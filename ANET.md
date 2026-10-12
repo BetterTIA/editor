@@ -1,6 +1,6 @@
 # LADEditor — ANET.md
 
-Lokální prohlížeč (a později editor) LAD networků z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
+Lokální prohlížeč a editor LAD networků z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
 
 ## Spuštění
 ```
@@ -15,7 +15,7 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\ladedito
 `http://localhost:8765/?projekt=<projekt>&blok=<blok>&nw=<n>[&snimek=1][&tema=svetly|tmavy]`
 - bez `projekt`/`blok` = výběr bloků ze všech exportů,
 - vlevo seznam networků bloku (číslo + titulek, jazyk mimo LAD), vpravo network jako v TIA,
-- `?uprava=<id>` otevře úpravu (M2); `snimek=1` je značka pro snímek (paleta zatím není), `tema` přepne motiv (jinak podle systému, výchozí tmavý).
+- `?uprava=<id>` otevře úpravu (M2), `?uprava=<id>&upravit=1` editor (M3); `snimek=1` je značka pro snímek, `tema` přepne motiv (jinak podle systému, výchozí tmavý).
 
 ## API — prohlížení exportu (M1)
 | GET | Vrací |
@@ -56,6 +56,26 @@ curl -s -X POST -H "Content-Type: application/json" -d '{"stav":"Approved","kdo"
 ```
 Stránka `?uprava=U001`: vlevo strom `projekt → kolo → blok → NW → úprava (stav barevně)` nad seznamem networků bloku, vpravo hlavička úpravy, tlačítka „← předchozí / další →" (Signed zašedlé s tooltipem, dokud není kontrola se shodou), kontroly, legenda a plátno s rozdílem.
 
+## M3 — editor, katalog, pravidla LAD
+**Editor:** u úpravy ve stavu Proposal tlačítko „Upravit" (`?uprava=<id>&upravit=1`); z prohlížení networku „Navrhnout úpravu" (založí Proposal s `po = pred` v zadaném kole a otevře editor). Vpravo **paleta** (instrukce + bloky projektu, hledání). Klik na položku palety zvýrazní **platná místa vložení** (kroužky na vodičích před prvky a za posledním prvkem úseku) → klik na místo, nebo položku **přetáhni** na vodič (přichytí se k nejbližšímu platnému místu do 45 px). **Větev**: tlačítko → klik na začátek a konec úseku v jednom rungu; prvek = vybraný v paletě, jinak spínací kontakt; konec za posledním prvkem otevřeného rungu = výstupní větev. Klik na prvek = výběr + panel vlastností (operand / tabulka pinů, instance, typ) s našeptáváním; **Delete** smaže, **Ctrl+Z / Ctrl+Y** (i Ctrl+Shift+Z), **Esc** zruší vkládání/větev/výběr. Po každé změně server model přepočítá (rozložení + rozdíl proti „před" + chyby). „Uložit návrh" = `POST /api/uprava/<id>/po` (i s chybami; hlavička úpravy je pak označí „⚠ N chyb LAD").
+
+**Pravidla LAD** (`model.validuj`, pod plátnem + oranžový rámeček u prvku): box (FB/FC/instrukce) uvnitř zavřené paralelní větve; cívka/RET jinde než na konci rungu; chybějící operand, bit hrany, instance, vstup instrukce (PT, IN…; u FB jsou vstupy volitelné); porovnání bez obou operandů; nenapájený rung (začíná v uzlu, do kterého nic nevede); nerozložitelné zapojení.
+
+**Katalog** `GET /api/katalog?projekt=` → `{instrukce: [{klic, nazev, skupina, prvek}], bloky: [{klic 'fb:X'|'fc:X', nazev, druh, cislo, rozhrani, instance: ['"DB"'], prvek}], db: [{nazev, instance_typ, cleny}], tagy: [{jmeno, typ, adresa, tabulka}]}`. `prvek` = šablona ve tvaru modelu (bez `id`). Klíče instrukcí: `NO NC P N C S R NEG RET EQ NE GT GE LT LE TON TOF TP CTU CTD MOVE SWAP CONV ADD SUB MUL DIV IN_RANGE P_TRIG N_TRIG`. Zdroj: nejnovější `.s7dcl` každého bloku (rozhraní `VAR_INPUT/VAR_OUTPUT/VAR_IN_OUT`, IN_OUT jako vstupy), `DATA_BLOCK "X" : "FB"` = instance, tag tabulky `<PLC>\Tags\**\*.xml` (SimaticML `SW.Tags.PlcTag`).
+
+**Operace a zkouška rozložení (Claude, nic neukládá):** `POST /api/rozlozeni` `{projekt, po, pred?, ops?, sirka?}` → `{po, kresba, rozlozeni, rozdil, mista, chyby, varovani, posledni}`. Operace (`ops` se provedou postupně):
+| op | tvar |
+|---|---|
+| vložit do série | `{"typ":"vloz","misto":{"r":0,"k":2},"prvek":"TON"}` — `r` = index rungu, `k` = pozice v `cesta` (před položku k; `k = len` = konec) |
+| větev | `{"typ":"vetev","od":{"r":0,"k":1},"do":{"r":0,"k":2},"prvek":"fb:FB_Pas"}` |
+| smazat | `{"typ":"smaz","id":"p3"}` (u boxu i rungy přívodů jeho pinů) |
+| změnit | `{"typ":"zmen","id":"n1","hodnoty":{"operand":"\"Kvitace\""}}` — pole `operand bit in1 in2 op sablona instance pod vstupy vystupy` |
+`prvek` je klíč palety nebo celý prvek (dict). Nové prvky dostávají `n1, n2…`, nové uzly `wire#wN` (rozdíl páruje podle id). Typický postup: `GET /api/network` → `POST /api/rozlozeni` s `po = {prvky, rungy}` a `ops` → zkontrolovat `chyby` → `POST /api/uprava` (nová) nebo `POST /api/uprava/<id>/po` (Proposal) s vráceným `po`.
+
+**Scénář v URL** (snímky, headless nemá myš): `?uprava=<id>&upravit=1&ops=<URL-kódovaný JSON seznam operací>&vyber=<id>&paleta=<klíč>&vetev=<r>,<k>` — operace se provedou jako v UI (bez uložení). Snímky `tests\snimky\M3_a_paleta_mista.png` (`&paleta=fb:FB_Pas`), `M3_b_FB_Pas_vetev.png` (výstupní větev s FB_Pas a piny), `M3_c_box_ve_vetvi.png` (chyba „box v paralelní větvi").
+
+M3 změny M2: název kola se ve stromu slučuje bez ohledu na velikost písmen a okrajové mezery; Signed odemyká **poslední** kontrola (pozdější neshoda zamkne; u úpravy už Signed+ se ukáže varování, stav se nevrací).
+
 ## Jak si Claude bere stav a snímek
 ```
 curl -s "http://localhost:8765/api/network?projekt=Demo_Linka&blok=FB_Dopravnik&nw=2"
@@ -67,7 +87,8 @@ python snimek.py --url "http://localhost:8765/?projekt=Demo_Linka&blok=FB_Doprav
 - `tests\vzorky\Demo_Linka\20261012-120000\PLC_1\Blocks\…` — vlastní, smyšlené (žádná zakázková data):
   `FB_Dopravnik` NW1 série · NW2 samodrž se 2 větvemi + NC · NW3 TON · NW4 volání FB `"DB_Pas1"` s piny (`:=`, `=>`, prázdný pin, pin napájený rungem `wire#w1`) · NW5 `NE_Contact`/`GT_Contact` se `S7_Templates` · NW6 MOVE · NW7 S/R cívky, výstupní větev, P_TRIG · NW8 prázdný; `FC_Vetve` vnořená větev, výstupní větve s boxem, FBD network, můstek (nerozložitelný), dva rungy s řetězem boxů; `FB_Pas` + `DB_Pas1` (dohledání typu FB z instance).
 - `python -m unittest discover tests` — parser, rozložení (pozice prvků), API přes `http.client` proti serveru na volném portu, snímek (přeskočí se bez Chrome).
-- `tests\snimky\` — snímky všech vzorků (tmavý motiv, 1300×520) + `FB_Dopravnik_NW4_svetly.png`; M2: `M2_U001_Proposal.png`, `M2_U001_Approved.png`.
+- `tests\snimky\` — snímky všech vzorků (tmavý motiv, 1300×520) + `FB_Dopravnik_NW4_svetly.png`; M2: `M2_U001_Proposal.png`, `M2_U001_Approved.png`; M3: `M3_a…c` (1500×820).
+- Vzorky M3: `DBs\DB_Stroj.s7dcl` (globální DB se STRUCT), `PLC_1\Tags\Default tag table.xml` (tagy pro našeptávání).
 
 ## Gramatika `.s7dcl` (zjištěno na exportech V21, 12. 10. 2026)
 - Network: `{ S7_Language := "LAD"; S7_NetworkTitle := "MLC_x"; S7_NetworkComment := "MLC_y" }` + `NETWORK … END_NETWORK`; atributy mohou chybět (`{ S7_Language := "LAD" }`). Texty v `.s7res` (`- id: MLC_x` / `en-US: …`, hodnoty i v `'…'` a blocích `|`, `|-`, `|+`).
@@ -89,4 +110,6 @@ python snimek.py --url "http://localhost:8765/?projekt=Demo_Linka&blok=FB_Doprav
 - ⚠️ Šířka textu je odhad (7,2 px/znak, Consolas 12 px); operand > 30 znaků se zkrátí „…" (plný v tooltipu). TIA dlouhé názvy zalamuje.
 - ⚠️ Přívod pinu u boxu, který není v sérii od lišty, může křížit svislici výstupní větve (v exportech nenalezeno).
 - ✅ M2: strom úprav, stavy, kontroly, rozdíl před/po (viz výše). Prázdný network má u lišty popisek „(prázdný network)“.
-- ❌ Editace myší, paleta, katalog (`katalog.py` je stub) — M3.
+- ✅ M3: editor (paleta, vložení klikem i přetažením, větev, smazání, operandy/piny s našeptáváním, Undo/Redo, Esc), katalog z exportu, pravidla LAD živě.
+- ⚠️ Katalog čte jen `.s7dcl` (globální DB jako `.db` v SCL tvaru ne), členy DB jen nejvyšší úrovně; FC s návratovou hodnotou se nabízí bez `Ret_Val`.
+- ❌ Přesun prvku tažením po plátně (jen smazat + vložit), ruční posun rozložení.
