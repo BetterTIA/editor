@@ -40,7 +40,7 @@ Prvek (`prvky[]`): `{id, typ, …}` — `typ` ∈ `kontakt`, `kontakt_nc`, `kont
 | POST | `/api/uprava` | nová úprava `{projekt, kolo, blok, nw, po, poznamka}` → 201, stav Proposal, autor ANet |
 | GET | `/api/uprava/<id>[?sirka=]` | úprava + kresba „po" se značkami `rozdil` (`pridany`/`zmeneny`, přízraky `x:<id>` = `smazany`), `dalsi`, `predchozi`, `signed_povolen` |
 | POST | `/api/uprava/<id>/stav` | `{stav, kdo}` — jen o krok vpřed/zpět v Proposal → Approved → Signed → Uploaded → Tested; Signed jen s kontrolou `shoda: true`, jinak **409** s důvodem |
-| POST | `/api/kontrola` | `{uprava_id, shoda, export_ts, poznamka}` — výsledek porovnání exportu po zápisu s návrhem |
+| POST | `/api/kontrola` | `{uprava_id, shoda, export_ts, poznamka}` — výsledek porovnání exportu po zápisu s návrhem (ručně; automaticky viz M4) |
 
 Model `po` má stejný tvar jako `/api/network` (`prvky` + `rungy`; `vodice` a `rozlozeni` dopočítá server). **Prvky se párují podle `id`**: zachovaný prvek nech s původním id, nový dostane nové (např. `n1`), smazaný vyhoď z `prvky` i `rungy`. Změna operandu/pinů = oranžová, nový prvek = zelený, smazaný = červený čárkovaný přízrak na původním místě (když pro něj v „po" není místo, vypíše se jako varování).
 
@@ -76,6 +76,21 @@ Stránka `?uprava=U001`: vlevo strom `projekt → kolo → blok → NW → úpra
 
 M3 změny M2: název kola se ve stromu slučuje bez ohledu na velikost písmen a okrajové mezery; Signed odemyká **poslední** kontrola (pozdější neshoda zamkne; u úpravy už Signed+ se ukáže varování, stav se nevrací).
 
+## M4 — kontrola „export po zápisu = návrh"
+Po zápisu úpravy do projektu (ručně nebo Writerem) a exportu Readerem do export rootu serveru:
+```
+python kontrola.py --server http://localhost:8765 --uprava U003 [--export-ts 20261012-140000]
+```
+Exit **0 = shoda, 1 = neshoda, 2 = chyba** (server neběží, úprava / export / blok nenalezen). Vypíše jeden řádek `SHODA|NESHODA <id> · export <ts> · NW <n> · <poznámka>`. Výsledek se vždy zapíše k úpravě jako kontrola (stejně jako `POST /api/kontrola`), takže poslední kontrola se shodou odemkne Signed.
+
+**Honza z UI:** u úpravy ve stavu Approved a dál tlačítko **„Zkontrolovat exportem"** (bere nejnovější export); výsledek se objeví v „Kontroly exportem", neshoda i nahoře jako varování.
+
+**Server:** `POST /api/uprava/<id>/kontrola-exportem` `{export_ts?}` → `{shoda, export_ts, nw_export, poznamka, rozdily, uprava}`. Postup: nejnovější (nebo zadaný) export, který blok obsahuje → network podle **titulku** (posun čísla se zapíše do poznámky: „network se posunul: NW 1 → NW 2"), bez titulku podle čísla → porovnání s modelem „po" **podle obsahu** (`rozdil.shoda_obsahu`): prvky bez `id`, `volani`, `napajeni` a prázdných hodnot (prázdné piny se ignorují, `wire#wN` = `wire#`), jako multimnožina → čitelné „chybí v exportu / navíc v exportu / jiný operand / jiné piny"; když prvky sedí, porovná se topologie (strom série / větve z `layout.strom`, pořadí větví nehraje roli) → „liší se zapojení". Když je export tentýž jako „před", poznámka to řekne.
+
+Instanční DB a volání FC se dohledávají v nejnovější kopii bloku do daného exportu (i když je export dílčí); `"FC"(…)` je teď `volani: fc` s názvem FC.
+
+**Pravidlo LAD navíc:** paralelní úsek, jehož hlavní cesta je jen vodič (např. po smazání kontaktu) → „Větev bez prvku v hlavní cestě" u každé přemostěné větve.
+
 ## Jak si Claude bere stav a snímek
 ```
 curl -s "http://localhost:8765/api/network?projekt=Demo_Linka&blok=FB_Dopravnik&nw=2"
@@ -89,6 +104,8 @@ python snimek.py --url "http://localhost:8765/?projekt=Demo_Linka&blok=FB_Doprav
 - `python -m unittest discover tests` — parser, rozložení (pozice prvků), API přes `http.client` proti serveru na volném portu, snímek (přeskočí se bez Chrome).
 - `tests\snimky\` — snímky všech vzorků (tmavý motiv, 1300×520) + `FB_Dopravnik_NW4_svetly.png`; M2: `M2_U001_Proposal.png`, `M2_U001_Approved.png`; M3: `M3_a…c` (1500×820).
 - Vzorky M3: `DBs\DB_Stroj.s7dcl` (globální DB se STRUCT), `PLC_1\Tags\Default tag table.xml` (tagy pro našeptávání).
+- Vzorek M4: `Demo_Linka\20261012-140000\` = dílčí „export po zápisu" jen s `FB_Dopravnik` (NW1 má navíc `Contact( "Pojistka_OK" )` před cívkou) — je to **nejnovější** export bloku; testy prohlížeče a rozložení jsou připnuté na `20261012-120000` (`tests\spolecne.py` `TS0`). Varianty (jiný operand, posunutý network) vznikají v testu v dočasném export rootu.
+- M4 snímky: `M4_a_kontroly_signed_odemceno.png` (neshoda + shoda, Signed odemčené), `M4_b_signed.png`.
 
 ## Gramatika `.s7dcl` (zjištěno na exportech V21, 12. 10. 2026)
 - Network: `{ S7_Language := "LAD"; S7_NetworkTitle := "MLC_x"; S7_NetworkComment := "MLC_y" }` + `NETWORK … END_NETWORK`; atributy mohou chybět (`{ S7_Language := "LAD" }`). Texty v `.s7res` (`- id: MLC_x` / `en-US: …`, hodnoty i v `'…'` a blocích `|`, `|-`, `|+`).
