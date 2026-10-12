@@ -339,8 +339,13 @@ def api_uprava_detail(data, uid, sirka=0, root=None):
     return vys
 
 
-def api_postup(data, uid):
+def api_postup(data, uid, root=None):
     _, _, u = stav.najdi(data, uid)
+    if 'f' not in u and root:                         # úpravy z doby před F2 příznak F-bloku nemají -> z exportu
+        try:
+            u = dict(u, f=_nacti(root, u['projekt'], u['blok'])[1]['atributy'].get('S7_Safety') == 'TRUE')
+        except KeyError:
+            pass
     return dict(postup.postup(u), uprava=uid)
 
 
@@ -529,7 +534,7 @@ class Handler(BaseHTTPRequestHandler):
             elif metoda == 'GET' and re.fullmatch(r'/api/uprava/[\w-]+', c):
                 self._json(api_uprava_detail(self.data, c.split('/')[3], int(q.get('sirka', '0')), self.root))
             elif metoda == 'GET' and re.fullmatch(r'/api/uprava/[\w-]+/postup', c):
-                self._json(api_postup(self.data, c.split('/')[3]))
+                self._json(api_postup(self.data, c.split('/')[3], self.root))
             elif metoda == 'GET' and c == '/api/katalog':
                 self._json(api_katalog(self.root, q.get('projekt', '')))
             elif metoda == 'POST' and c == '/api/rozlozeni':

@@ -1,6 +1,6 @@
 # LADEditor — ANET.md
 
-Lokální prohlížeč a editor LAD networků (FBD od F1: prohlížení a návrh přes API) z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
+Lokální prohlížeč a editor LAD networků (FBD od F1/F2: prohlížení, editor, kontrola, postup pro TIA) z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
 
 ## Spuštění
 ```
@@ -130,9 +130,39 @@ Rozdíl: nový box zeleně, změněný oranžově — **u změněného boxu jsou
 - ✅ Ad hoc (nic neuloženo) na všech FBD networcích obou exportů: 43 networků (jen jeden projekt, 2 bloky; druhý export FBD nemá) — parser 43/43, rozložení 43/43, 0 varování, 5 prázdných.
 - ⚠️ `RUNG` bez operandu + `Coil(x)` (v exportu 2×) se kreslí jako `=` s otevřeným vstupem `...` — v TIA nejspíš „vždy 1"; neověřeno pohledem do TIA. `NOT A(…)` se čte jako negace 1. vstupu (ne výstupu předchozího boxu) — neověřeno.
 - ⚠️ Signál vedený z výstupního pinu volání (`Q => wire#…`) model nezná (v exportech není); signál = vždy hlavní výstup boxu.
-- ❌ Editor FBD v UI (paleta, vložení boxu do signálu, smazání), kontrola exportem pro FBD (vrací neshodu „F2"), postup skládání pro TIA, „zobrazit jako LAD" — vše F2. Tlačítko „Upravit" se u FBD úpravy nenabízí.
+- ✅ Editor FBD, kontrola exportem, postup pro TIA a „zobrazit jako LAD" — viz F2.
 
 Snímky F1: `tests\snimky\F1_a_bitova_logika.png` (NW1: >=1 → & s negovaným vstupem → =), `F1_b_volani_F_bloku.png` (NW4: F-blok s piny, negovaný pin, `ACK` z P_TRIG přes `wire#`), `F1_c_navrh_rozdil.png` (U001 založená přes API: & + 4. vstup, změněný operand přiřazení).
+
+## F2 — editor FBD, kontrola exportem, postup pro TIA
+**Operace FBD** (`fbd.proved`, `ops` v `POST /api/rozlozeni` — Claude i editor; nové boxy `n1…`):
+| op | tvar |
+|---|---|
+| vložit box | `{"typ":"vloz_box","prvek":"AND","do":{"id":"b2","vstup":1}}` — box převezme signál/operand vstupu na svůj 1. vstup a výstupem ho napájí; `vstup` = počet+1 u &/>=1/x = nový vstup; bez `do` = nová logická cesta. Klíče palety FBD: `AND OR XOR ASSIGN S R SR RS P_TRIG N_TRIG`, z katalogu `MOVE`, `ADD`… a `fb:X` / `fc:X` |
+| vložit volání | `{"typ":"vloz_volani","prvek":"fb:FB_Pas","instance":"\"DB_Pas1\"","do":…}` — v F-bloku (`f: true` v těle) bez EN |
+| vstupy | `{"typ":"pridej_vstup","id":"b2","operand":"#X"}` · `{"typ":"odeber_vstup","id":"b2","vstup":3}` (jen &/>=1/x s víc než 2 vstupy) |
+| negace | `{"typ":"negace","id":"b2","vstup":2}` · `"vystup":"Q"` (pin volání) · `"vystup":"hlavni"` (hlavní výstup boxu → `neg_vystup`) |
+| operandy | `{"typ":"zmen_operand","id":"b3","operand":"#Y"}` (nad boxem / instance) nebo s `"vstup": n` · `{"typ":"zmen_pin","id":"b1","pin":"ACK","operand":"#Z","neg":false}` |
+| smazat | `{"typ":"smaz","id":"b2"}` — vstupy, které box napájel, převezmou jeho 1. vstup (řetěz); volání/instrukce bez EN je nechá otevřené |
+Odpověď `/api/rozlozeni` pro FBD nese i `mista` (`{x, y, do}` pro editor) a `chyby` (`varovani: true` = jen varování).
+
+**Pravidla FBD** (`fbd.validuj`): chybí operand (=, S, R, SR/RS, bit hrany), chybí instance, nezapojený vstup bez operandu, box &/>=1/x/hrana bez výstupu nikam (varování); v **F-bloku** (`S7_Safety := "TRUE"` v hlavičce → `f` v úpravě, ANet může poslat `f: true` v `POST /api/uprava`): volání bloku, který není F (katalog `bloky[].f`), a zapojený EN = chyba.
+
+**Editor FBD v UI** (`?uprava=<id>&upravit=1`, stejný rámec jako LAD): paleta (bitová logika, přiřazení, paměti, hrany, instrukce, bloky projektu s `F-`), místa vložení (kroužek na každém vstupu, pod posledním vstupem &/>=1/x = nový vstup, vlevo dole = nová logická cesta), klik na box nebo na jeho vstup → vlastnosti (operand s našeptáváním, NOT u vstupu/výstupu, operand nad boxem, instance), tlačítka **+ vstup / − vstup / Negovat vstup**, Delete, Ctrl+Z/Y, Esc, Uložit návrh. Z prohlížení FBD networku „Navrhnout úpravu" jako u LAD. Scénář pro snímek: `&ops=…&vyber=n1&vstup=2&paleta=AND`.
+
+**Kontrola exportem FBD** (`fbd.shoda_obsahu`, tlačítko i `kontrola.py --uprava`): boxy podle obsahu (typ, operand, název, instance, vstupy operand/negace/„signál"; prázdné piny volání se ignorují), u **&, >=1, x pořadí vstupů nehraje roli**, u ostatních ano; když boxy sedí, porovná se zapojení (stromy od výstupů) → „boxy sedí, ale liší se zapojení signálů". Výstup jako u LAD (shoda / neshoda + poznámka, poslední shoda odemkne Signed).
+
+**Postup pro TIA** (`postup.py`, LAD i FBD): `GET /api/uprava/<id>/postup` → `{hlavicka, kroky, markdown, zdroje}`; hlavička `FB30 "FB_Bezpecnost" · NW 1: <titulek>`; kroky česky s povely ověřenými v nápovědě V21 (nota §5b, tabulka `postup.POVELY` se zdrojem): **Insert input** `Ctrl+Shift+3`, **Create a ones complement** `Ctrl+Shift+4`, **Delete**, Replace přes trojúhelník (`Alt+F2`), `F9`/`F10`/`Shift+F7`, Empty box `F8`, **Call options** Single/Multi-instance, **Change instance**; ostatní slovy s ⟦neověřeno⟧ (gesto pin→pin, převzetí signálu při vložení, zrušení negace, LAD gesta). U F-bloku na konci „Přelož safety program a zkontroluj F-signaturu" (heslo F-CPU / Safety Administration). V UI panel „Postup pro TIA" pod kontrolami s tlačítkem **kopírovat** (markdown).
+```
+python kontrola.py --postup U003            # vytiskne markdown postupu (relace ho vloží do odpovědi Honzovi)
+curl -s http://localhost:8765/api/uprava/U003/postup
+```
+
+**Zobrazit jako LAD** (jen ke čtení, rozhodnutí b): network výhradně z &, >=1, negací a = → `jako_lad {prvky, rungy, kresba}` v `/api/network`; tlačítko „Zobrazit jako LAD" (`&lad=1`). & = série, >=1 = paralelní větve, negovaný operand = rozpínací kontakt, negovaný výsledek = NOT; každé přiřazení je vlastní rung od lišty (sdílené části se opakují). Exporty: 27 ze 43 FBD networků.
+
+**Vzorek F2:** `Demo_Linka\20261012-150000\` = export po zápisu (jen `FB_Bezpecnost`, NW1: & + `in4 := #Zamek_OK`, `Coil( #Povoleni_Pohon )`) — nejnovější export bloku; testy FBD jsou připnuté na `20261012-120000` (`TS0`), `TS2` = tento. Testy `tests\test_fbd_f2.py`. Snímky `F2_a_editor_fbd.png` (paleta, místa vložení, vložený P_TRIG), `F2_b_postup.png` (panel postupu), `F2_c_signed_fbd.png` (neshoda proti starému exportu, shoda proti novému, Signed).
+
+**Neumí (F2):** tažení boxu po plátně / přepojení signálu myší (jen vložení na vstup a smazání); `pin → wire#` z výstupního pinu volání; časovače/čítače ve FBD mají EN/ENO místo IN/Q; negace hlavního výstupu se nekanonizuje proti negaci vstupu následníka (dva zápisy téže logiky = neshoda).
 
 ## Jak si Claude bere stav a snímek
 ```
