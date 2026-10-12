@@ -71,7 +71,7 @@ svg g.d-pridany .prv, svg g.d-pridany .box { stroke: var(--pridany); stroke-widt
 svg g.d-pridany text, svg g.d-pridany .titul { fill: var(--pridany); font-weight: bold; }
 svg g.d-zmeneny .prv, svg g.d-zmeneny .box { stroke: var(--zmeneny); stroke-width: 2.5; }
 svg g.d-zmeneny text, svg g.d-zmeneny .titul { fill: var(--zmeneny); font-weight: bold; }
-svg g.d-smazany .prv, svg g.d-smazany .box { stroke: var(--smazany); stroke-dasharray: 4 3; }
+svg g.d-smazany .prv, svg g.d-smazany .box { stroke: var(--smazany); stroke-width: 2.5; stroke-dasharray: 3 2; }
 svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decoration: line-through; }
 .strom { padding-bottom: 6px; border-bottom: 1px solid var(--hrana); }
 .strom .u0, .strom .u1, .strom .u2 { padding: 3px 12px; color: var(--tlum); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -359,7 +359,7 @@ async function zobrazUpravu(uid, chyba) {
   const tlSigned = d.dalsi === 'Signed' && !d.signed_povolen;
   m.innerHTML =
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
-    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span> kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas)}</div>` +
+    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span> kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas.replace('T', ' '))}</div>` +
     (u.poznamka ? `<p class="komentar">${esc(u.poznamka)}</p>` : '') +
     `<div class="tlacitka">` +
     (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
@@ -368,7 +368,7 @@ async function zobrazUpravu(uid, chyba) {
     (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
     `<div class="kontroly"><h3>Kontroly exportem</h3>` +
     (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
-      `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas)} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
+      `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
       : '<div>Zatím žádná — Signed se odemkne po kontrole se shodou.</div>') + `</div>` +
     d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
     `<div class="legenda">Model „po“ proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
