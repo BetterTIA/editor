@@ -173,6 +173,12 @@ def parse_blok(text):
               'jazyk': nw_attrs.get('S7_Language', ''), 'text': obsah}
         if nw['jazyk'] == 'LAD':
             nw['rungy'], nw['prvky'] = parse_lad(obsah)
+        elif nw['jazyk'] == 'FBD':
+            import fbd                                   # líně: fbd importuje s7dcl
+            try:
+                nw['prvky'] = fbd.parse(obsah)
+            except ChybaParseru as e:                    # neznámá konstrukce FBD nesmí shodit celý blok
+                nw['chyba'] = str(e)
         blok['networky'].append(nw)
     return blok
 
@@ -356,7 +362,7 @@ def dopln_typy_fb(blok, najdi_db):
     """Doplní název FB u volání: #inst -> typ z rozhraní bloku, "Inst" -> DATA_BLOCK "Inst" : "FB" (najdi_db)."""
     for nw in blok['networky']:
         for p in nw.get('prvky', []):
-            if p['typ'] == 'box' and p['volani'] == 'fb' and not p['nazev']:
+            if p.get('volani') == 'fb' and not p['nazev']:          # LAD box i FBD volani
                 inst = p['instance']
                 if inst.startswith('#'):
                     p['nazev'] = blok['promenne'].get(inst[1:].strip('"'))

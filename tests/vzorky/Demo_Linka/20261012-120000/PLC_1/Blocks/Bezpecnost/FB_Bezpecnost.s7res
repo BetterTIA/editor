@@ -1,0 +1,17 @@
+MultiLingualTexts:
+  - id: MLC_1
+    en-US: Povolení — >=1, & s negací, přiřazení
+  - id: MLC_2
+    en-US: Kvitace — vstup z jiného rungu (wire)
+  - id: MLC_3
+    en-US: Odbočka za boxem a řetěz přiřazení
+  - id: MLC_4
+    en-US: Nouzový stop — F-blok, hrana kvitace
+  - id: MLC_5
+    en-US: Dveře — F-blok s negovanými piny
+  - id: MLC_6
+    en-US: Paměť poruchy — S, R, SR
+  - id: MLC_7
+    en-US: RUNG true a MOVE
+  - id: MLC_8
+    en-US: Nesoulad snímačů — x a N_TRIG

@@ -54,6 +54,9 @@ svg .lista { stroke: var(--akcent); stroke-width: 4; }
 svg .prv { stroke: var(--akcent); stroke-width: 2; fill: none; }
 svg .box { stroke: var(--akcent); stroke-width: 1.5; fill: var(--bg); }
 svg .maska { fill: var(--bg); stroke: none; }
+svg .neg { fill: var(--bg); stroke-width: 1.5; }
+svg .uzel { fill: var(--vodic); stroke: none; }
+svg g.d-zmeneny text.beze-zmeny { fill: var(--text); font-weight: normal; }   /* FBD: u změněného boxu jen změněné piny */
 pre, .rungy { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
 .rungy div { border-bottom: 1px dashed var(--hrana); padding: 2px 0; }
 ul.vyber { list-style: none; padding: 0; columns: 3 220px; }
@@ -255,9 +258,49 @@ function box(g, d, p) {
   });
   if (p.pod) popis(g, bx + bw / 2, spodek + 14, p.pod);
 }
+// FBD (F1): geometrie z fbd.rozloz — boxy s piny, negace kroužkem, signály ortogonálně, uzly odboček
+function kresliFBD(net, rozdil) {
+  const k = net.kresba;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', k.sirka); svg.setAttribute('height', k.vyska);
+  svg.setAttribute('viewBox', `0 0 ${k.sirka} ${k.vyska}`);
+  const vod = el(svg, 'g', {});
+  for (const [x1, y1, x2, y2] of k.cary) el(vod, 'line', {class: 'vod', x1, y1, x2, y2});
+  for (const [cx, cy] of k.uzly) el(vod, 'circle', {class: 'uzel', cx, cy, r: 3});
+  const gp = el(svg, 'g', {});
+  const zp = net.rozdil_piny || {};
+  for (const d of k.boxy) {
+    const g = el(gp, 'g', {'data-id': d.id, class: rozdil[d.id] ? 'd-' + rozdil[d.id] : ''});
+    const z = zp[d.id], ticho = (e, zmena) => { if (z && !zmena && e) e.classList.add('beze-zmeny'); };
+    el(g, 'rect', {class: 'box', x: d.x, y: d.y, width: d.w, height: d.h, rx: 2});
+    el(g, 'text', {x: d.x + d.w / 2, y: d.y_titul, 'text-anchor': 'middle', class: 'titul'}, d.titul);
+    if (d.sablona) el(g, 'text', {x: d.x + d.w / 2, y: d.y_sablona, 'text-anchor': 'middle', class: 'pin'}, d.sablona);
+    if (d.nad != null) ticho(popis(g, d.x + d.w / 2, d.y_nad, d.nad), z && z.nad);
+    for (const v of d.vstupy) {
+      const xb = d.x - (v.neg ? 8 : 0);
+      if (v.operand !== null) {
+        el(g, 'line', {class: 'vod', x1: xb - 14, y1: v.y, x2: xb, y2: v.y});
+        ticho(popis(g, xb - 17, v.y + 4, v.operand, 'end'), z && z.vstupy.includes(v.n));
+      }
+      if (v.neg) el(g, 'circle', {class: 'prv neg', cx: d.x - 4, cy: v.y, r: 4});
+      if (v.pin) ticho(el(g, 'text', {x: d.x + 4, y: v.y + 4, class: 'pin'}, v.pin), z && z.vstupy.includes(v.n));
+    }
+    for (const v of d.vystupy) {
+      const xa = d.x + d.w + (v.neg ? 8 : 0);
+      if (v.pahyl) el(g, 'line', {class: 'vod', x1: xa, y1: v.y, x2: xa + 12, y2: v.y});
+      if (v.neg) el(g, 'circle', {class: 'prv neg', cx: d.x + d.w + 4, cy: v.y, r: 4});
+      const zm = z && z.vystupy.includes(v.pin);
+      if (v.operand !== null) ticho(popis(g, xa + 15, v.y + 4, v.operand, 'start'), zm);
+      if (v.pin) ticho(el(g, 'text', {x: d.x + d.w - 4, y: v.y + 4, 'text-anchor': 'end', class: 'pin'}, v.pin), zm);
+    }
+  }
+  if (k.prazdny) el(svg, 'text', {x: 16, y: k.vyska / 2 + 4, class: 'prazdny'}, '(prázdný network)');
+  return svg;
+}
 function kresli(net, rozdil) {
   const k = net.kresba;
   rozdil = rozdil || {};
+  if (k.fbd) return kresliFBD(net, rozdil);
   const prvky = Object.fromEntries(net.prvky.map(p => [p.id, p]));
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('width', k.sirka); svg.setAttribute('height', k.vyska);
@@ -378,6 +421,8 @@ async function zobrazNetwork(projekt, blok) {
   m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.titulek || '')}</h1>` +
     (net.komentar ? `<p class="komentar">${esc(net.komentar)}</p>` : '') +
     net.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('');
+  if (net.jazyk === 'FBD' && net.kresba && !net.kresba.prazdny)
+    m.insertAdjacentHTML('beforeend', '<p class="komentar">FBD: návrh úpravy zatím přes API (<code>POST /api/uprava</code>), editor FBD přijde v F2.</p>');
   if (net.jazyk === 'LAD' && net.kresba) {
     const pp = posledniStav.projekty.find(p => p.projekt === projekt);
     const kolo = pp && pp.upravy.length ? pp.upravy[pp.upravy.length - 1].kolo : 'Kolo 1';
@@ -423,16 +468,17 @@ async function zobrazUpravu(uid, chyba) {
   $('nw').innerHTML = vlevo;
   const m = $('obsah');
   const tlSigned = d.dalsi === 'Signed' && !d.signed_povolen;
+  const jazyk = d.jazyk || 'LAD';
   m.innerHTML =
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
-    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span>${d.chyby.length ? `<span class="znacka-chyb">⚠ ${nChyb(d.chyby.length)}</span> · ` : ''} kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas.replace('T', ' '))}</div>` +
+    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span>${d.chyby.length ? `<span class="znacka-chyb">⚠ ${nChyb(d.chyby.length, jazyk)}</span> · ` : ''} kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas.replace('T', ' '))}</div>` +
     (u.poznamka ? `<p class="komentar">${esc(u.poznamka)}</p>` : '') +
     `<div class="tlacitka">` +
     (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
     (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlSigned ? 'disabled title="Signed až po poslední kontrole exportem se shodou (POST /api/kontrola)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
-    (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : `<button id="kontrola" title="porovná nejnovější export Readeru s návrhem a zapíše kontrolu">Zkontrolovat exportem</button>`) +
+    (u.stav === 'Proposal' ? (jazyk === 'FBD' ? '' : `<button id="upravit">Upravit</button>`) : `<button id="kontrola" title="porovná nejnovější export Readeru s návrhem a zapíše kontrolu">Zkontrolovat exportem</button>`) +
     `</div>` +
-    (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla LAD (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
+    (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla ${jazyk} (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
     (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
     `<div class="kontroly"><h3>Kontroly exportem</h3>` +
     (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
@@ -460,12 +506,13 @@ async function zobrazUpravu(uid, chyba) {
 // ---------- M3: editor ----------
 const ed = {u: null, pred: null, po: null, hist: [], redo: [], vyber: null, vklad: null, vetev: null, res: null,
             kat: null, zmeneno: false};
-const nChyb = n => `${n} ${n === 1 ? 'chyba' : n < 5 ? 'chyby' : 'chyb'} LAD`;
+const nChyb = (n, j) => `${n} ${n === 1 ? 'chyba' : n < 5 ? 'chyby' : 'chyb'} ${j || 'LAD'}`;
 const DRUH = p => /^civka|^ret$/.test(p.typ) ? 'civka' : p.typ === 'box' ? 'box' : 'kontakt';
 
 async function editor(uid) {
   const d = await api(`/api/uprava/${enc(uid)}`);
   const u = d.uprava;
+  if (u.po.jazyk === 'FBD') { await zobrazUpravu(uid, 'Editor FBD přijde v F2 — FBD návrh zatím přes API (POST /api/rozlozeni, /api/uprava/<id>/po).'); return; }
   if (u.stav !== 'Proposal') { await zobrazUpravu(uid, `Upravovat lze jen návrh ve stavu Proposal (teď ${u.stav}).`); return; }
   Object.assign(ed, {u, pred: {prvky: u.pred.prvky, rungy: u.pred.rungy}, po: {prvky: u.po.prvky, rungy: u.po.rungy},
                      hist: [], redo: [], vyber: null, vklad: null, vetev: null, zmeneno: false});

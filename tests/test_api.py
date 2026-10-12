@@ -61,7 +61,8 @@ class TestApi(unittest.TestCase):
         self.assertIsNone(j['kresba'])
         self.assertIn('seznam rungů', j['varovani'][0])
         _, _, b = self.get('/api/network?projekt=%s&blok=FC_Vetve&nw=3' % PROJEKT)
-        self.assertIn('FBD', json.loads(b)['varovani'][0])
+        j = json.loads(b)                                   # od F1 se FBD kreslí (vlastní model)
+        self.assertEqual((j['jazyk'], j['kresba']['fbd'], j['varovani']), ('FBD', True, []))
 
     def test_chyby(self):
         self.assertEqual(self.get('/api/blok?projekt=%s&blok=Neni' % PROJEKT)[0], 404)

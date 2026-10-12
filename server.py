@@ -11,6 +11,7 @@ import textwrap
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
+import fbd
 import katalog
 import layout
 import model
@@ -79,7 +80,7 @@ def _nacti(root, projekt, blok, ts=None):
     s7dcl.dopln_typy_fb(b, najdi_db)
     for nw in b['networky']:                          # "FC"(…) je volání FC, ne instance FB
         for p in nw.get('prvky', []):
-            if p['typ'] == 'box' and p['volani'] == 'fb' and (p['instance'] or '').strip('"') in fc:
+            if p.get('volani') == 'fb' and (p['instance'] or '').strip('"') in fc:
                 p.update(volani='fc', nazev=p['instance'].strip('"'), instance=None)
     return t, b
 
@@ -114,8 +115,17 @@ def api_network(root, projekt, blok, nw, ts=None, sirka=0):
            'komentar': n['komentar'], 'prvky': n.get('prvky', []), 'rungy': n.get('rungy', []),
            'vodice': s7dcl.vodice(n) if n['jazyk'] == 'LAD' else [],
            'rozlozeni': None, 'kresba': None, 'varovani': []}
+    if n['jazyk'] == 'FBD' and 'prvky' in n:
+        vys.update(rungy=[], signaly=fbd.signaly(n['prvky']))
+        try:
+            vys['rozlozeni'], vys['kresba'] = fbd.rozloz(n['prvky'], sirka)
+        except fbd.Nerozlozitelne as e:
+            vys['varovani'].append('Rozložení FBD se nepodařilo (%s) — zobrazen text.' % e)
+            vys['text'] = textwrap.dedent(n['text']).strip(chr(10))
+        return vys
     if n['jazyk'] != 'LAD':
-        vys['varovani'].append('Network v jazyce %s — M1 kreslí jen LAD.' % (n['jazyk'] or '?'))
+        vys['varovani'].append('Network v jazyce %s — kreslí se jen LAD a FBD.' % (n['jazyk'] or '?')
+                               if not n.get('chyba') else 'FBD network nejde přečíst (%s) — zobrazen text.' % n['chyba'])
         vys['text'] = textwrap.dedent(n['text']).strip(chr(10))
         return vys
     try:
@@ -128,7 +138,23 @@ def api_network(root, projekt, blok, nw, ts=None, sirka=0):
 # ---------- M2: úpravy a stavy ----------
 
 def _model(net):
+    if net['jazyk'] == 'FBD':
+        return {'jazyk': 'FBD', 'prvky': net['prvky'], 'signaly': net['signaly'], 'rozlozeni': net['rozlozeni']}
     return {k: net[k] for k in ('prvky', 'rungy', 'vodice', 'rozlozeni')}
+
+
+def _fbd_po(po, sirka=0):
+    """FBD model z API -> {jazyk, prvky, signaly, rozlozeni}; chybný tvar = 400."""
+    try:
+        fbd.over_model(po)
+    except ValueError as e:
+        raise stav.ChybaStavu(str(e), 400)
+    m = fbd.model(po['prvky'])
+    try:
+        m['rozlozeni'] = fbd.rozloz(m['prvky'], sirka)[0]
+    except fbd.Nerozlozitelne:
+        m['rozlozeni'] = None
+    return m
 
 
 def over_model(po):
@@ -186,18 +212,23 @@ def api_uprava_nova(root, data, body):
     projekt, blok = str(body.get('projekt', '')), str(body.get('blok', ''))
     stav._soubor(data, projekt)                      # kontrola --data a jména projektu
     net = api_network(root, projekt, blok, int(body.get('nw', 0)))
-    if net['jazyk'] != 'LAD':
-        raise stav.ChybaStavu('úprava jen pro LAD network', 400)
-    over_model(body.get('po'))
-    po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
-    po['vodice'] = s7dcl.vodice(po)
-    po['rozlozeni'] = body['po'].get('rozlozeni') or _rozloz(po)[0]
+    if net['jazyk'] == 'FBD' and net.get('signaly') is not None:
+        if not isinstance(body.get('po'), dict):
+            raise stav.ChybaStavu('po musí být FBD model {jazyk: "FBD", prvky: [...]}', 400)
+        po = _fbd_po(dict(body['po'], jazyk='FBD'))
+    elif net['jazyk'] != 'LAD':
+        raise stav.ChybaStavu('úprava jen pro LAD nebo FBD network (tento je %s)' % (net['jazyk'] or '?'), 400)
+    else:
+        over_model(body.get('po'))
+        po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
+        po['vodice'] = s7dcl.vodice(po)
+        po['rozlozeni'] = body['po'].get('rozlozeni') or _rozloz(po)[0]
     cas = stav.ted()
     with stav.ZAMEK:
         s = stav.nacti(data, projekt)
         u = {'id': stav.nove_id(data), 'projekt': projekt, 'kolo': str(body.get('kolo') or '—'),
              'blok': net['soubor'], 'druh': net['druh'], 'cislo_bloku': net['cislo'], 'nw': net['nw'],
-             'titulek': net['titulek'], 'autor': 'ANet', 'cas': cas, 'stav': 'Proposal',
+             'titulek': net['titulek'], 'jazyk': net['jazyk'], 'autor': 'ANet', 'cas': cas, 'stav': 'Proposal',
              'poznamka': str(body.get('poznamka') or ''),
              'historie': [{'stav': 'Proposal', 'cas': cas, 'kdo': 'ANet'}],
              'pred': dict(_model(net), export_ts=net['ts']), 'po': po, 'kontroly': []}
@@ -231,6 +262,8 @@ def api_kontrola(data, body):
 def _kresba_rozdilu(pred, po, sirka=0):
     """Kresba modelu „po" se smazanými prvky jako přízraky a značkami rozdílu proti „pred"."""
     zmeny, smazane = rozdil.porovnej(pred, po)
+    if fbd.je_fbd(po):
+        return _kresba_rozdilu_fbd(pred, po, zmeny, smazane, sirka)
     prvky, rungy, nevlozene = rozdil.slouc(pred, po, smazane)
     varovani = []
     rozl, kresba = _rozloz({'prvky': prvky, 'rungy': rungy}, sirka)
@@ -249,6 +282,31 @@ def _kresba_rozdilu(pred, po, sirka=0):
             'varovani': varovani}
 
 
+def _kresba_rozdilu_fbd(pred, po, zmeny, smazane, sirka):
+    """FBD: smazané boxy jako přízraky (samostatné stromy; signály ze zachovaných boxů zůstanou)."""
+    varovani, prvky = [], fbd.slouc(pred, po, smazane)
+    try:
+        rozl, kresba = fbd.rozloz(prvky, sirka)
+        znacky = dict(zmeny, **{'x:' + i: 'smazany' for i in smazane})
+    except fbd.Nerozlozitelne:
+        prvky, znacky = po['prvky'], dict(zmeny)
+        try:
+            rozl, kresba = fbd.rozloz(prvky, sirka)
+        except fbd.Nerozlozitelne as e:
+            rozl, kresba = None, None
+            varovani.append('Model „po" nejde rozložit (%s).' % e)
+        if smazane:
+            P = {p['id']: p for p in pred['prvky']}
+            varovani.append('Smazáno: ' + ', '.join(fbd.jmeno(P[i]) for i in smazane))
+    return {'jazyk': 'FBD', 'prvky': prvky, 'rungy': [], 'signaly': fbd.signaly(prvky), 'rozlozeni': rozl,
+            'kresba': kresba, 'rozdil': znacky, 'varovani': varovani,
+            'rozdil_piny': fbd.zmeny_pinu(pred, po, {i for i, z in zmeny.items() if z == 'zmeneny'})}
+
+
+def _validuj(po):
+    return fbd.validuj(po) if fbd.je_fbd(po) else model.validuj(po)
+
+
 def api_uprava_detail(data, uid, sirka=0):
     """Úprava + kresba „po" s rozdílem, chyby pravidel LAD, přechody stavů."""
     _, _, u = stav.najdi(data, uid)
@@ -259,7 +317,7 @@ def api_uprava_detail(data, uid, sirka=0):
                                   'zkontroluj zápis v projektu.' % u['stav'])
     dalsi, predchozi = stav.prechody(u)
     vys.update({'uprava': u, 'dalsi': dalsi, 'predchozi': predchozi, 'signed_povolen': stav.signed_povolen(u),
-                'chyby': model.validuj(u['po'])})
+                'chyby': _validuj(u['po'])})
     return vys
 
 
@@ -276,6 +334,8 @@ def api_rozlozeni(root, body):
     proti „pred", místa vložení, chyby pravidel LAD. Nic neukládá."""
     if not isinstance(body, dict):
         raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+    if fbd.je_fbd(body.get('po')):
+        return _rozlozeni_fbd(body)
     over_model(body.get('po'))
     po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
     pred = body.get('pred')
@@ -304,6 +364,26 @@ def api_rozlozeni(root, body):
     return vys
 
 
+def _rozlozeni_fbd(body):
+    """FBD: operace pridej_vstup / zmen_operand / negace (fbd.proved), kresba s rozdílem proti pred, chyby."""
+    po = _fbd_po(body['po'])
+    pred = _fbd_po(dict(body['pred'], jazyk='FBD')) if isinstance(body.get('pred'), dict) else None
+    ops = body.get('ops') or []
+    if not isinstance(ops, list):
+        raise stav.ChybaStavu('ops musí být seznam operací', 400)
+    posledni = None
+    for op in ops:
+        try:
+            po, posledni = fbd.proved(po, op)
+        except fbd.ChybaOperace as e:
+            raise stav.ChybaStavu(str(e), 400)
+    vys = _kresba_rozdilu(pred or po, po, int(body.get('sirka') or 0))
+    if vys['kresba'] is not None:
+        po['rozlozeni'] = fbd.rozloz(po['prvky'])[0]
+    vys.update({'po': po, 'mista': [], 'chyby': fbd.validuj(po), 'posledni': posledni})
+    return vys
+
+
 def api_kontrola_exportem(root, data, uid, body):
     """M4: porovná network úpravy v exportu (nejnovějším / zadaném) s modelem „po" podle obsahu
     a zapíše výsledek jako kontrolu (POST /api/kontrola). Network se hledá podle titulku, pak podle čísla."""
@@ -325,6 +405,8 @@ def api_kontrola_exportem(root, data, uid, body):
             pozn.append('titulek „%s" v exportu není — porovnáno podle čísla NW %d' % (u['titulek'], u['nw']))
     if n is None:
         shoda, rozd = False, ['network %d v exportu není' % u['nw']]
+    elif fbd.je_fbd(u['po']):
+        shoda, rozd = False, ['kontrola exportem pro FBD zatím není (milník F2)']
     elif n['jazyk'] != 'LAD':
         shoda, rozd = False, ['NW %d je v exportu v jazyce %s' % (n['nw'], n['jazyk'] or '?')]
     else:
@@ -341,18 +423,23 @@ def api_uprava_po(data, uid, body):
     """Uloží model „po" k úpravě (editor „Uložit návrh"). Jen ve stavu Proposal; chyby pravidel uložení nebrání."""
     if not isinstance(body, dict):
         raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
-    over_model(body.get('po'))
-    po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
-    po['vodice'] = s7dcl.vodice(po)
-    po['rozlozeni'] = _rozloz(po)[0]
+    if fbd.je_fbd(body.get('po')):
+        po = _fbd_po(body['po'])
+    else:
+        over_model(body.get('po'))
+        po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
+        po['vodice'] = s7dcl.vodice(po)
+        po['rozlozeni'] = _rozloz(po)[0]
     with stav.ZAMEK:
         projekt, s, u = stav.najdi(data, uid)
+        if fbd.je_fbd(po) != fbd.je_fbd(u['po']):
+            raise stav.ChybaStavu('jazyk návrhu (LAD/FBD) musí zůstat stejný', 400)
         if u['stav'] != 'Proposal':
             raise stav.ChybaStavu('návrh lze měnit jen ve stavu Proposal (teď %s)' % u['stav'])
         u['po'] = po
         u['upraveno'] = stav.ted()
         stav.uloz(data, projekt, s)
-    return {'uprava': u, 'chyby': model.validuj(po)}
+    return {'uprava': u, 'chyby': _validuj(po)}
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -81,10 +81,11 @@ class TestParser(unittest.TestCase):
                          ['kontakt', 'civka_s', 'kontakt', 'civka', 'kontakt', 'box', 'civka_r'])
         self.assertEqual((prvky[5]['nazev'], prvky[5]['pod'], prvky[5]['napajeni']), ('P_TRIG', '#Kvitace_P', ['CLK', 'Q']))
 
-    def test_fbd_se_nekresli(self):
+    def test_fbd_vlastni_model(self):
         n = nw('FC_Vetve', 3)
         self.assertEqual(n['jazyk'], 'FBD')
-        self.assertNotIn('rungy', n)
+        self.assertNotIn('rungy', n)                                     # FBD nemá LAD rungy, ale boxy (F1)
+        self.assertEqual([p['typ'] for p in n['prvky']], ['or', 'assign'])
 
     def test_carky_v_uvozovkach(self):
         self.assertEqual(s7dcl.rozdel_carkami('a := "x,y", b := c[1,2], d =>  '), ['a := "x,y"', 'b := c[1,2]', 'd =>'])
