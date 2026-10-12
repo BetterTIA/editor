@@ -1,6 +1,6 @@
 # LADEditor — ANET.md
 
-Lokální prohlížeč a editor LAD networků z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
+Lokální prohlížeč a editor LAD networků (FBD od F1: prohlížení a návrh přes API) z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
 
 ## Spuštění
 ```
@@ -91,6 +91,49 @@ Instanční DB a volání FC se dohledávají v nejnovější kopii bloku do dan
 
 **Pravidlo LAD navíc:** paralelní úsek, jehož hlavní cesta je jen vodič (např. po smazání kontaktu) → „Větev bez prvku v hlavní cestě" u každé přemostěné větve.
 
+## F1 — FBD (prohlížení + návrh přes API)
+**Model** (`fbd.py`, vlastní, ne převod na LAD): `{jazyk: "FBD", prvky: [box], signaly: [{z, do, vstup}]}`.
+- box = `{id, typ, vstupy: [{n, pin, operand, signal, neg}], vystupy: [{pin, operand, neg}], operand?, nazev?, instance?, sablona?, atributy?}`; `typ` ∈ `and or xor assign s r sr rs ptrig ntrig volani instrukce`.
+- 1. vstup = vstup řetězu (`in1`, `CLK`, `S`/`R`, u volání/instrukce `EN`; F-blok bez napájení EN nemá). `signal` = id boxu, jehož hlavní výstup vstup napájí (operand je pak `''`); `neg` = kroužek negace.
+- `operand` = operand nad boxem (`=`, S, R, SR/RS, bit paměti hrany); `volani`: `nazev` (typ FB / F-instrukce), `instance`, `atributy` (`f_user_card`…).
+- Id z exportu `b1, b2…` (pořadí v textu), nové prvky `n1…`. `signaly` jsou odvozené — server je dopočítá ze vstupů, posílat stačí `prvky`.
+
+**Gramatika FBD v `.s7dcl`** (V21): `RUNG <operand>|wire#wN|true` + prvky za sebou (výstup předchozího = 1. vstup dalšího): `A(in2 := …, in3 := …)` &, `O(…)` >=1, `X(…)` x (neověřeno exportem), `Coil(x)` =, `S_Coil`/`R_Coil`, `S_SR(r1 := …, operand := …)` (neověřeno), `P_Trig(pamet)`/`N_Trig`, `Move(…)`, volání `#inst.TYP(…)` / `"Inst"(…)` s atributy `{ f_user_card := "1"; … }`. `NOT` před prvkem = negovaný 1. vstup, `pin := NOT x` = negovaný vstup. `wire#wN` v rungu = odbočka za boxem, `END_RUNG wire#wN` = výstup rungu; `in2 := wire#wN` / `RUNG wire#wN` = napájení z nich. Víc `Coil` za sebou = řetěz přiřazení. `RUNG` + `END_RUNG` = prázdný network.
+
+**Rozložení** (`fbd.rozloz`): strom podle hlavního spotřebiče (první v pořadí exportu); zdroje vlevo, přiřazení vpravo, výstup boxu v lince jeho 1. vstupu (řetěz = rovná čára), box napájející další vstup se položí na linku toho vstupu; další spotřebiče téhož výstupu = odbočka (svislice v kanálu sloupce, uzel). Box = obdélník s titulkem (`&`, `>=1`, `x`, `=`, `S`, `R`, `SR`, `P_TRIG`, název FB), operand / instance nad boxem, piny jen u SR/hran/volání/instrukcí. Cyklus nebo signál z neexistujícího boxu → `Nerozlozitelne` → stránka ukáže text networku s varováním.
+
+**API pro FBD:**
+| Metoda | Cesta | FBD |
+|---|---|---|
+| GET | `/api/network?…` | `jazyk: "FBD"`, `prvky`, `signaly`, `rozlozeni {id: {r, c}}`, `kresba {fbd: true, boxy, cary, uzly}` |
+| POST | `/api/rozlozeni` | `{projekt, po: {jazyk: "FBD", prvky}, pred?, ops?}` → `po`, `kresba`, `rozdil`, `rozdil_piny`, `chyby` (nic neukládá) |
+| POST | `/api/uprava` | `{projekt, kolo, blok, nw, po: {prvky}, poznamka}` — u FBD networku je `po` FBD model; číslo, titulek, `pred` doplní server |
+| POST | `/api/uprava/<id>/po` | uloží FBD „po" (jen Proposal; jazyk návrhu se měnit nesmí → 400) |
+| GET | `/api/uprava/<id>` | `jazyk: "FBD"`, kresba s rozdílem, `rozdil_piny {id: {vstupy: [n], vystupy: [pin], nad}}`, `chyby` (pravidla FBD) |
+
+Operace FBD (`ops` v `/api/rozlozeni`): `{"typ":"pridej_vstup","id":"b2","operand":"#X"}` (jen &, >=1, x) · `{"typ":"zmen_operand","id":"b3","operand":"#Y"}` (operand nad boxem / instance) nebo s `"vstup": n` / `"vystup": "PIN"` (signál vstupu se nahradí operandem) · `{"typ":"negace","id":"b2","vstup":2}` (přepne).
+```
+# 1) network -> 2) zkouška operací -> 3) návrh (JSON v souborech, ať se shell nehádá s uvozovkami)
+curl -s "http://localhost:8765/api/network?projekt=Demo_Linka&blok=FB_Bezpecnost&nw=1" > net.json
+#   rozl.json: {"projekt":"Demo_Linka","pred":{"jazyk":"FBD","prvky":<net.prvky>},"po":{"jazyk":"FBD","prvky":<net.prvky>},
+#               "ops":[{"typ":"pridej_vstup","id":"b2","operand":"#Zamek_OK"},{"typ":"zmen_operand","id":"b3","operand":"#Povoleni_Pohon"}]}
+curl -s -X POST -H "Content-Type: application/json" --data-binary @rozl.json http://localhost:8765/api/rozlozeni > rozl_out.json
+#   navrh.json: {"projekt":"Demo_Linka","kolo":"F1 demo","blok":"FB_Bezpecnost","nw":1,"poznamka":"…","po":<rozl_out.po>}
+curl -s -X POST -H "Content-Type: application/json" --data-binary @navrh.json http://localhost:8765/api/uprava
+```
+Rozdíl: nový box zeleně, změněný oranžově — **u změněného boxu jsou oranžové jen změněné vstupy / výstupy / operand** (`rozdil_piny`), smazaný box červeně čárkovaně jako samostatný přízrak (visí na signálu, ze kterého byl napájen).
+
+**Pravidla FBD (minimum F1, `fbd.validuj`):** chybí operand `=`/S/R/SR/hrany, chybí instance volání, nezapojený vstup &/>=1/x (1. vstup `=`/S/R se nehlásí — export má `RUNG` + `Coil(x)` bez vstupu, viz níže).
+
+**Umí / neumí (F1):**
+- ✅ prohlížení všech konstrukcí výše, rozdíl před/po, návrh přes API, operace přidat vstup / změnit operand / negace; vzorek `FB_Bezpecnost` (9 networků).
+- ✅ Ad hoc (nic neuloženo) na všech FBD networcích obou exportů: 43 networků (jen jeden projekt, 2 bloky; druhý export FBD nemá) — parser 43/43, rozložení 43/43, 0 varování, 5 prázdných.
+- ⚠️ `RUNG` bez operandu + `Coil(x)` (v exportu 2×) se kreslí jako `=` s otevřeným vstupem `...` — v TIA nejspíš „vždy 1"; neověřeno pohledem do TIA. `NOT A(…)` se čte jako negace 1. vstupu (ne výstupu předchozího boxu) — neověřeno.
+- ⚠️ Signál vedený z výstupního pinu volání (`Q => wire#…`) model nezná (v exportech není); signál = vždy hlavní výstup boxu.
+- ❌ Editor FBD v UI (paleta, vložení boxu do signálu, smazání), kontrola exportem pro FBD (vrací neshodu „F2"), postup skládání pro TIA, „zobrazit jako LAD" — vše F2. Tlačítko „Upravit" se u FBD úpravy nenabízí.
+
+Snímky F1: `tests\snimky\F1_a_bitova_logika.png` (NW1: >=1 → & s negovaným vstupem → =), `F1_b_volani_F_bloku.png` (NW4: F-blok s piny, negovaný pin, `ACK` z P_TRIG přes `wire#`), `F1_c_navrh_rozdil.png` (U001 založená přes API: & + 4. vstup, změněný operand přiřazení).
+
 ## Jak si Claude bere stav a snímek
 ```
 curl -s "http://localhost:8765/api/network?projekt=Demo_Linka&blok=FB_Dopravnik&nw=2"
@@ -106,6 +149,7 @@ python snimek.py --url "http://localhost:8765/?projekt=Demo_Linka&blok=FB_Doprav
 - Vzorky M3: `DBs\DB_Stroj.s7dcl` (globální DB se STRUCT), `PLC_1\Tags\Default tag table.xml` (tagy pro našeptávání).
 - Vzorek M4: `Demo_Linka\20261012-140000\` = dílčí „export po zápisu" jen s `FB_Dopravnik` (NW1 má navíc `Contact( "Pojistka_OK" )` před cívkou) — je to **nejnovější** export bloku; testy prohlížeče a rozložení jsou připnuté na `20261012-120000` (`tests\spolecne.py` `TS0`). Varianty (jiný operand, posunutý network) vznikají v testu v dočasném export rootu.
 - M4 snímky: `M4_a_kontroly_signed_odemceno.png` (neshoda + shoda, Signed odemčené), `M4_b_signed.png`.
+- Vzorek F1: `20261012-120000\PLC_1\Blocks\Bezpecnost\FB_Bezpecnost.s7dcl` (F-FB, `S7_Safety`): NW1 >=1 + & s negací + =, NW2 & s `wire#` vstupem z jiného rungu, NW3 odbočka za & + řetěz přiřazení + `NOT Coil`, NW4 F-blok `#NouzStop.ESTOP1` s atributy, negovaným pinem a `ACK` z `P_Trig`, NW5 F-blok s negovanými `QBAD`, NW6 S/R/SR, NW7 `RUNG true` + MOVE, NW8 x + N_TRIG, NW9 prázdný. Testy `tests	est_fbd.py`.
 
 ## Gramatika `.s7dcl` (zjištěno na exportech V21, 12. 10. 2026)
 - Network: `{ S7_Language := "LAD"; S7_NetworkTitle := "MLC_x"; S7_NetworkComment := "MLC_y" }` + `NETWORK … END_NETWORK`; atributy mohou chybět (`{ S7_Language := "LAD" }`). Texty v `.s7res` (`- id: MLC_x` / `en-US: …`, hodnoty i v `'…'` a blocích `|`, `|-`, `|+`).
@@ -123,7 +167,7 @@ python snimek.py --url "http://localhost:8765/?projekt=Demo_Linka&blok=FB_Doprav
 ## Co umí / neumí
 - ✅ série, paralelní větve (i vnořené, rekurzivně), výstupní větve, víc rungů, boxy v hlavní větvi i ve výstupních větvích, řetězy boxů EN/ENO, přívody pinů od lišty, porovnání, P/N kontakty, S/R/negované cívky, RET, P_TRIG; cívky k pravému okraji; tmavý/světlý motiv.
 - ✅ Ověřeno ad hoc (bez uložení čehokoli) na všech 5501 LAD networcích obou exportů: parser bez chyby, rozložení bez výjimky. Vizuálně kontrolovány jen vlastní vzorky.
-- ⚠️ Nerozložitelné zapojení (můstek, přívod pinu odjinud než z lišty) → seznam rungů s varováním. FBD/SCL/STL → varování + text.
+- ⚠️ Nerozložitelné zapojení (můstek, přívod pinu odjinud než z lišty) → seznam rungů s varováním. SCL/STL → varování + text. FBD viz F1.
 - ⚠️ Šířka textu je odhad (7,2 px/znak, Consolas 12 px); operand > 30 znaků se zkrátí „…" (plný v tooltipu). TIA dlouhé názvy zalamuje.
 - ⚠️ Přívod pinu u boxu, který není v sérii od lišty, může křížit svislici výstupní větve (v exportech nenalezeno).
 - ✅ M2: strom úprav, stavy, kontroly, rozdíl před/po (viz výše). Prázdný network má u lišty popisek „(prázdný network)“.
