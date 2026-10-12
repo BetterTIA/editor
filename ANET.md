@@ -162,6 +162,8 @@ curl -s http://localhost:8765/api/uprava/U003/postup
 
 **Vzorek F2:** `Demo_Linka\20261012-150000\` = export po zápisu (jen `FB_Bezpecnost`, NW1: & + `in4 := #Zamek_OK`, `Coil( #Povoleni_Pohon )`) — nejnovější export bloku; testy FBD jsou připnuté na `20261012-120000` (`TS0`), `TS2` = tento. Testy `tests\test_fbd_f2.py`. Snímky `F2_a_editor_fbd.png` (paleta, místa vložení, vložený P_TRIG), `F2_b_postup.png` (panel postupu), `F2_c_signed_fbd.png` (neshoda proti starému exportu, shoda proti novému, Signed).
 
+**Skutečné kliky myší** (`tests	est_klikani.py`): headless Chrome přes DevTools protokol (mini WebSocket klient ze stdlib), `Input.dispatchMouseEvent` = důvěryhodná sekvence pointerdown/mousedown → pointerup/mouseup → click na `rect.hit` boxu, „+ vstup", položku palety a místo vložení — FBD i LAD editor. Pozor při živém testu přes rozšíření `claude-in-chrome`: když je karta skrytá (`document.visibilityState === "hidden"`, snímek obrazovky vyprší), **první** kliknutí po načtení stránky do stránky vůbec nedorazí (ověřeno i na prosté JSON stránce `/api/stav`) — druhé už ano. Není to chyba aplikace.
+
 **Neumí (F2):** tažení boxu po plátně / přepojení signálu myší (jen vložení na vstup a smazání); `pin → wire#` z výstupního pinu volání; časovače/čítače ve FBD mají EN/ENO místo IN/Q; negace hlavního výstupu se nekanonizuje proti negaci vstupu následníka (dva zápisy téže logiky = neshoda).
 
 ## Jak si Claude bere stav a snímek
