@@ -3,13 +3,13 @@ import os
 import tempfile
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT
+from tests.spolecne import VZORKY, PROJEKT, TS0
 import s7dcl
 import server
 
 
 def nw(blok, n):
-    _, b = server._nacti(VZORKY, PROJEKT, blok)
+    _, b = server._nacti(VZORKY, PROJEKT, blok, TS0)
     return b['networky'][n - 1]
 
 
@@ -22,7 +22,7 @@ class TestParser(unittest.TestCase):
             self.assertIn(b['druh'], ('FB', 'FC', 'DB'))
 
     def test_hlavicka_a_titulky(self):
-        _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik')
+        _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik', TS0)
         self.assertEqual((b['druh'], b['nazev'], b['cislo']), ('FB', 'FB_Dopravnik', 10))
         self.assertEqual(len(b['networky']), 8)
         self.assertEqual(b['networky'][0]['titulek'], 'Připravenost dopravníku')

@@ -37,7 +37,8 @@ class TestApi(unittest.TestCase):
         self.assertEqual(s, 200)
         p = json.loads(b)['projekty'][0]
         self.assertEqual(p['projekt'], PROJEKT)
-        self.assertIn({'blok': 'FB_Dopravnik', 'ts': '20261012-120000'}, p['bloky'])
+        self.assertIn({'blok': 'FB_Dopravnik', 'ts': '20261012-140000'}, p['bloky'])
+        self.assertIn({'blok': 'FB_Pas', 'ts': '20261012-120000'}, p['bloky'])     # dílčí export
 
     def test_blok(self):
         s, _, b = self.get('/api/blok?projekt=%s&blok=FB_Dopravnik' % PROJEKT)

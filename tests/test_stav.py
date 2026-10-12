@@ -7,7 +7,7 @@ import threading
 import unittest
 from unittest import mock
 
-from tests.spolecne import VZORKY, PROJEKT, po_nw2
+from tests.spolecne import VZORKY, PROJEKT, TS1, TS0, po_nw2
 import rozdil
 import s7dcl
 import server
@@ -70,7 +70,7 @@ class TestAutomat(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
     def test_rozdil_a_prizrak(self):
-        _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik')
+        _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik', TS0)
         n = b['networky'][1]
         pred = {'prvky': n['prvky'], 'rungy': n['rungy']}
         po = po_nw2(pred)
@@ -115,7 +115,7 @@ class TestApiUpravy(unittest.TestCase):
         self.assertEqual(s, 201)
         self.assertEqual((u['id'], u['stav'], u['autor']), ('U001', 'Proposal', 'ANet'))
         self.assertEqual((u['druh'], u['cislo_bloku'], u['nw'], u['titulek']), ('FB', 10, 2, 'Samodrž motoru'))
-        self.assertEqual(u['pred']['export_ts'], '20261012-120000')
+        self.assertEqual(u['pred']['export_ts'], TS1)                       # nejnovější export s blokem
         self.assertEqual(len(u['pred']['prvky']), 7)
         self.assertIsNotNone(u['po']['rozlozeni'])                         # přepočteno serverem
         self.assertIn({'z': 'n1', 'do': 'p4'}, u['po']['vodice'])

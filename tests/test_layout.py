@@ -1,12 +1,12 @@
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT
+from tests.spolecne import VZORKY, PROJEKT, TS0
 import layout
 import server
 
 
 def roz(blok, n, sirka=0):
-    _, b = server._nacti(VZORKY, PROJEKT, blok)
+    _, b = server._nacti(VZORKY, PROJEKT, blok, TS0)
     x = b['networky'][n - 1]
     r, k = layout.rozloz(x['rungy'], x['prvky'], sirka)
     return r, k, {d['id']: d for d in k['prvky']}

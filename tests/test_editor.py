@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT
+from tests.spolecne import VZORKY, PROJEKT, TS0
 import katalog
 import layout
 import model
@@ -14,7 +14,7 @@ import server
 
 
 def nw(n):
-    _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik')
+    _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik', TS0)
     x = b['networky'][n - 1]
     return {'prvky': x['prvky'], 'rungy': x['rungy']}
 
@@ -194,7 +194,7 @@ class TestApiEditor(unittest.TestCase):
         s, u = self.req('POST', '/api/uprava', {'projekt': PROJEKT, 'kolo': 'Kolo 1', 'blok': 'FB_Dopravnik', 'nw': 1,
                                                  'po': {'prvky': net['prvky'], 'rungy': net['rungy']}})
         self.assertEqual(s, 201)
-        _, r = self.req('POST', '/api/rozlozeni', {'projekt': PROJEKT, 'po': nw(1), 'ops': [
+        _, r = self.req('POST', '/api/rozlozeni', {'projekt': PROJEKT, 'po': u['po'], 'ops': [
             {'typ': 'vetev', 'od': {'r': 0, 'k': 1}, 'do': {'r': 0, 'k': 2}, 'prvek': 'fb:FB_Pas'}]})
         s, v = self.req('POST', '/api/uprava/%s/po' % u['id'], {'po': r['po']})
         self.assertEqual(s, 200)                                           # uložit lze i s chybou
