@@ -430,7 +430,7 @@ async function zobrazUpravu(uid, chyba) {
     `<div class="tlacitka">` +
     (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
     (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlSigned ? 'disabled title="Signed až po poslední kontrole exportem se shodou (POST /api/kontrola)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
-    (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : '') +
+    (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : `<button id="kontrola" title="porovná nejnovější export Readeru s návrhem a zapíše kontrolu">Zkontrolovat exportem</button>`) +
     `</div>` +
     (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla LAD (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
     (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
@@ -441,6 +441,13 @@ async function zobrazUpravu(uid, chyba) {
     d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
     `<div class="legenda">Model „po“ proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
   if ($('upravit')) $('upravit').onclick = () => { location.href = `?uprava=${enc(u.id)}&upravit=1`; };
+  if ($('kontrola')) $('kontrola').onclick = async () => {
+    $('kontrola').disabled = true;
+    try {
+      const k = await apiJson('POST', `/api/uprava/${enc(u.id)}/kontrola-exportem`, {});
+      await zobrazUpravu(uid, k.shoda ? null : `Kontrola exportem ${k.export_ts}: ${k.poznamka}`);
+    } catch (e) { await zobrazUpravu(uid, 'Kontrola exportem selhala: ' + e.message); }
+  };
   for (const b of m.querySelectorAll('button[data-stav]')) {
     b.onclick = async () => {
       try { await zmenStav(u.id, b.dataset.stav); await zobrazUpravu(uid); }

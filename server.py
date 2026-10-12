@@ -45,13 +45,18 @@ def index_exportu(root):
 
 
 def najdi_blok(root, projekt, blok, ts=None):
-    """-> (ts, cesta, bloky_ts) nejnovějšího exportu s blokem; jména jen z indexu (žádné skládání cest z URL)."""
+    """-> (ts, cesta, bloky) nejnovějšího exportu s blokem; bloky = nejnovější kopie všech bloků projektu do ts
+    (dílčí export pak dohledá instanční DB i FC ze staršího). Jména jen z indexu (žádné skládání cest z URL)."""
     exp = index_exportu(root).get(projekt)
     if not exp:
         raise KeyError('neznámý projekt')
     for t in sorted(exp, reverse=True):
         if (ts is None or t == ts) and blok in exp[t]:
-            return t, exp[t][blok], exp[t]
+            bloky = {}
+            for x in sorted(exp):
+                if x <= t:
+                    bloky.update(exp[x])
+            return t, exp[t][blok], bloky
     raise KeyError('blok v exportu není')
 
 
@@ -59,14 +64,23 @@ def _nacti(root, projekt, blok, ts=None):
     t, cesta, bloky = najdi_blok(root, projekt, blok, ts)
     b = s7dcl.nacti_blok(cesta)
 
+    fc = set()
+
     def najdi_db(jmeno):
         c = bloky.get(jmeno)
         if c:
             try:
-                return s7dcl.parse_blok(s7dcl.cti(c)).get('instance_typ')
+                x = s7dcl.parse_blok(s7dcl.cti(c))
             except s7dcl.ChybaParseru:
                 return None
+            if x['druh'] == 'FC':
+                fc.add(jmeno)
+            return x.get('instance_typ')
     s7dcl.dopln_typy_fb(b, najdi_db)
+    for nw in b['networky']:                          # "FC"(…) je volání FC, ne instance FB
+        for p in nw.get('prvky', []):
+            if p['typ'] == 'box' and p['volani'] == 'fb' and (p['instance'] or '').strip('"') in fc:
+                p.update(volani='fc', nazev=p['instance'].strip('"'), instance=None)
     return t, b
 
 
@@ -290,6 +304,39 @@ def api_rozlozeni(root, body):
     return vys
 
 
+def api_kontrola_exportem(root, data, uid, body):
+    """M4: porovná network úpravy v exportu (nejnovějším / zadaném) s modelem „po" podle obsahu
+    a zapíše výsledek jako kontrolu (POST /api/kontrola). Network se hledá podle titulku, pak podle čísla."""
+    if not isinstance(body, dict):
+        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+    _, _, u = stav.najdi(data, uid)
+    t, b = _nacti(root, u['projekt'], u['blok'], str(body['export_ts']) if body.get('export_ts') else None)
+    pozn = []
+    kand = [n for n in b['networky'] if u.get('titulek') and n['titulek'] == u['titulek']]
+    if kand:
+        n = next((x for x in kand if x['nw'] == u['nw']), kand[0])
+        if n['nw'] != u['nw']:
+            pozn.append('network se posunul: NW %d → NW %d (podle titulku „%s")' % (u['nw'], n['nw'], u['titulek']))
+        if len(kand) > 1:
+            pozn.append('titulek je v bloku %d×, porovnán NW %d' % (len(kand), n['nw']))
+    else:
+        n = b['networky'][u['nw'] - 1] if u['nw'] <= len(b['networky']) else None
+        if u.get('titulek'):
+            pozn.append('titulek „%s" v exportu není — porovnáno podle čísla NW %d' % (u['titulek'], u['nw']))
+    if n is None:
+        shoda, rozd = False, ['network %d v exportu není' % u['nw']]
+    elif n['jazyk'] != 'LAD':
+        shoda, rozd = False, ['NW %d je v exportu v jazyce %s' % (n['nw'], n['jazyk'] or '?')]
+    else:
+        shoda, rozd = rozdil.shoda_obsahu(u['po'], n)
+    if t == u['pred'].get('export_ts'):
+        pozn.append('pozor: export je tentýž jako před úpravou')
+    poznamka = ('export = návrh' if shoda else 'NESHODA: ' + '; '.join(rozd)) + ''.join(' · ' + x for x in pozn)
+    u = api_kontrola(data, {'uprava_id': uid, 'shoda': shoda, 'export_ts': t, 'poznamka': poznamka})
+    return {'shoda': shoda, 'export_ts': t, 'nw_export': n['nw'] if n else None, 'poznamka': poznamka,
+            'rozdily': rozd, 'uprava': u}
+
+
 def api_uprava_po(data, uid, body):
     """Uloží model „po" k úpravě (editor „Uložit návrh"). Jen ve stavu Proposal; chyby pravidel uložení nebrání."""
     if not isinstance(body, dict):
@@ -367,6 +414,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(api_rozlozeni(self.root, self._telo()))
             elif metoda in ('POST', 'PUT') and re.fullmatch(r'/api/uprava/[\w-]+/po', c):
                 self._json(api_uprava_po(self.data, c.split('/')[3], self._telo()))
+            elif metoda == 'POST' and re.fullmatch(r'/api/uprava/[\w-]+/kontrola-exportem', c):
+                self._json(api_kontrola_exportem(self.root, self.data, c.split('/')[3], self._telo()))
             elif metoda == 'POST' and c == '/api/kontrola':
                 self._json(api_kontrola(self.data, self._telo()))
             else:

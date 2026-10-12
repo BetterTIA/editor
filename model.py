@@ -288,6 +288,26 @@ def validuj(model):
                                               'Dej ho do hlavní nebo výstupní větve.' % jm})
             if p['typ'] in CIVKY and (r['do'] is not None or it != prvky_r[-1]):
                 ch.append({'id': it, 'chyba': 'Cívka %s není na konci rungu — za cívkou nesmí nic být.' % jm})
+    for oi, o in enumerate(model['rungy']):      # paralelní úsek, jehož hlavní cesta je jen vodič
+        if o['do'] is None or o['do'] in privody:
+            continue
+        for ri, r in enumerate(model['rungy']):
+            c = r['cesta']
+            if ri == oi or 'wire#' + o['do'] not in c:
+                continue
+            j = c.index('wire#' + o['do'])
+            if o['z'] == r['z']:
+                i = 0
+            elif 'wire#' + o['z'] in c[:j]:
+                i = c.index('wire#' + o['z']) + 1
+            else:
+                continue
+            if not [x for x in c[i:j] if not _je_wire(x)]:
+                prvni = next((x for x in o['cesta'] if not _je_wire(x)), None)
+                ch.append({'id': prvni, 'chyba': 'Větev bez prvku v hlavní cestě — hlavní cesta úseku je jen vodič, '
+                                                 'větev %s je přemostěná. Doplň prvek do hlavní cesty, nebo větev smaž.'
+                                                 % (_jmeno(P[prvni]) if prvni in P else '')})
+                break
     for p in model['prvky']:
         jm, t = _jmeno(p), p['typ']
         if t in OPERAND and not (p.get('operand') or '').strip():
