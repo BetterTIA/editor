@@ -11,7 +11,9 @@ import textwrap
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
+import katalog
 import layout
+import model
 import rozdil
 import s7dcl
 import stav
@@ -212,28 +214,98 @@ def api_kontrola(data, body):
     return u
 
 
-def api_uprava_detail(data, uid, sirka=0):
-    """Úprava + kresba modelu „po" se smazanými prvky jako přízraky a značkami rozdílu."""
-    _, _, u = stav.najdi(data, uid)
-    zmeny, smazane = rozdil.porovnej(u['pred'], u['po'])
-    prvky, rungy, nevlozene = rozdil.slouc(u['pred'], u['po'], smazane)
+def _kresba_rozdilu(pred, po, sirka=0):
+    """Kresba modelu „po" se smazanými prvky jako přízraky a značkami rozdílu proti „pred"."""
+    zmeny, smazane = rozdil.porovnej(pred, po)
+    prvky, rungy, nevlozene = rozdil.slouc(pred, po, smazane)
     varovani = []
     rozl, kresba = _rozloz({'prvky': prvky, 'rungy': rungy}, sirka)
     if kresba is None:                                # přízraky rozbily rozložení -> jen „po"
-        prvky, rungy, nevlozene = u['po']['prvky'], u['po']['rungy'], list(smazane)
-        rozl, kresba = _rozloz(u['po'], sirka)
+        prvky, rungy, nevlozene = po['prvky'], po['rungy'], list(smazane)
+        rozl, kresba = _rozloz(po, sirka)
         if kresba is None:
             varovani.append('Model „po" nejde rozložit — zobrazen jako seznam rungů.')
     znacky = dict(zmeny)
     znacky.update({'x:' + i: 'smazany' for i in smazane if i not in nevlozene})
     if nevlozene:
-        P = {p['id']: p for p in u['pred']['prvky']}
+        P = {p['id']: p for p in pred['prvky']}
         varovani.append('Smazáno (bez místa v obraze): ' + ', '.join(
             '%s %s' % (P[i]['typ'], P[i].get('operand') or P[i].get('nazev') or '') for i in nevlozene))
+    return {'prvky': prvky, 'rungy': rungy, 'rozlozeni': rozl, 'kresba': kresba, 'rozdil': znacky,
+            'varovani': varovani}
+
+
+def api_uprava_detail(data, uid, sirka=0):
+    """Úprava + kresba „po" s rozdílem, chyby pravidel LAD, přechody stavů."""
+    _, _, u = stav.najdi(data, uid)
+    vys = _kresba_rozdilu(u['pred'], u['po'], sirka)
+    k = u.get('kontroly') or []
+    if stav.STAVY.index(u['stav']) >= stav.STAVY.index('Signed') and k and k[-1].get('shoda') is False:
+        vys['varovani'].insert(0, 'Poslední kontrola exportem je NESHODA, ale úprava už je %s — stav se sám nevrací, '
+                                  'zkontroluj zápis v projektu.' % u['stav'])
     dalsi, predchozi = stav.prechody(u)
-    return {'uprava': u, 'prvky': prvky, 'rungy': rungy, 'rozlozeni': rozl, 'kresba': kresba,
-            'rozdil': znacky, 'varovani': varovani, 'dalsi': dalsi, 'predchozi': predchozi,
-            'signed_povolen': stav.signed_povolen(u)}
+    vys.update({'uprava': u, 'dalsi': dalsi, 'predchozi': predchozi, 'signed_povolen': stav.signed_povolen(u),
+                'chyby': model.validuj(u['po'])})
+    return vys
+
+
+# ---------- M3: katalog, editor ----------
+
+def api_katalog(root, projekt):
+    if projekt not in index_exportu(root):
+        raise KeyError('neznámý projekt')
+    return katalog.katalog(root, projekt)
+
+
+def api_rozlozeni(root, body):
+    """Editor / zkouška Clauda: {po, pred?, ops?: [op], projekt?, sirka?} -> „po" po operacích, kresba s rozdílem
+    proti „pred", místa vložení, chyby pravidel LAD. Nic neukládá."""
+    if not isinstance(body, dict):
+        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+    over_model(body.get('po'))
+    po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
+    pred = body.get('pred')
+    if pred is not None:
+        over_model(pred)
+    kat = []
+
+    def sablona(klic):                                # klíč palety ('NO', 'fb:FB_Pas') -> prvek z katalogu
+        if not kat:
+            kat.append(api_katalog(root, str(body.get('projekt', ''))))
+        try:
+            return katalog.prvek(kat[0], klic)
+        except KeyError as e:
+            raise model.ChybaOperace(str(e).strip("'"))
+    ops = body.get('ops') or []
+    if not isinstance(ops, list):
+        raise stav.ChybaStavu('ops musí být seznam operací', 400)
+    posledni = None
+    for op in ops:
+        po, posledni = model.proved(po, op, sablona)
+        over_model(po)
+    vys = _kresba_rozdilu(pred or po, po, int(body.get('sirka') or 0))
+    vys.update({'po': po, 'mista': model.mista(po, vys['kresba']), 'chyby': model.validuj(po), 'posledni': posledni})
+    if vys['kresba'] is None:
+        vys['chyby'].append({'id': None, 'chyba': 'Zapojení nejde rozložit (není sériově-paralelní).'})
+    return vys
+
+
+def api_uprava_po(data, uid, body):
+    """Uloží model „po" k úpravě (editor „Uložit návrh"). Jen ve stavu Proposal; chyby pravidel uložení nebrání."""
+    if not isinstance(body, dict):
+        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+    over_model(body.get('po'))
+    po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
+    po['vodice'] = s7dcl.vodice(po)
+    po['rozlozeni'] = _rozloz(po)[0]
+    with stav.ZAMEK:
+        projekt, s, u = stav.najdi(data, uid)
+        if u['stav'] != 'Proposal':
+            raise stav.ChybaStavu('návrh lze měnit jen ve stavu Proposal (teď %s)' % u['stav'])
+        u['po'] = po
+        u['upraveno'] = stav.ted()
+        stav.uloz(data, projekt, s)
+    return {'uprava': u, 'chyby': model.validuj(po)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -289,6 +361,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(api_uprava_stav(self.data, c.split('/')[3], self._telo()))
             elif metoda == 'GET' and re.fullmatch(r'/api/uprava/[\w-]+', c):
                 self._json(api_uprava_detail(self.data, c.split('/')[3], int(q.get('sirka', '0'))))
+            elif metoda == 'GET' and c == '/api/katalog':
+                self._json(api_katalog(self.root, q.get('projekt', '')))
+            elif metoda == 'POST' and c == '/api/rozlozeni':
+                self._json(api_rozlozeni(self.root, self._telo()))
+            elif metoda in ('POST', 'PUT') and re.fullmatch(r'/api/uprava/[\w-]+/po', c):
+                self._json(api_uprava_po(self.data, c.split('/')[3], self._telo()))
             elif metoda == 'POST' and c == '/api/kontrola':
                 self._json(api_kontrola(self.data, self._telo()))
             else:

@@ -95,7 +95,9 @@ def najdi(data, uid):
 
 
 def signed_povolen(u):
-    return any(k.get('shoda') is True for k in u.get('kontroly', []))
+    """O odemknutí Signed rozhoduje poslední kontrola (pozdější neshoda zase zamkne)."""
+    k = u.get('kontroly') or []
+    return bool(k) and k[-1].get('shoda') is True
 
 
 def prechody(u):
