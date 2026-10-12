@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LADEditor</title>
+<style>
+:root {
+  --bg: #1e1e1e; --panel: #252526; --hrana: #3a3a3a; --text: #f0f0f0; --tlum: #a8a8a8;
+  --akcent: #00D7FF; --vodic: #8A8A8A; --varovani: #fb923c; --vyber: #0e3a47;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #ffffff; --panel: #f3f3f3; --hrana: #d0d0d0; --text: #111111; --tlum: #555555;
+    --akcent: #0a7ea4; --vodic: #4a4a4a; --varovani: #c2410c; --vyber: #d6f1fa;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #ffffff; --panel: #f3f3f3; --hrana: #d0d0d0; --text: #111111; --tlum: #555555;
+  --akcent: #0a7ea4; --vodic: #4a4a4a; --varovani: #c2410c; --vyber: #d6f1fa;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+       display: grid; grid-template-rows: auto 1fr; }
+header { display: flex; gap: 16px; align-items: baseline; padding: 8px 16px; border-bottom: 1px solid var(--hrana);
+         background: var(--panel); }
+header b { color: var(--akcent); font-size: 15px; }
+header .info { color: var(--tlum); }
+.hlavni { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+aside { border-right: 1px solid var(--hrana); overflow: auto; background: var(--panel); }
+aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 12px 12px 6px; }
+aside a { display: block; padding: 5px 12px; color: var(--text); text-decoration: none; border-left: 3px solid transparent;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+aside a:hover { background: var(--vyber); }
+aside a.akt { border-left-color: var(--akcent); background: var(--vyber); }
+aside a .c { color: var(--akcent); font-family: Consolas, monospace; margin-right: 6px; }
+aside a .j { color: var(--tlum); font-size: 11px; margin-left: 4px; }
+main { overflow: auto; padding: 14px 18px; min-width: 0; }
+h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+h1 .c { color: var(--akcent); font-family: Consolas, monospace; }
+.komentar { color: var(--tlum); margin: 0 0 8px; white-space: pre-wrap; }
+.varovani { color: var(--varovani); border: 1px solid var(--varovani); padding: 6px 10px; border-radius: 4px; margin: 8px 0; }
+.platno { overflow: auto; border: 1px solid var(--hrana); border-radius: 4px; background: var(--bg); padding: 6px 0; }
+svg text { font: 12px Consolas, "DejaVu Sans Mono", monospace; fill: var(--text); }
+svg .pin { font-size: 11px; fill: var(--tlum); }
+svg .titul { font-weight: bold; fill: var(--akcent); }
+svg .prazdny { fill: var(--tlum); }
+svg .vod { stroke: var(--vodic); stroke-width: 1.5; fill: none; }
+svg .lista { stroke: var(--akcent); stroke-width: 4; }
+svg .prv { stroke: var(--akcent); stroke-width: 2; fill: none; }
+svg .box { stroke: var(--akcent); stroke-width: 1.5; fill: var(--bg); }
+svg .maska { fill: var(--bg); stroke: none; }
+pre, .rungy { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
+.rungy div { border-bottom: 1px dashed var(--hrana); padding: 2px 0; }
+ul.vyber { list-style: none; padding: 0; columns: 3 220px; }
+ul.vyber a { color: var(--text); }
+</style>
+</head>
+<body>
+<header><b>LADEditor</b><span class="info" id="info">M1 — prohlížeč</span></header>
+<div class="hlavni">
+  <aside id="nw"></aside>
+  <main id="obsah"></main>
+</div>
+<script>
+'use strict';
+const q = new URLSearchParams(location.search);
+if (q.get('tema') === 'svetly') document.documentElement.dataset.theme = 'light';
+if (q.get('tema') === 'tmavy') document.documentElement.dataset.theme = 'dark';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const L = 18, MAXZN = 30;
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+async function api(cesta) {
+  const r = await fetch(cesta);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.chyba || r.status);
+  return j;
+}
+function odkaz(par) {
+  const u = new URLSearchParams(q);
+  for (const [k, v] of Object.entries(par)) v == null ? u.delete(k) : u.set(k, v);
+  return '?' + u.toString();
+}
+
+// ---------- SVG ----------
+function el(rodic, jm, attrs, text) {
+  const e = document.createElementNS(NS, jm);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  rodic.appendChild(e);
+  return e;
+}
+function popis(g, x, y, s, kotva, trida) {
+  const prazdny = !s;
+  let t = prazdny ? '...' : s;
+  const zkr = t.length > MAXZN ? t.slice(0, MAXZN - 1) + '…' : t;
+  const e = el(g, 'text', {x, y, 'text-anchor': kotva || 'middle', class: (trida || '') + (prazdny ? ' prazdny' : '')}, zkr);
+  if (zkr !== t) el(e, 'title', {}, t);
+  return e;
+}
+function kontakt(g, d, p) {
+  const {cx, y} = d;
+  el(g, 'rect', {class: 'maska', x: cx - 8, y: y - 10, width: 16, height: 20});
+  el(g, 'line', {class: 'prv', x1: cx - 7, y1: y - 9, x2: cx - 7, y2: y + 9});
+  el(g, 'line', {class: 'prv', x1: cx + 7, y1: y - 9, x2: cx + 7, y2: y + 9});
+  if (p.typ === 'kontakt_nc') el(g, 'line', {class: 'prv', x1: cx - 4, y1: y + 7, x2: cx + 4, y2: y - 7});
+  if (p.typ === 'kontakt_p' || p.typ === 'kontakt_n') {
+    el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, p.typ === 'kontakt_p' ? 'P' : 'N');
+    popis(g, cx, y + L + 4, p.bit);
+  }
+  popis(g, cx, y - 13, p.operand);
+}
+function civka(g, d, p) {
+  const {cx, y} = d;
+  el(g, 'rect', {class: 'maska', x: cx - 9, y: y - 10, width: 18, height: 20});
+  el(g, 'path', {class: 'prv', d: `M${cx - 4} ${y - 9} A 13 13 0 0 0 ${cx - 4} ${y + 9}`});
+  el(g, 'path', {class: 'prv', d: `M${cx + 4} ${y - 9} A 13 13 0 0 1 ${cx + 4} ${y + 9}`});
+  const zn = {civka_s: 'S', civka_r: 'R', civka_p: 'P', civka_n: 'N'}[p.typ];
+  if (zn) el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, zn);
+  if (p.typ === 'civka_neg') el(g, 'line', {class: 'prv', x1: cx - 3, y1: y + 6, x2: cx + 3, y2: y - 6});
+  if (p.typ === 'ret') {
+    el(g, 'rect', {class: 'maska', x: cx - 16, y: y - 8, width: 32, height: 16});
+    el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, 'RET');
+    if (p.operand) popis(g, cx, y - 13, p.operand);
+    return;
+  }
+  popis(g, cx, y - 13, p.operand);
+}
+function porovnani(g, d, p) {
+  const {cx, y} = d;
+  el(g, 'rect', {class: 'maska', x: cx - 16, y: y - 10, width: 32, height: 20});
+  el(g, 'line', {class: 'prv', x1: cx - 15, y1: y - 9, x2: cx - 15, y2: y + 9});
+  el(g, 'line', {class: 'prv', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
+  el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, p.op);
+  popis(g, cx, y - 13, p.in1);
+  if (p.sablona) el(g, 'text', {x: cx, y: y + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.sablona);
+  popis(g, cx, y + L * (p.sablona ? 2 : 1) + 4, p.in2);
+}
+function negace(g, d) {
+  const {cx, y} = d;
+  el(g, 'rect', {class: 'maska', x: cx - 16, y: y - 10, width: 32, height: 20});
+  el(g, 'line', {class: 'prv', x1: cx - 15, y1: y - 9, x2: cx - 15, y2: y + 9});
+  el(g, 'line', {class: 'prv', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
+  el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, 'NOT');
+}
+function box(g, d, p) {
+  const {bx, bw, y_hl, radky, radky_r} = d;
+  const top = y_hl - 13, spodek = Math.max(...radky, ...radky_r) + 11;
+  el(g, 'rect', {class: 'box', x: bx, y: top, width: bw, height: spodek - top, rx: 2});
+  el(g, 'text', {x: bx + bw / 2, y: y_hl + 4, 'text-anchor': 'middle', class: 'titul'}, p.nazev || '');
+  if (p.sablona) el(g, 'text', {x: bx + bw / 2, y: y_hl + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.sablona);
+  if (p.instance) popis(g, bx + bw / 2, top - 6, p.instance);
+  // vstupy: [napájení, ...vstupy]
+  [{pin: p.napajeni[0], operand: null}, ...p.vstupy].forEach((pin, i) => {
+    const yy = radky[i];
+    const privod = String(pin.operand).startsWith('wire#');   // přívod: vodič vede až z buňky vlevo
+    if (i > 0) el(g, 'line', {class: 'vod', x1: privod ? d.x : bx - 12, y1: yy, x2: bx, y2: yy});
+    if (pin.pin) el(g, 'text', {x: bx + 5, y: yy + 4, class: 'pin'}, pin.pin);
+    if (i > 0 && !privod) popis(g, bx - 15, yy + 4, pin.operand, 'end');
+  });
+  [{pin: p.napajeni[1], operand: null}, ...p.vystupy].forEach((pin, i) => {
+    const yy = radky_r[i];
+    if (i > 0) el(g, 'line', {class: 'vod', x1: bx + bw, y1: yy, x2: bx + bw + 12, y2: yy});
+    if (pin.pin) el(g, 'text', {x: bx + bw - 5, y: yy + 4, 'text-anchor': 'end', class: 'pin'}, pin.pin);
+    if (i > 0) popis(g, bx + bw + 15, yy + 4, pin.operand, 'start');
+  });
+  if (p.pod) popis(g, bx + bw / 2, spodek + 14, p.pod);
+}
+function kresli(net) {
+  const k = net.kresba;
+  const prvky = Object.fromEntries(net.prvky.map(p => [p.id, p]));
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', k.sirka); svg.setAttribute('height', k.vyska);
+  svg.setAttribute('viewBox', `0 0 ${k.sirka} ${k.vyska}`);
+  const vod = el(svg, 'g', {});
+  for (const [x1, y1, x2, y2] of k.cary) el(vod, 'line', {class: 'vod', x1, y1, x2, y2});
+  const gp = el(svg, 'g', {});
+  for (const d of k.prvky) {
+    const p = prvky[d.id];
+    const g = el(gp, 'g', {'data-id': d.id});
+    if (p.typ.startsWith('kontakt')) kontakt(g, d, p);
+    else if (p.typ.startsWith('civka') || p.typ === 'ret') civka(g, d, p);
+    else if (p.typ === 'porovnani') porovnani(g, d, p);
+    else if (p.typ === 'not') negace(g, d);
+    else box(g, d, p);
+  }
+  el(svg, 'line', {class: 'lista', x1: k.lista.x, y1: k.lista.y1, x2: k.lista.x, y2: k.lista.y2});
+  return svg;
+}
+function popisPrvku(p) {
+  if (!p) return '?';
+  if (p.typ === 'box') return `[${p.instance ? p.instance + ' ' : ''}${p.nazev}(${p.vstupy.map(x => x.pin + ':=' + x.operand).concat(p.vystupy.map(x => x.pin + '=>' + x.operand)).join(', ')})]`;
+  if (p.typ === 'porovnani') return `|${p.in1} ${p.op} ${p.in2}|`;
+  const zn = {kontakt: '| |', kontakt_nc: '|/|', kontakt_p: '|P|', kontakt_n: '|N|', civka: '( )', civka_s: '(S)',
+              civka_r: '(R)', civka_neg: '(/)', ret: '(RET)', not: '|NOT|'}[p.typ] || p.typ;
+  return `${zn} ${p.operand || ''}`;
+}
+function seznamRungu(net) {
+  const prvky = Object.fromEntries(net.prvky.map(p => [p.id, p]));
+  const div = document.createElement('div');
+  div.className = 'rungy';
+  for (const r of net.rungy) {
+    const casti = [r.z].concat(r.cesta.map(c => c.startsWith('wire#') ? '● ' + c.slice(5) : popisPrvku(prvky[c])));
+    if (r.do) casti.push('→ ' + r.do);
+    const d = document.createElement('div');
+    d.textContent = casti.join('  —  ');
+    div.appendChild(d);
+  }
+  return div;
+}
+
+// ---------- stránka ----------
+async function vyberExportu() {
+  const ex = await api('/api/exporty');
+  let h = '<h1>Exporty</h1>';
+  for (const p of ex.projekty) {
+    h += `<h2>${esc(p.projekt)}</h2><ul class="vyber">` +
+      p.bloky.map(b => `<li><a href="${odkaz({projekt: p.projekt, blok: b.blok, nw: null})}">${esc(b.blok)}</a></li>`).join('') + '</ul>';
+  }
+  $('obsah').innerHTML = h || 'Žádné exporty.';
+}
+async function start() {
+  if (q.get('snimek') === '1') document.body.classList.add('snimek');
+  const projekt = q.get('projekt'), blok = q.get('blok');
+  if (!projekt || !blok) return vyberExportu();
+  const nw = parseInt(q.get('nw') || '1', 10);
+  const b = await api(`/api/blok?projekt=${encodeURIComponent(projekt)}&blok=${encodeURIComponent(blok)}`);
+  $('info').textContent = `${b.projekt} · export ${b.ts} · ${b.druh}${b.cislo != null ? b.cislo : ''} "${b.blok}"`;
+  document.title = `LADEditor — ${b.blok} NW${nw}`;
+  $('nw').innerHTML = `<h2>${esc(b.blok)} — networky</h2>` + b.networky.map(n =>
+    `<a class="${n.nw === nw ? 'akt' : ''}" href="${odkaz({nw: n.nw})}"><span class="c">NW ${n.nw}</span>${esc(n.titulek || '')}` +
+    `${n.jazyk !== 'LAD' ? `<span class="j">${esc(n.jazyk || '?')}</span>` : ''}</a>`).join('');
+  const sirka = Math.max(600, $('obsah').clientWidth - 40);   // cívky k pravému okraji okna jako v TIA
+  const net = await api(`/api/network?projekt=${encodeURIComponent(projekt)}&blok=${encodeURIComponent(blok)}&nw=${nw}&sirka=${sirka}`);
+  const m = $('obsah');
+  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.titulek || '')}</h1>` +
+    (net.komentar ? `<p class="komentar">${esc(net.komentar)}</p>` : '') +
+    net.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('');
+  if (net.kresba) {
+    const pl = document.createElement('div');
+    pl.className = 'platno';
+    pl.appendChild(kresli(net));
+    m.appendChild(pl);
+  } else if (net.rungy.length) {
+    m.appendChild(seznamRungu(net));
+  } else if (net.text) {
+    const pre = document.createElement('pre');
+    pre.textContent = net.text;
+    m.appendChild(pre);
+  }
+  document.body.dataset.hotovo = '1';
+}
+start().catch(e => {
+  $('obsah').innerHTML = `<div class="varovani">⚠ ${esc(e.message)}</div>`;
+  document.body.dataset.hotovo = '1';
+});
+</script>
+</body>
+</html>
