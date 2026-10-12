@@ -1,0 +1,113 @@
+{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_BlockNumber := "20";
+    S7_Version := "0.1"
+}
+FUNCTION "FC_Vetve" : Void
+    VAR_TEMP
+        Pom : Int;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Senzor_A" )
+            wire#w1
+            Contact( "Senzor_B" )
+            wire#w2
+            Coil( "Vystup_1" )
+        END_RUNG
+        RUNG wire#w1
+            Contact( "Senzor_C" )
+        END_RUNG wire#w2
+        RUNG wire#powerrail
+            Contact( "Tlacitko_1" )
+            I_Contact( "Tlacitko_2" )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_2"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Cyklus_Start" )
+            wire#w1
+            Coil( "Cyklus_Bezi" )
+        END_RUNG
+        RUNG wire#w1
+            Move(
+                in := 0,
+                out1 => #Pom
+            )
+        END_RUNG
+        RUNG wire#w1
+            I_Contact( "Dvere_Zavreny" )
+            R_Coil( "Povoleni_Ruka" )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_3"
+    }
+    NETWORK
+        RUNG "Senzor_A"
+            O( in2 := "Senzor_B" )
+            Coil( "Vystup_2" )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "M_1" )
+            wire#w1
+            Contact( "M_2" )
+            wire#w3
+            Coil( "Most" )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "M_3" )
+            wire#w2
+            Contact( "M_4" )
+        END_RUNG wire#w3
+        RUNG wire#w1
+            Contact( "M_5" )
+        END_RUNG wire#w2
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_5"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Takt" )
+            
+            Move(
+                in := #Pom,
+                out1 => "DB_Stroj".Kopie
+            )
+            { S7_Templates := "SrcType := Int" }
+            Add(
+                in1 := #Pom,
+                in2 := 1,
+                out => #Pom
+            )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "Senzor_C" )
+            { S7_Templates := "time_type := Time" }
+            "DB_T_Dobeh".TOF(
+                pt := T#500ms,
+                et =>  
+            )
+            Coil( "Dobeh" )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION

@@ -1,0 +1,31 @@
+{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_BlockNumber := "11";
+    S7_Version := "0.1"
+}
+FUNCTION_BLOCK "FB_Pas"
+    VAR_INPUT
+        Povoleni : Bool;
+        Smer : Bool;
+        Rychlost : Real;
+        Reset : Bool;
+    END_VAR
+    VAR_OUTPUT
+        Bezi : Bool;
+        Porucha : Bool;
+        Stav : Int;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Povoleni )
+            I_Contact( #Porucha )
+            Coil( #Bezi )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION_BLOCK

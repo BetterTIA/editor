@@ -1,0 +1,11 @@
+MultiLingualTexts:
+  - id: MLC_1
+    en-US: Vnořená větev a OR na začátku
+  - id: MLC_2
+    en-US: Výstupní větve s boxem
+  - id: MLC_3
+    en-US: FBD network (M1 nekreslí)
+  - id: MLC_4
+    en-US: Můstek — nejde rozložit
+  - id: MLC_5
+    en-US: Dva rungy, řetěz boxů

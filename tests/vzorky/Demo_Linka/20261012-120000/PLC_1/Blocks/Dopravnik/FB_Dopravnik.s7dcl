@@ -1,0 +1,162 @@
+{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_BlockNumber := "10";
+    S7_Version := "0.1"
+}
+FUNCTION_BLOCK "FB_Dopravnik"
+    VAR_INPUT
+        Start : Bool;
+        Stop : Bool;
+        Smer : Bool;
+        Rychlost : Real;
+    END_VAR
+    VAR_OUTPUT
+        Motor : Bool;
+        Porucha : Bool;
+    END_VAR
+    VAR
+        {
+            S7_Setpoint := "False"
+        }
+        T_Rozbeh : TON_TIME;
+        Rozbeh_Cas : Time;
+        Rozbehnuto : Bool;
+        Pripraven : Bool;
+        Jede : Bool;
+        Kvitace_P : Bool;
+        Teplota_Vysoka : Bool;
+        Pas_Bezi : Bool;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Start_Povoleno" )
+            Contact( "DB_Stroj".Bezpecnost_OK )
+            Contact( "DB_Stroj".Rezim_Auto )
+            Coil( #Pripraven )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_2";
+        S7_NetworkComment := "MLC_2k"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Start )
+            wire#w1
+            I_Contact( #Stop )
+            Contact( #Pripraven )
+            Coil( #Motor )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Motor )
+        END_RUNG wire#w1
+        RUNG wire#powerrail
+            Contact( "DB_Stroj".Servis_Start )
+            I_Contact( "DB_Stroj".Servis_Blokace )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_3"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Motor )
+            { S7_Templates := "time_type := Time" }
+            #T_Rozbeh.TON(
+                pt := T#2s,
+                et => #Rozbeh_Cas
+            )
+            Coil( #Rozbehnuto )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Motor )
+            "DB_Pas1"(
+                Povoleni := wire#w1,
+                Smer := #Smer,
+                Rychlost := "DB_Stroj".Rychlost,
+                Reset :=  ,
+                Bezi => #Pas_Bezi,
+                Porucha => "Porucha_Pas1",
+                Stav =>  
+            )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Rozbehnuto )
+            I_Contact( "Nouzovy_Stop" )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_5"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            { S7_Templates := "SrcType := Int" }
+            NE_Contact(
+                in1 := "DB_Stroj".Rezim,
+                in2 := 0
+            )
+            { S7_Templates := "SrcType := Real" }
+            GT_Contact(
+                in1 := #Rychlost,
+                in2 := 0.5
+            )
+            Coil( #Jede )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_6"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Motor )
+            
+            Move(
+                in := 1500,
+                out1 => "DB_Stroj".Zadana_Rychlost
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_7"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Porucha_Pas1" )
+            wire#w1
+            S_Coil( #Porucha )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Teplota_Vysoka )
+        END_RUNG wire#w1
+        RUNG wire#w1
+            Coil( "Hukacka" )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "Kvitace" )
+            P_Trig( #Kvitace_P )
+            R_Coil( #Porucha )
+        END_RUNG
+    END_NETWORK
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+        END_RUNG
+    END_NETWORK
+END_FUNCTION_BLOCK

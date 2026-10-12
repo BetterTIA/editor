@@ -1,0 +1,6 @@
+{
+    S7_Optimized := "TRUE";
+    S7_Version := "0.1"
+}
+DATA_BLOCK "DB_Pas1" : "FB_Pas"
+END_DATA_BLOCK

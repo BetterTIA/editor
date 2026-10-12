@@ -1,0 +1,19 @@
+MultiLingualTexts:
+  - id: MLC_1
+    en-US: Připravenost dopravníku
+  - id: MLC_2
+    en-US: Samodrž motoru
+  - id: MLC_2k
+    en-US: |-
+      Start nebo servisní start, Stop rozpíná.
+      Přídržná větev přes Motor.
+  - id: MLC_3
+    en-US: Rozběh
+  - id: MLC_4
+    en-US: 'Volání pásu (instance DB_Pas1)'
+  - id: MLC_5
+    en-US: Porovnání režimu a rychlosti
+  - id: MLC_6
+    en-US: Zadání rychlosti
+  - id: MLC_7
+    en-US: Poruchy a kvitace
