@@ -58,10 +58,50 @@ pre, .rungy { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
 .rungy div { border-bottom: 1px dashed var(--hrana); padding: 2px 0; }
 ul.vyber { list-style: none; padding: 0; columns: 3 220px; }
 ul.vyber a { color: var(--text); }
+/* M2: rozdíl a stavy */
+:root { --pridany: #4ade80; --zmeneny: #fb923c; --smazany: #f87171;
+        --s-Proposal: #a8a8a8; --s-Approved: #00D7FF; --s-Signed: #c084fc; --s-Uploaded: #facc15; --s-Tested: #4ade80; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --pridany: #15803d; --zmeneny: #c2410c; --smazany: #b91c1c;
+    --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Uploaded: #a16207; --s-Tested: #15803d; }
+}
+:root[data-theme="light"] { --pridany: #15803d; --zmeneny: #c2410c; --smazany: #b91c1c;
+  --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Uploaded: #a16207; --s-Tested: #15803d; }
+svg g.d-pridany .prv, svg g.d-pridany .box { stroke: var(--pridany); stroke-width: 2.5; }
+svg g.d-pridany text, svg g.d-pridany .titul { fill: var(--pridany); font-weight: bold; }
+svg g.d-zmeneny .prv, svg g.d-zmeneny .box { stroke: var(--zmeneny); stroke-width: 2.5; }
+svg g.d-zmeneny text, svg g.d-zmeneny .titul { fill: var(--zmeneny); font-weight: bold; }
+svg g.d-smazany .prv, svg g.d-smazany .box { stroke: var(--smazany); stroke-dasharray: 4 3; }
+svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decoration: line-through; }
+.strom { padding-bottom: 6px; border-bottom: 1px solid var(--hrana); }
+.strom .u0, .strom .u1, .strom .u2 { padding: 3px 12px; color: var(--tlum); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strom .u0 { color: var(--text); font-weight: 600; }
+.strom .u1 { padding-left: 22px; }
+.strom .u2 { padding-left: 32px; }
+.strom a.u3 { padding-left: 42px; font-size: 13px; }
+.strom a.u4 { padding-left: 54px; font-size: 13px; }
+.strom .prazdno { padding: 3px 12px; color: var(--tlum); font-size: 12px; margin: 0; }
+.stav { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; font-weight: 600; margin: 0 6px;
+        border: 1px solid var(--sc); color: var(--sc); }
+.s-Proposal { --sc: var(--s-Proposal); } .s-Approved { --sc: var(--s-Approved); } .s-Signed { --sc: var(--s-Signed); }
+.s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); }
+.hlavicka { color: var(--tlum); margin: 2px 0 8px; }
+.hlavicka b { color: var(--text); font-weight: 600; }
+.tlacitka { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.tlacitka button { font: inherit; padding: 5px 14px; border-radius: 4px; border: 1px solid var(--akcent); background: transparent;
+                   color: var(--akcent); cursor: pointer; }
+.tlacitka button.vpred { background: var(--akcent); color: var(--bg); font-weight: 600; }
+.tlacitka button:disabled { border-color: var(--hrana); background: transparent; color: var(--tlum); cursor: not-allowed; }
+.kontroly { font-size: 13px; margin: 6px 0 10px; }
+.kontroly h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 0 0 4px; }
+.kontroly .ok { color: var(--pridany); } .kontroly .ne { color: var(--smazany); }
+.legenda { font-size: 12px; color: var(--tlum); margin: 4px 0; display: flex; gap: 14px; }
+.legenda span::before { content: '■ '; } .legenda .p { color: var(--pridany); } .legenda .z { color: var(--zmeneny); }
+.legenda .s { color: var(--smazany); }
 </style>
 </head>
 <body>
-<header><b>LADEditor</b><span class="info" id="info">M1 — prohlížeč</span></header>
+<header><b>LADEditor</b><span class="info" id="info">prohlížeč a úpravy</span></header>
 <div class="hlavni">
   <aside id="nw"></aside>
   <main id="obsah"></main>
@@ -172,8 +212,9 @@ function box(g, d, p) {
   });
   if (p.pod) popis(g, bx + bw / 2, spodek + 14, p.pod);
 }
-function kresli(net) {
+function kresli(net, rozdil) {
   const k = net.kresba;
+  rozdil = rozdil || {};
   const prvky = Object.fromEntries(net.prvky.map(p => [p.id, p]));
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('width', k.sirka); svg.setAttribute('height', k.vyska);
@@ -183,7 +224,7 @@ function kresli(net) {
   const gp = el(svg, 'g', {});
   for (const d of k.prvky) {
     const p = prvky[d.id];
-    const g = el(gp, 'g', {'data-id': d.id});
+    const g = el(gp, 'g', {'data-id': d.id, class: rozdil[d.id] ? 'd-' + rozdil[d.id] : ''});
     if (p.typ.startsWith('kontakt')) kontakt(g, d, p);
     else if (p.typ.startsWith('civka') || p.typ === 'ret') civka(g, d, p);
     else if (p.typ === 'porovnani') porovnani(g, d, p);
@@ -191,6 +232,7 @@ function kresli(net) {
     else box(g, d, p);
   }
   el(svg, 'line', {class: 'lista', x1: k.lista.x, y1: k.lista.y1, x2: k.lista.x, y2: k.lista.y2});
+  if (k.prazdny) el(svg, 'text', {x: k.lista.x + 14, y: k.vyska / 2 + 4, class: 'prazdny'}, '(prázdný network)');
   return svg;
 }
 function popisPrvku(p) {
@@ -225,35 +267,126 @@ async function vyberExportu() {
   }
   $('obsah').innerHTML = h || 'Žádné exporty.';
 }
-async function start() {
-  if (q.get('snimek') === '1') document.body.classList.add('snimek');
-  const projekt = q.get('projekt'), blok = q.get('blok');
-  if (!projekt || !blok) return vyberExportu();
-  const nw = parseInt(q.get('nw') || '1', 10);
-  const b = await api(`/api/blok?projekt=${encodeURIComponent(projekt)}&blok=${encodeURIComponent(blok)}`);
-  $('info').textContent = `${b.projekt} · export ${b.ts} · ${b.druh}${b.cislo != null ? b.cislo : ''} "${b.blok}"`;
-  document.title = `LADEditor — ${b.blok} NW${nw}`;
-  $('nw').innerHTML = `<h2>${esc(b.blok)} — networky</h2>` + b.networky.map(n =>
-    `<a class="${n.nw === nw ? 'akt' : ''}" href="${odkaz({nw: n.nw})}"><span class="c">NW ${n.nw}</span>${esc(n.titulek || '')}` +
+const enc = encodeURIComponent;
+const sirkaPlatna = () => Math.max(600, $('obsah').clientWidth - 40);   // cívky k pravému okraji okna jako v TIA
+
+// strom úprav: projekt → kolo → blok → NW → úprava
+function stromHtml(st, aktId) {
+  let h = '<h2>Úpravy</h2><div class="strom">';
+  if (!st.projekty.length) h += '<p class="prazdno">Zatím žádné úpravy.</p>';
+  const skup = (pole, klic) => {
+    const m = new Map();
+    for (const x of pole) { const k = klic(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+    return m;
+  };
+  for (const p of st.projekty) {
+    h += `<div class="u0">${esc(p.projekt)}</div>`;
+    for (const [kolo, uk] of skup(p.upravy, u => u.kolo)) {
+      h += `<div class="u1">Kolo: ${esc(kolo)}</div>`;
+      for (const [blok, ub] of skup(uk, u => u.blok)) {
+        const u0 = ub[0];
+        h += `<div class="u2">${esc(u0.druh || '')}${u0.cislo_bloku ?? ''} "${esc(blok)}"</div>`;
+        const nws = [...skup(ub, u => u.nw)].sort((a, b) => a[0] - b[0]);
+        for (const [nw, un] of nws) {
+          h += `<a class="u3" href="?projekt=${enc(p.projekt)}&blok=${enc(blok)}&nw=${nw}"><span class="c">NW ${nw}</span>${esc(un[0].titulek || '')}</a>`;
+          for (const u of un) {
+            h += `<a class="u4 ${u.id === aktId ? 'akt' : ''}" href="?uprava=${enc(u.id)}"><span class="c">${esc(u.id)}</span>` +
+                 `<span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span>${esc(u.poznamka || '')}</a>`;
+          }
+        }
+      }
+    }
+  }
+  return h + '</div>';
+}
+async function stromNacti(aktId) {
+  try { return stromHtml(await api('/api/stav'), aktId); }
+  catch (e) { return `<h2>Úpravy</h2><p class="varovani">⚠ ${esc(e.message)}</p>`; }
+}
+function networkyHtml(b, nw, url) {
+  return `<h2>${esc(b.blok)} — networky</h2>` + b.networky.map(n =>
+    `<a class="${n.nw === nw ? 'akt' : ''}" href="${url(n.nw)}"><span class="c">NW ${n.nw}</span>${esc(n.titulek || '')}` +
     `${n.jazyk !== 'LAD' ? `<span class="j">${esc(n.jazyk || '?')}</span>` : ''}</a>`).join('');
-  const sirka = Math.max(600, $('obsah').clientWidth - 40);   // cívky k pravému okraji okna jako v TIA
-  const net = await api(`/api/network?projekt=${encodeURIComponent(projekt)}&blok=${encodeURIComponent(blok)}&nw=${nw}&sirka=${sirka}`);
-  const m = $('obsah');
-  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.titulek || '')}</h1>` +
-    (net.komentar ? `<p class="komentar">${esc(net.komentar)}</p>` : '') +
-    net.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('');
+}
+function platno(m, net, rozdil) {
   if (net.kresba) {
     const pl = document.createElement('div');
     pl.className = 'platno';
-    pl.appendChild(kresli(net));
+    pl.appendChild(kresli(net, rozdil));
     m.appendChild(pl);
-  } else if (net.rungy.length) {
+  } else if (net.rungy && net.rungy.length) {
     m.appendChild(seznamRungu(net));
   } else if (net.text) {
     const pre = document.createElement('pre');
     pre.textContent = net.text;
     m.appendChild(pre);
   }
+}
+
+async function zobrazNetwork(projekt, blok) {
+  const nw = parseInt(q.get('nw') || '1', 10);
+  const [strom, b] = await Promise.all([stromNacti(null), api(`/api/blok?projekt=${enc(projekt)}&blok=${enc(blok)}`)]);
+  $('info').textContent = `${b.projekt} · export ${b.ts} · ${b.druh}${b.cislo != null ? b.cislo : ''} "${b.blok}"`;
+  document.title = `LADEditor — ${b.blok} NW${nw}`;
+  $('nw').innerHTML = strom + networkyHtml(b, nw, n => odkaz({nw: n}));
+  const net = await api(`/api/network?projekt=${enc(projekt)}&blok=${enc(blok)}&nw=${nw}&sirka=${sirkaPlatna()}`);
+  const m = $('obsah');
+  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.titulek || '')}</h1>` +
+    (net.komentar ? `<p class="komentar">${esc(net.komentar)}</p>` : '') +
+    net.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('');
+  platno(m, net);
+}
+
+async function zmenStav(uid, stav) {
+  const r = await fetch(`/api/uprava/${enc(uid)}/stav`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                    body: JSON.stringify({stav, kdo: 'Honza'})});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.chyba || r.status);
+}
+
+async function zobrazUpravu(uid, chyba) {
+  const d = await api(`/api/uprava/${enc(uid)}?sirka=${sirkaPlatna()}`);
+  const u = d.uprava;
+  $('info').textContent = `${u.projekt} · úprava ${u.id} · export před ${u.pred.export_ts}`;
+  document.title = `LADEditor — ${u.id} ${u.blok} NW${u.nw}`;
+  let vlevo = await stromNacti(u.id);
+  try {
+    const b = await api(`/api/blok?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}`);
+    vlevo += networkyHtml(b, u.nw, n => `?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}&nw=${n}`);
+  } catch (e) { /* blok už v exportu není: strom stačí */ }
+  $('nw').innerHTML = vlevo;
+  const m = $('obsah');
+  const tlSigned = d.dalsi === 'Signed' && !d.signed_povolen;
+  m.innerHTML =
+    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
+    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span> kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas)}</div>` +
+    (u.poznamka ? `<p class="komentar">${esc(u.poznamka)}</p>` : '') +
+    `<div class="tlacitka">` +
+    (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
+    (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlSigned ? 'disabled title="Signed až po kontrole exportem se shodou (POST /api/kontrola)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
+    `</div>` +
+    (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
+    `<div class="kontroly"><h3>Kontroly exportem</h3>` +
+    (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
+      `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas)} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
+      : '<div>Zatím žádná — Signed se odemkne po kontrole se shodou.</div>') + `</div>` +
+    d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
+    `<div class="legenda">Model „po“ proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
+  for (const b of m.querySelectorAll('button[data-stav]')) {
+    b.onclick = async () => {
+      try { await zmenStav(u.id, b.dataset.stav); await zobrazUpravu(uid); }
+      catch (e) { await zobrazUpravu(uid, e.message); }
+    };
+  }
+  platno(m, d, d.rozdil);
+}
+
+async function start() {
+  if (q.get('snimek') === '1') document.body.classList.add('snimek');
+  const projekt = q.get('projekt'), blok = q.get('blok');
+  if (q.get('uprava')) await zobrazUpravu(q.get('uprava'));
+  else if (projekt && blok) await zobrazNetwork(projekt, blok);
+  else { $('nw').innerHTML = await stromNacti(null); await vyberExportu(); }
   document.body.dataset.hotovo = '1';
 }
 start().catch(e => {
