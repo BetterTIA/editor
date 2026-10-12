@@ -98,6 +98,47 @@ svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decora
 .legenda { font-size: 12px; color: var(--tlum); margin: 4px 0; display: flex; gap: 14px; }
 .legenda span::before { content: '■ '; } .legenda .p { color: var(--pridany); } .legenda .z { color: var(--zmeneny); }
 .legenda .s { color: var(--smazany); }
+/* M3: editor */
+.hlavni.edit { grid-template-columns: 280px 1fr 250px; }
+#paleta { border-left: 1px solid var(--hrana); border-right: 0; }
+#paleta input { width: calc(100% - 24px); margin: 4px 12px 6px; font: inherit; padding: 4px 8px; background: var(--bg);
+                color: var(--text); border: 1px solid var(--hrana); border-radius: 4px; }
+#paleta .pol { display: flex; gap: 8px; align-items: baseline; padding: 4px 12px; cursor: grab; border-left: 3px solid transparent;
+               white-space: nowrap; overflow: hidden; }
+#paleta .pol:hover { background: var(--vyber); }
+#paleta .pol.akt { border-left-color: var(--akcent); background: var(--vyber); }
+#paleta .pol b { font: 600 12px Consolas, monospace; color: var(--akcent); min-width: 64px; }
+#paleta .pol span { color: var(--tlum); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.nastroje { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.nastroje button { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 4px; border: 1px solid var(--hrana);
+                   background: var(--panel); color: var(--text); cursor: pointer; }
+.nastroje button:hover:not(:disabled) { border-color: var(--akcent); }
+.nastroje button.akt { border-color: var(--akcent); color: var(--akcent); }
+.nastroje button.hl { background: var(--akcent); color: var(--bg); border-color: var(--akcent); font-weight: 600; }
+.nastroje button:disabled { color: var(--tlum); cursor: not-allowed; }
+.nastroje input { font: inherit; font-size: 13px; padding: 3px 8px; width: 110px; background: var(--bg); color: var(--text);
+                  border: 1px solid var(--hrana); border-radius: 4px; }
+.rezim { color: var(--akcent); font-size: 13px; min-height: 19px; }
+.rezim.zprava { color: var(--pridany); }
+svg .misto { fill: var(--akcent); fill-opacity: .25; stroke: var(--akcent); stroke-width: 2; cursor: pointer; }
+svg .misto:hover, svg .misto.blizko { fill-opacity: .9; }
+svg .misto.zvolene { fill: var(--zmeneny); stroke: var(--zmeneny); fill-opacity: .9; }
+svg .hit { fill: transparent; cursor: pointer; }
+svg .ram-vyber { fill: var(--akcent); fill-opacity: .10; stroke: var(--akcent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .ram-chyba { fill: none; stroke: var(--varovani); stroke-width: 2; }
+.editor-spod { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 16px; margin-top: 10px; }
+.editor-spod h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 0 0 6px; }
+.chyby div { color: var(--varovani); padding: 3px 0; cursor: pointer; font-size: 13px; }
+.chyby .ok { color: var(--pridany); cursor: default; }
+.editor-spod > div { min-width: 0; }
+.vlastnosti table { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
+.vlastnosti td { padding: 2px 6px 2px 0; }
+.vlastnosti td:first-child { color: var(--tlum); font-family: Consolas, monospace; white-space: nowrap; width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.vlastnosti input, .vlastnosti select { width: 100%; font: 13px Consolas, monospace; padding: 3px 6px; background: var(--bg);
+                    color: var(--text); border: 1px solid var(--hrana); border-radius: 3px; }
+.vlastnosti input:focus { border-color: var(--akcent); outline: none; }
+.vlastnosti .sekce td { color: var(--akcent); font-family: inherit; padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
+.znacka-chyb { color: var(--varovani); font-weight: 600; margin-left: 8px; }
 </style>
 </head>
 <body>
@@ -105,7 +146,9 @@ svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decora
 <div class="hlavni">
   <aside id="nw"></aside>
   <main id="obsah"></main>
+  <aside id="paleta" hidden></aside>
 </div>
+<datalist id="operandy"></datalist>
 <script>
 'use strict';
 const q = new URLSearchParams(location.search);
@@ -281,8 +324,8 @@ function stromHtml(st, aktId) {
   };
   for (const p of st.projekty) {
     h += `<div class="u0">${esc(p.projekt)}</div>`;
-    for (const [kolo, uk] of skup(p.upravy, u => u.kolo)) {
-      h += `<div class="u1">Kolo: ${esc(kolo)}</div>`;
+    for (const [, uk] of skup(p.upravy, u => String(u.kolo ?? '').trim().toLowerCase())) {
+      h += `<div class="u1">Kolo: ${esc(String(uk[0].kolo ?? '').trim())}</div>`;
       for (const [blok, ub] of skup(uk, u => u.blok)) {
         const u0 = ub[0];
         h += `<div class="u2">${esc(u0.druh || '')}${u0.cislo_bloku ?? ''} "${esc(blok)}"</div>`;
@@ -299,8 +342,9 @@ function stromHtml(st, aktId) {
   }
   return h + '</div>';
 }
+let posledniStav = {projekty: []};
 async function stromNacti(aktId) {
-  try { return stromHtml(await api('/api/stav'), aktId); }
+  try { posledniStav = await api('/api/stav'); return stromHtml(posledniStav, aktId); }
   catch (e) { return `<h2>Úpravy</h2><p class="varovani">⚠ ${esc(e.message)}</p>`; }
 }
 function networkyHtml(b, nw, url) {
@@ -334,7 +378,29 @@ async function zobrazNetwork(projekt, blok) {
   m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.titulek || '')}</h1>` +
     (net.komentar ? `<p class="komentar">${esc(net.komentar)}</p>` : '') +
     net.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('');
+  if (net.jazyk === 'LAD' && net.kresba) {
+    const pp = posledniStav.projekty.find(p => p.projekt === projekt);
+    const kolo = pp && pp.upravy.length ? pp.upravy[pp.upravy.length - 1].kolo : 'Kolo 1';
+    const d = document.createElement('div');
+    d.className = 'nastroje';
+    d.innerHTML = `<button class="hl" id="navrh">Navrhnout úpravu</button> kolo <input id="navrh-kolo" value="${esc(kolo)}">` +
+                  `<span class="rezim" id="navrh-chyba"></span>`;
+    m.appendChild(d);
+    $('navrh').onclick = async () => {
+      try {
+        const u = await apiJson('POST', '/api/uprava', {projekt, kolo: $('navrh-kolo').value.trim() || 'Kolo 1', blok, nw,
+                                 po: {prvky: net.prvky, rungy: net.rungy}, poznamka: ''});
+        location.href = `?uprava=${enc(u.id)}&upravit=1`;
+      } catch (e) { $('navrh-chyba').textContent = '⚠ ' + e.message; }
+    };
+  }
   platno(m, net);
+}
+async function apiJson(metoda, cesta, telo) {
+  const r = await fetch(cesta, {method: metoda, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(telo)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.chyba || r.status);
+  return j;
 }
 
 async function zmenStav(uid, stav) {
@@ -359,19 +425,22 @@ async function zobrazUpravu(uid, chyba) {
   const tlSigned = d.dalsi === 'Signed' && !d.signed_povolen;
   m.innerHTML =
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
-    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span> kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas.replace('T', ' '))}</div>` +
+    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span>${d.chyby.length ? `<span class="znacka-chyb">⚠ ${nChyb(d.chyby.length)}</span> · ` : ''} kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas.replace('T', ' '))}</div>` +
     (u.poznamka ? `<p class="komentar">${esc(u.poznamka)}</p>` : '') +
     `<div class="tlacitka">` +
     (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
-    (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlSigned ? 'disabled title="Signed až po kontrole exportem se shodou (POST /api/kontrola)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
+    (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlSigned ? 'disabled title="Signed až po poslední kontrole exportem se shodou (POST /api/kontrola)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
+    (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : '') +
     `</div>` +
+    (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla LAD (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
     (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
     `<div class="kontroly"><h3>Kontroly exportem</h3>` +
     (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
       `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
-      : '<div>Zatím žádná — Signed se odemkne po kontrole se shodou.</div>') + `</div>` +
+      : '<div>Zatím žádná — Signed se odemkne, když poslední kontrola je shoda.</div>') + `</div>` +
     d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
     `<div class="legenda">Model „po“ proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
+  if ($('upravit')) $('upravit').onclick = () => { location.href = `?uprava=${enc(u.id)}&upravit=1`; };
   for (const b of m.querySelectorAll('button[data-stav]')) {
     b.onclick = async () => {
       try { await zmenStav(u.id, b.dataset.stav); await zobrazUpravu(uid); }
@@ -381,10 +450,315 @@ async function zobrazUpravu(uid, chyba) {
   platno(m, d, d.rozdil);
 }
 
+// ---------- M3: editor ----------
+const ed = {u: null, pred: null, po: null, hist: [], redo: [], vyber: null, vklad: null, vetev: null, res: null,
+            kat: null, zmeneno: false};
+const nChyb = n => `${n} ${n === 1 ? 'chyba' : n < 5 ? 'chyby' : 'chyb'} LAD`;
+const DRUH = p => /^civka|^ret$/.test(p.typ) ? 'civka' : p.typ === 'box' ? 'box' : 'kontakt';
+
+async function editor(uid) {
+  const d = await api(`/api/uprava/${enc(uid)}`);
+  const u = d.uprava;
+  if (u.stav !== 'Proposal') { await zobrazUpravu(uid, `Upravovat lze jen návrh ve stavu Proposal (teď ${u.stav}).`); return; }
+  Object.assign(ed, {u, pred: {prvky: u.pred.prvky, rungy: u.pred.rungy}, po: {prvky: u.po.prvky, rungy: u.po.rungy},
+                     hist: [], redo: [], vyber: null, vklad: null, vetev: null, zmeneno: false});
+  ed.kat = await api(`/api/katalog?projekt=${enc(u.projekt)}`);
+  $('info').textContent = `${u.projekt} · editor úpravy ${u.id} · export před ${u.pred.export_ts}`;
+  document.title = `LADEditor — upravit ${u.id}`;
+  let vlevo = await stromNacti(u.id);
+  try {
+    const b = await api(`/api/blok?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}`);
+    vlevo += networkyHtml(b, u.nw, n => `?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}&nw=${n}`);
+  } catch (e) { /* blok v exportu není */ }
+  $('nw').innerHTML = vlevo;
+  document.querySelector('.hlavni').classList.add('edit');
+  paleta();
+  operandy();
+  $('obsah').innerHTML =
+    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
+    `<div class="hlavicka"><span class="stav s-Proposal">Proposal</span><span id="ed-znacka"></span> kolo <b>${esc(u.kolo)}</b> · úprava v editoru</div>` +
+    `<div class="nastroje">` +
+    `<button id="ed-zpet" title="Ctrl+Z">↶ Zpět</button><button id="ed-znovu" title="Ctrl+Y">↷ Znovu</button>` +
+    `<button id="ed-vetev" title="vyber dvě místa v jednom rungu; prvek = vybraný v paletě, jinak spínací kontakt">Větev</button>` +
+    `<button id="ed-smaz" title="Delete">Smazat</button>` +
+    `<button id="ed-uloz" class="hl">Uložit návrh</button><button id="ed-zavri">Zavřít editor</button></div>` +
+    `<div class="rezim" id="ed-rezim"></div>` +
+    `<div class="platno" id="ed-platno"></div>` +
+    `<div class="legenda">Proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span>` +
+    ` · <span style="color:var(--varovani)">■ chyba pravidla</span></div>` +
+    `<div class="editor-spod"><div><h3>Pravidla LAD</h3><div class="chyby" id="ed-chyby"></div></div>` +
+    `<div><h3>Vlastnosti prvku</h3><div class="vlastnosti" id="ed-vlastnosti"></div></div></div>`;
+  $('ed-zpet').onclick = zpet;
+  $('ed-znovu').onclick = znovu;
+  $('ed-vetev').onclick = () => { ed.vetev = ed.vetev ? null : {od: null}; vykresli(); };
+  $('ed-smaz').onclick = () => { if (ed.vyber) smazVyber(); };
+  $('ed-uloz').onclick = uloz;
+  $('ed-zavri').onclick = () => {
+    if (!ed.zmeneno || confirm('Neuložené změny se zahodí. Zavřít?')) location.href = `?uprava=${enc(u.id)}`;
+  };
+  const pl = $('ed-platno');
+  pl.addEventListener('dragover', e => { if (ed.vklad) { e.preventDefault(); zvyrazniBlizke(nejblizsi(e)); } });
+  pl.addEventListener('dragleave', () => zvyrazniBlizke(null));
+  pl.addEventListener('drop', e => { e.preventDefault(); const m = nejblizsi(e); if (m) vlozNa(m); });
+  document.addEventListener('keydown', klavesy);
+  await prepocti([]);
+  // scénáře pro snímky / Clauda (headless nemá myš): &ops=<JSON operací>, &vyber=<id>, &paleta=<klíč>, &vetev=r,k
+  if (q.get('ops')) await prepocti(JSON.parse(q.get('ops')));
+  if (q.get('vyber')) { ed.vyber = q.get('vyber'); vykresli(); }
+  if (q.get('paleta')) vyberPalety(q.get('paleta'));
+  if (q.get('vetev')) { const [r, k] = q.get('vetev').split(',').map(Number); ed.vetev = {od: {r, k}}; vykresli(); }
+}
+
+async function prepocti(ops, bezHistorie) {
+  const res = await apiJson('POST', '/api/rozlozeni', {projekt: ed.u.projekt, pred: ed.pred, po: ed.po, ops, sirka: sirkaPlatna()});
+  if (ops.length && !bezHistorie) { ed.hist.push(ed.po); ed.redo = []; ed.zmeneno = true; }
+  if (ops.length) rezim('');
+  ed.po = res.po;
+  ed.res = res;
+  if (ed.vyber && !res.po.prvky.some(p => p.id === ed.vyber)) ed.vyber = null;
+  vykresli();
+  return res;
+}
+async function provedOp(op) {
+  try { return await prepocti([op]); }
+  catch (e) { rezim('⚠ ' + e.message); }
+}
+async function zpet() {
+  if (!ed.hist.length) return;
+  ed.redo.push(ed.po); ed.po = ed.hist.pop(); ed.zmeneno = true;
+  await prepocti([]);
+}
+async function znovu() {
+  if (!ed.redo.length) return;
+  ed.hist.push(ed.po); ed.po = ed.redo.pop(); ed.zmeneno = true;
+  await prepocti([]);
+}
+async function smazVyber() {
+  const id = ed.vyber;
+  ed.vyber = null;
+  await provedOp({typ: 'smaz', id});
+}
+async function uloz() {
+  try {
+    const r = await apiJson('POST', `/api/uprava/${enc(ed.u.id)}/po`, {po: ed.po});
+    ed.zmeneno = false;
+    rezim(`Uloženo ${new Date().toLocaleTimeString('cs-CZ')}` + (r.chyby.length ? ` — ${nChyb(r.chyby.length)} (hlavička úpravy je označí)` : ' — bez chyb'), true);
+  } catch (e) { rezim('⚠ Uložení selhalo: ' + e.message); }
+}
+function rezim(text, zprava) {
+  const r = $('ed-rezim');
+  if (!r) return;
+  r.textContent = text || '';
+  r.classList.toggle('zprava', !!zprava);
+}
+function klavesy(e) {
+  const vPoli = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName);
+  if (e.key === 'Escape') {
+    if (vPoli) { document.activeElement.blur(); return; }
+    if (ed.vklad || ed.vetev) { ed.vklad = null; ed.vetev = null; paletaAkt(); vykresli(); }
+    else if (ed.vyber) { ed.vyber = null; vykresli(); }
+    return;
+  }
+  if (vPoli) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? znovu() : zpet(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); znovu(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && ed.vyber) { e.preventDefault(); smazVyber(); }
+}
+
+// paleta: instrukce + bloky projektu, hledání podle názvu
+function paleta() {
+  const p = $('paleta');
+  p.hidden = false;
+  p.innerHTML = `<h2>Paleta</h2><input id="pal-hledat" placeholder="hledat (TON, FB_…, MOVE)" autocomplete="off"><div id="pal-seznam"></div>`;
+  $('pal-hledat').oninput = paletaSeznam;
+  paletaSeznam();
+}
+function paletaSeznam() {
+  const h = ($('pal-hledat').value || '').trim().toLowerCase();
+  const sk = new Map();
+  for (const x of ed.kat.instrukce) { if (!sk.has(x.skupina)) sk.set(x.skupina, []); sk.get(x.skupina).push(x); }
+  sk.set('Bloky projektu', ed.kat.bloky.map(b => ({klic: b.klic, nazev: b.nazev, popis: `${b.druh}${b.cislo ?? ''}` +
+          (b.instance.length ? ' · ' + b.instance.join(', ') : '')})));
+  let html = '';
+  for (const [skup, pol] of sk) {
+    const f = pol.filter(x => !h || (x.klic + ' ' + x.nazev + ' ' + (x.popis || '')).toLowerCase().includes(h));
+    if (!f.length) continue;
+    html += `<h2>${esc(skup)}</h2>` + f.map(x => `<div class="pol" draggable="true" data-klic="${esc(x.klic)}" title="${esc(x.popis || '')}">` +
+      `<b>${esc(x.nazev)}</b><span>${esc(x.popis || '')}</span></div>`).join('');
+  }
+  $('pal-seznam').innerHTML = html || '<p class="prazdno">Nic nenalezeno.</p>';
+  for (const el of $('pal-seznam').querySelectorAll('.pol')) {
+    el.onclick = () => vyberPalety(ed.vklad && ed.vklad.klic === el.dataset.klic ? null : el.dataset.klic);
+    el.ondragstart = e => { e.dataTransfer.setData('text/plain', el.dataset.klic); vyberPalety(el.dataset.klic); };
+  }
+  paletaAkt();
+}
+function paletaAkt() {
+  for (const el of document.querySelectorAll('#paleta .pol')) {
+    const akt = !!ed.vklad && el.dataset.klic === ed.vklad.klic;
+    el.classList.toggle('akt', akt);
+    if (akt) el.scrollIntoView({block: 'nearest'});
+  }
+}
+function sablona(klic) {
+  const x = ed.kat.instrukce.find(i => i.klic === klic) || ed.kat.bloky.find(b => b.klic === klic);
+  return x ? JSON.parse(JSON.stringify(x.prvek)) : null;
+}
+function vyberPalety(klic) {
+  const prvek = klic ? sablona(klic) : null;
+  ed.vklad = prvek ? {klic, prvek, druh: DRUH(prvek)} : null;
+  paletaAkt();
+  vykresli();
+}
+// našeptávání operandů: tagy, členy globálních DB, proměnné upravovaného bloku (#…), instanční DB
+function operandy() {
+  const o = [];
+  for (const t of ed.kat.tagy) o.push([`"${t.jmeno}"`, `${t.typ} ${t.adresa}`]);
+  for (const d of ed.kat.db) {
+    if (d.instance_typ) o.push([`"${d.nazev}"`, `instance ${d.instance_typ}`]);
+    for (const c of d.cleny) o.push([`"${d.nazev}".${c.jmeno}`, c.typ]);
+  }
+  const blok = ed.kat.bloky.find(b => b.nazev === ed.u.blok);
+  if (blok) for (const [sek, pole] of Object.entries(blok.rozhrani)) for (const v of pole) o.push([`#${v.jmeno}`, `${v.typ} (${sek})`]);
+  $('operandy').innerHTML = o.map(([v, l]) => `<option value="${esc(v)}" label="${esc(l)}"></option>`).join('');
+}
+
+// místa vložení: platná pro vybraný prvek palety, ve větvi všechna (začátek) / za začátkem v témže rungu (konec)
+function mistaViditelna() {
+  const m = ed.res.mista || [];
+  if (ed.vetev) return ed.vetev.od ? m.filter(x => x.r === ed.vetev.od.r && x.k > ed.vetev.od.k) : m;
+  if (ed.vklad) return m.filter(x => x[ed.vklad.druh]);
+  return [];
+}
+function nejblizsi(e) {
+  const svg = $('ed-platno').querySelector('svg');
+  if (!svg) return null;
+  const b = svg.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+  let best = null, dist = 45;
+  for (const m of mistaViditelna()) {
+    const d = Math.hypot(m.x - x, m.y - y);
+    if (d < dist) { dist = d; best = m; }
+  }
+  return best;
+}
+function zvyrazniBlizke(m) {
+  for (const c of document.querySelectorAll('#ed-platno .misto'))
+    c.classList.toggle('blizko', !!m && +c.dataset.r === m.r && +c.dataset.k === m.k);
+}
+async function vlozNa(m) {
+  if (ed.vetev) {
+    if (!ed.vetev.od) { ed.vetev.od = {r: m.r, k: m.k}; vykresli(); return; }
+    const prvek = ed.vklad ? ed.vklad.prvek : sablona('NO');
+    const od = ed.vetev.od;
+    ed.vetev = null; ed.vklad = null; paletaAkt();
+    const res = await provedOp({typ: 'vetev', od, do: {r: m.r, k: m.k}, prvek});
+    if (res && res.posledni) { ed.vyber = res.posledni; vykresli(); }
+    return;
+  }
+  if (!ed.vklad) return;
+  const prvek = ed.vklad.prvek;
+  ed.vklad = null; paletaAkt();
+  const res = await provedOp({typ: 'vloz', misto: {r: m.r, k: m.k}, prvek});
+  if (res && res.posledni) { ed.vyber = res.posledni; vykresli(); }
+}
+
+function vykresli() {
+  const res = ed.res, pl = $('ed-platno');
+  if (!res || !pl) return;
+  pl.innerHTML = '';
+  if (!res.kresba) { pl.appendChild(seznamRungu(res)); }
+  else {
+    const svg = kresli(res, res.rozdil);
+    pl.appendChild(svg);
+    const chybne = new Set(res.chyby.map(c => c.id).filter(Boolean));
+    for (const g of svg.querySelectorAll('g[data-id]')) {
+      const id = g.dataset.id, bb = g.getBBox();
+      const ram = (tr, o) => { const r = el(g, 'rect', {class: tr, x: bb.x - o, y: bb.y - o, width: bb.width + 2 * o, height: bb.height + 2 * o, rx: 3});
+                               g.insertBefore(r, g.firstChild); };
+      if (id.startsWith('x:')) continue;
+      ram('hit', 4);
+      if (chybne.has(id)) ram('ram-chyba', 5);
+      if (id === ed.vyber) ram('ram-vyber', 7);
+      g.onclick = ev => { ev.stopPropagation(); if (ed.vklad || ed.vetev) return; ed.vyber = id; vykresli(); vlastnostiFokus(); };
+    }
+    svg.onclick = () => { if (!ed.vklad && !ed.vetev && ed.vyber) { ed.vyber = null; vykresli(); } };
+    const gm = el(svg, 'g', {});
+    for (const m of mistaViditelna()) {
+      const c = el(gm, 'circle', {class: 'misto', cx: m.x, cy: m.y, r: 7, 'data-r': m.r, 'data-k': m.k});
+      el(c, 'title', {}, `rung ${m.r + 1}, pozice ${m.k}`);
+      c.onclick = ev => { ev.stopPropagation(); vlozNa(m); };
+    }
+    if (ed.vetev && ed.vetev.od) {
+      const a = (res.mista || []).find(x => x.r === ed.vetev.od.r && x.k === ed.vetev.od.k);
+      if (a) el(gm, 'circle', {class: 'misto zvolene', cx: a.x, cy: a.y, r: 7});
+    }
+  }
+  // režim, chyby, vlastnosti, tlačítka
+  if (ed.vetev) rezim(ed.vetev.od ? 'Větev: klikni na konec úseku ve stejném rungu (Esc zruší).'
+                                  : `Větev${ed.vklad ? ' s ' + ed.vklad.prvek.nazev : ''}: klikni na začátek úseku (Esc zruší).`);
+  else if (ed.vklad) rezim(`Vkládání: ${ed.vklad.prvek.nazev || ed.vklad.klic} — klikni na zvýrazněné místo nebo přetáhni na vodič (Esc zruší).`);
+  else if (!$('ed-rezim').classList.contains('zprava')) rezim('');
+  $('ed-vetev').classList.toggle('akt', !!ed.vetev);
+  $('ed-zpet').disabled = !ed.hist.length;
+  $('ed-znovu').disabled = !ed.redo.length;
+  $('ed-smaz').disabled = !ed.vyber;
+  $('ed-znacka').innerHTML = res.chyby.length ? `<span class="znacka-chyb">⚠ ${nChyb(res.chyby.length)}</span> ·` : '';
+  $('ed-chyby').innerHTML = res.chyby.length
+    ? res.chyby.map(c => `<div data-id="${esc(c.id || '')}">⚠ ${esc(c.chyba)}</div>`).join('')
+    : '<div class="ok">✓ Bez chyb.</div>';
+  for (const d of $('ed-chyby').querySelectorAll('div[data-id]'))
+    if (d.dataset.id) d.onclick = () => { ed.vyber = d.dataset.id; vykresli(); };
+  vlastnosti();
+}
+
+function vlastnosti() {
+  const v = $('ed-vlastnosti');
+  const p = ed.vyber && ed.po.prvky.find(x => x.id === ed.vyber);
+  if (!p) { v.innerHTML = '<p class="komentar">Klikni na prvek v plátně. Delete smaže, Ctrl+Z vrátí.</p>'; return; }
+  const pole = (klic, hodnota, popis, list) => `<tr><td>${esc(popis)}</td><td><input data-pole="${klic}" value="${esc(hodnota ?? '')}" list="${list || 'operandy'}" autocomplete="off"></td></tr>`;
+  let h = `<table><colgroup><col style="width:96px"><col></colgroup><tr class="sekce"><td colspan="2" title="${esc(popisPrvku(p))}">${esc(p.id)} · ${esc(popisPrvku(p))}</td></tr>`;
+  if (p.typ === 'box') {
+    if (p.instance != null) {
+      const b = ed.kat.bloky.find(x => x.nazev === p.nazev);
+      h += pole('instance', p.instance, 'instance', 'operandy');
+      if (b && b.instance.length) h += `<tr><td></td><td style="color:var(--tlum);font-size:12px">instance ${esc(p.nazev)}: ${b.instance.map(esc).join(', ')}</td></tr>`;
+    }
+    if (p.sablona != null) h += pole('sablona', p.sablona, 'typ', '');
+    if (p.pod != null) h += pole('pod', p.pod, 'bit hrany');
+    if (p.vstupy.length) h += `<tr class="sekce"><td colspan="2">Vstupy</td></tr>`;
+    p.vstupy.forEach((x, i) => {
+      h += x.operand.startsWith('wire#') ? `<tr><td>${esc(x.pin)}</td><td style="color:var(--tlum)">← napájeno větví ${esc(x.operand.slice(5))}</td></tr>`
+                                         : `<tr><td>${esc(x.pin)}</td><td><input data-pin="vstupy:${i}" value="${esc(x.operand)}" list="operandy" autocomplete="off"></td></tr>`;
+    });
+    if (p.vystupy.length) h += `<tr class="sekce"><td colspan="2">Výstupy</td></tr>`;
+    p.vystupy.forEach((x, i) => { h += `<tr><td>${esc(x.pin)}</td><td><input data-pin="vystupy:${i}" value="${esc(x.operand)}" list="operandy" autocomplete="off"></td></tr>`; });
+  } else if (p.typ === 'porovnani') {
+    h += pole('in1', p.in1, 'IN1');
+    h += `<tr><td>op</td><td><select data-pole="op">${['==', '<>', '>', '>=', '<', '<='].map(o => `<option ${o === p.op ? 'selected' : ''}>${o}</option>`).join('')}</select></td></tr>`;
+    h += pole('in2', p.in2, 'IN2') + pole('sablona', p.sablona, 'typ', '');
+  } else if (p.typ !== 'not') {
+    h += pole('operand', p.operand, 'operand');
+    if (p.typ === 'kontakt_p' || p.typ === 'kontakt_n') h += pole('bit', p.bit, 'bit hrany');
+  }
+  v.innerHTML = h + '</table>';
+  for (const i of v.querySelectorAll('[data-pole]')) i.onchange = () => provedOp({typ: 'zmen', id: p.id, hodnoty: {[i.dataset.pole]: i.value}});
+  for (const i of v.querySelectorAll('[data-pin]')) i.onchange = () => {
+    const [str, idx] = i.dataset.pin.split(':');
+    const piny = p[str].map(x => ({pin: x.pin, operand: x.operand}));
+    piny[+idx].operand = i.value.trim();
+    provedOp({typ: 'zmen', id: p.id, hodnoty: {[str]: piny}});
+  };
+}
+function vlastnostiFokus() {
+  const i = $('ed-vlastnosti').querySelector('input');
+  if (i) { i.focus(); i.select(); }
+}
+
 async function start() {
   if (q.get('snimek') === '1') document.body.classList.add('snimek');
   const projekt = q.get('projekt'), blok = q.get('blok');
-  if (q.get('uprava')) await zobrazUpravu(q.get('uprava'));
+  if (q.get('uprava') && q.get('upravit') === '1') await editor(q.get('uprava'));
+  else if (q.get('uprava')) await zobrazUpravu(q.get('uprava'));
   else if (projekt && blok) await zobrazNetwork(projekt, blok);
   else { $('nw').innerHTML = await stromNacti(null); await vyberExportu(); }
   document.body.dataset.hotovo = '1';
