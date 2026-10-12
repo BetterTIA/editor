@@ -308,7 +308,8 @@ def rozloz(rungy, prvky, min_sirka=0):
     R = Rozlozeni(rungy, prvky)
     if not R.pozice:
         # prázdný network: jen lišta
-        return {}, {'sirka': 200, 'vyska': 3 * L, 'lista': {'x': LISTA_X, 'y1': 4, 'y2': 3 * L}, 'cary': [], 'prvky': []}
+        return {}, {'sirka': 260, 'vyska': 3 * L, 'lista': {'x': LISTA_X, 'y1': 4, 'y2': 3 * L}, 'cary': [], 'prvky': [],
+                    'prazdny': True}
     uzly = {}
 
     def projdi(t):

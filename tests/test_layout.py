@@ -78,6 +78,7 @@ class TestRozlozeni(unittest.TestCase):
         r, k, _ = roz('FB_Dopravnik', 8)
         self.assertEqual(r, {})
         self.assertEqual(k['prvky'], [])
+        self.assertTrue(k['prazdny'])                        # stránka připíše „(prázdný network)“
 
 
 if __name__ == '__main__':
