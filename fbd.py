@@ -16,6 +16,7 @@ První vstup je vstup řetězu (in1, EN, CLK, S …); volání bez napájení (F
 `signaly` jsou odvozené ze vstupů (server je dopočítá) — Claude posílá jen `prvky`.
 """
 import copy
+import json
 import re
 
 import s7dcl
@@ -250,7 +251,7 @@ def _cyklus(prvky):
     return any(i not in stav and dfs(i) for i in P)
 
 
-# ---------- operace (F1: přes API; editor až F2) ----------
+# ---------- operace (API i editor) ----------
 
 class ChybaOperace(ValueError):
     pass
@@ -278,20 +279,153 @@ def _pin(p, op):
     return None
 
 
-def proved(m, op):
-    """{typ: pridej_vstup, id} | {typ: zmen_operand, id, vstup?|vystup?, operand} | {typ: negace, id, vstup?|vystup?}
-    -> (model, id)"""
+def _vstupy(*piny):
+    return [{'n': i + 1, 'pin': p, 'operand': '', 'signal': None, 'neg': False} for i, p in enumerate(piny)]
+
+
+def _paleta():
+    P = []
+
+    def add(klic, nazev, skupina, prvek, popis=''):
+        P.append({'klic': klic, 'nazev': nazev, 'skupina': skupina, 'popis': popis,
+                  'prvek': dict(prvek, vystupy=[])})
+    add('AND', '&', 'Bitová logika', {'typ': 'and', 'vstupy': _vstupy('in1', 'in2')}, 'AND (F9)')
+    add('OR', '>=1', 'Bitová logika', {'typ': 'or', 'vstupy': _vstupy('in1', 'in2')}, 'OR (F10)')
+    add('XOR', 'x', 'Bitová logika', {'typ': 'xor', 'vstupy': _vstupy('in1', 'in2')}, 'XOR')
+    add('ASSIGN', '=', 'Přiřazení', {'typ': 'assign', 'operand': '', 'vstupy': _vstupy('in1')}, 'přiřazení (Shift+F7)')
+    add('S', 'S', 'Přiřazení', {'typ': 's', 'operand': '', 'vstupy': _vstupy('in1')}, 'nastavit')
+    add('R', 'R', 'Přiřazení', {'typ': 'r', 'operand': '', 'vstupy': _vstupy('in1')}, 'nulovat')
+    add('SR', 'SR', 'Paměti', {'typ': 'sr', 'operand': '', 'vstupy': _vstupy('S', 'R1')}, 'přednost reset')
+    add('RS', 'RS', 'Paměti', {'typ': 'rs', 'operand': '', 'vstupy': _vstupy('R', 'S1')}, 'přednost set')
+    add('P_TRIG', 'P_TRIG', 'Hrany', {'typ': 'ptrig', 'operand': '', 'vstupy': _vstupy('CLK')}, 'náběžná hrana, bit paměti nad boxem')
+    add('N_TRIG', 'N_TRIG', 'Hrany', {'typ': 'ntrig', 'operand': '', 'vstupy': _vstupy('CLK')}, 'sestupná hrana')
+    return P
+
+
+PALETA = _paleta()
+LAD_INSTRUKCE = {'MOVE', 'SWAP', 'CONV', 'ADD', 'SUB', 'MUL', 'DIV', 'TON', 'TOF', 'TP', 'CTU', 'CTD'}  # z katalogu LAD
+
+
+def z_lad(box, f=False):
+    """Šablona boxu z katalogu LAD (instrukce / FB / FC) -> FBD box; v F-bloku bez EN (nezapojitelný).
+    shortcut: časovače a čítače dostanou EN/ENO místo IN/Q (TIA FBD je kreslí s IN/Q) — opravit, až budou v F-blocích potřeba"""
+    vol = box.get('volani') in ('fb', 'fc') or bool(box.get('instance'))
+    vys = {'typ': 'volani' if vol else 'instrukce', 'volani': box.get('volani') or 'instrukce', 'nazev': box.get('nazev'),
+           'instance': box.get('instance'), 'sablona': box.get('sablona'),
+           'vstupy': ([] if f else _vstupy('EN')) + [{'pin': x['pin'], 'operand': x.get('operand', ''), 'signal': None,
+                                                      'neg': False} for x in box.get('vstupy', [])],
+           'vystupy': [{'pin': x['pin'], 'operand': x.get('operand', ''), 'neg': False} for x in box.get('vystupy', [])]}
+    for i, v in enumerate(vys['vstupy']):
+        v['n'] = i + 1
+    return vys
+
+
+def sablona(klic, katalog_prvek=None, f=False):
+    """Klíč palety FBD ('AND', 'P_TRIG') / katalogu ('MOVE', 'fb:FB_Pas') -> FBD box bez id."""
+    for x in PALETA:
+        if x['klic'] == klic:
+            return copy.deepcopy(x['prvek'])
+    if katalog_prvek is None:
+        raise ChybaOperace('prvek palety %s neexistuje' % klic)
+    return z_lad(katalog_prvek(klic), f)
+
+
+def _nove_id(m):
+    n = [int(x['id'][1:]) for x in m['prvky'] if re.fullmatch(r'n\d+', x['id'])]
+    return 'n%d' % (max(n, default=0) + 1)
+
+
+def _prevezmi(cil, zdroj, neg=False):
+    """Vstup `cil` dostane zdroj vstupu `zdroj` (signál nebo operand, negace se skládá)."""
+    cil.update(operand=zdroj['operand'], signal=zdroj.get('signal'), neg=bool(zdroj.get('neg')) != neg)
+
+
+def _precisluj(p):
+    for i, v in enumerate(p['vstupy']):
+        v['n'] = i + 1
+        if p['typ'] in ('and', 'or', 'xor'):
+            v['pin'] = 'in%d' % (i + 1)
+
+
+def vloz_box(m, prvek, do=None):
+    """Nový box (id n…). do = {id, vstup: n}: box se vloží do toho vstupu (převezme jeho signál / operand na svůj
+    1. vstup a výstupem ho napájí); vstup len+1 u &/>=1/x = nový vstup. Bez `do` = nová logická cesta."""
+    if not isinstance(prvek, dict) or prvek.get('typ') not in TYPY:
+        raise ChybaOperace('prvek musí být FBD box {typ: %s, …}' % '|'.join(sorted(TYPY)))
+    p = copy.deepcopy(prvek)
+    p['id'] = _nove_id(m)
+    p.setdefault('vystupy', [])
+    p['vstupy'] = [dict({'signal': None, 'neg': False, 'operand': ''}, **v) for v in p.get('vstupy', [])]
+    _precisluj(p)
+    if do:
+        c = _najdi(m, do.get('id'))
+        try:
+            n = int(do.get('vstup'))
+        except (TypeError, ValueError):
+            raise ChybaOperace('vložení: do = {id, vstup: n}')
+        if n == len(c['vstupy']) + 1 and c['typ'] in ('and', 'or', 'xor'):
+            c['vstupy'].append({'n': n, 'pin': 'in%d' % n, 'operand': '', 'signal': None, 'neg': False})
+        if not 1 <= n <= len(c['vstupy']):
+            raise ChybaOperace('box %s nemá vstup %r' % (c['id'], n))
+        v = c['vstupy'][n - 1]
+        if p['vstupy']:
+            _prevezmi(p['vstupy'][0], v)
+        v.update(operand='', signal=p['id'], neg=False)
+    m['prvky'].append(p)
+    return p['id']
+
+
+def smaz(m, pid):
+    """Smaže box; vstupy, které napájel, převezmou jeho 1. vstup (řetěz); volání / instrukce bez EN nechá vstupy otevřené."""
+    p = _najdi(m, pid)
+    m['prvky'].remove(p)
+    prvni = p['vstupy'][0] if p['vstupy'] and (p['typ'] not in ('volani', 'instrukce') or p['vstupy'][0]['pin'] == 'EN') \
+        else None
+    for q in m['prvky']:
+        for v in q['vstupy']:
+            if v.get('signal') == pid:
+                if prvni is not None:
+                    _prevezmi(v, prvni, bool(v.get('neg')))
+                else:
+                    v.update(operand='', signal=None)
+
+
+def proved(m, op, katalog_prvek=None, f=False):
+    """Operace FBD z API -> (model, id dotčeného / nového boxu | None):
+    pridej_vstup {id, operand?, neg?} · odeber_vstup {id, vstup} · negace {id, vstup | vystup: pin | "hlavni"} ·
+    zmen_operand {id, vstup? | vystup?, operand} · zmen_pin {id, pin, operand?, neg?} · smaz {id} ·
+    vloz_box {prvek: klíč | box, do?: {id, vstup}} · vloz_volani {prvek: 'fb:X' | 'MOVE' …, instance?, do?}"""
     if not isinstance(op, dict):
         raise ChybaOperace('operace musí být objekt')
     m = copy.deepcopy(m)
-    p = _najdi(m, op.get('id'))
     t = op.get('typ')
+    if t in ('vloz_box', 'vloz_volani'):
+        prvek = op.get('prvek')
+        if isinstance(prvek, str):
+            try:
+                prvek = sablona(prvek, katalog_prvek, f)
+            except KeyError as e:
+                raise ChybaOperace(str(e).strip("'"))
+        if t == 'vloz_volani':
+            if not isinstance(prvek, dict) or prvek.get('typ') not in ('volani', 'instrukce'):
+                raise ChybaOperace('vloz_volani: prvek musí být blok projektu (fb:X / fc:X) nebo instrukce')
+            if op.get('instance') is not None:
+                prvek['instance'] = str(op['instance']).strip()
+        pid = vloz_box(m, prvek, op.get('do'))
+        m['signaly'] = signaly(m['prvky'])
+        return m, pid
+    p = _najdi(m, op.get('id'))
     if t == 'pridej_vstup':
         if p['typ'] not in ('and', 'or', 'xor'):
             raise ChybaOperace('vstup lze přidat jen boxu &, >=1, x')
         n = len(p['vstupy']) + 1
         p['vstupy'].append({'n': n, 'pin': 'in%d' % n, 'operand': str(op.get('operand') or '').strip(),
                             'signal': None, 'neg': bool(op.get('neg'))})
+    elif t == 'odeber_vstup':
+        if p['typ'] not in ('and', 'or', 'xor') or len(p['vstupy']) <= 2:
+            raise ChybaOperace('odebrat lze jen vstup boxu &, >=1, x, který má víc než 2 vstupy')
+        p['vstupy'].remove(_pin(p, {'vstup': op.get('vstup')}))
+        _precisluj(p)
     elif t == 'zmen_operand':
         if not isinstance(op.get('operand'), str):
             raise ChybaOperace('operand musí být text')
@@ -307,18 +441,38 @@ def proved(m, op):
             pin['operand'] = op['operand'].strip()
             if 'signal' in pin:
                 pin['signal'] = None
-    elif t == 'negace':
-        pin = _pin(p, op)
+    elif t == 'zmen_pin':
+        pin = next((v for v in p['vstupy'] + p['vystupy'] if v['pin'] == op.get('pin')), None)
         if pin is None:
-            raise ChybaOperace('negace: zadej vstup (n) nebo vystup (pin)')
-        pin['neg'] = not pin.get('neg')
+            raise ChybaOperace('box %s nemá pin %r' % (p['id'], op.get('pin')))
+        if op.get('operand') is not None:
+            if not isinstance(op['operand'], str):
+                raise ChybaOperace('operand musí být text')
+            pin['operand'] = op['operand'].strip()
+            if 'signal' in pin:
+                pin['signal'] = None
+        if op.get('neg') is not None:
+            pin['neg'] = bool(op['neg'])
+    elif t == 'negace':
+        if op.get('vystup') == 'hlavni':
+            p['neg_vystup'] = not p.get('neg_vystup')
+        else:
+            pin = _pin(p, op)
+            if pin is None:
+                raise ChybaOperace('negace: zadej vstup (n) nebo vystup (pin | "hlavni")')
+            pin['neg'] = not pin.get('neg')
+    elif t == 'smaz':
+        smaz(m, p['id'])
+        m['signaly'] = signaly(m['prvky'])
+        return m, None
     else:
-        raise ChybaOperace('neznámá FBD operace %r (pridej_vstup, zmen_operand, negace)' % t)
+        raise ChybaOperace('neznámá FBD operace %r (pridej_vstup, odeber_vstup, negace, zmen_operand, zmen_pin, smaz, '
+                           'vloz_box, vloz_volani)' % t)
     m['signaly'] = signaly(m['prvky'])
     return m, p['id']
 
 
-# ---------- pravidla (minimum F1) ----------
+# ---------- pravidla ----------
 
 def jmeno(p):
     if p['typ'] in ('volani', 'instrukce'):
@@ -326,8 +480,10 @@ def jmeno(p):
     return ('%s %s' % (TITUL[p['typ']], p.get('operand') or '')).strip()
 
 
-def validuj(m):
+def validuj(m, f_blok=False, ne_f=()):
+    """-> [{id, chyba, varovani?}]. f_blok: upravovaný blok je F-blok; ne_f: jména bloků projektu, které F nejsou."""
     ch = []
+    spotr = {v['signal'] for p in m['prvky'] for v in p['vstupy'] if v.get('signal')}
     for p in m['prvky']:
         if p['typ'] in S_OPERANDEM and not (p.get('operand') or '').strip():
             ch.append({'id': p['id'], 'chyba': 'Chybí operand: %s' % jmeno(p)})
@@ -335,13 +491,181 @@ def validuj(m):
             ch.append({'id': p['id'], 'chyba': 'Chybí instance: %s' % jmeno(p)})
         if p['typ'] not in ('volani', 'instrukce'):
             for v in p['vstupy']:
-                # shortcut: export V21 má `RUNG` + `Coil(x)` (= bez vstupu, nejspíš „vždy 1“) — 1. vstup =/S/R se
-                # nehlásí; až se v TIA ověří, jak to editor kreslí, pravidlo upřesnit
-                if p['typ'] in ('assign', 's', 'r') and v['n'] == 1:
+                # shortcut: export V21 má `RUNG` + `Coil(x)` (= bez vstupu, nejspíš „vždy 1“) — u boxů z exportu se
+                # 1. vstup =/S/R nehlásí; až se v TIA ověří, jak to editor kreslí, pravidlo upřesnit
+                if p['typ'] in ('assign', 's', 'r') and v['n'] == 1 and not p['id'].startswith('n'):
                     continue
                 if not v.get('signal') and not v['operand'].strip():
-                    ch.append({'id': p['id'], 'chyba': 'Nezapojený vstup %d boxu %s' % (v['n'], jmeno(p))})
+                    ch.append({'id': p['id'], 'chyba': 'Nezapojený vstup %d boxu %s — doplň operand nebo signál'
+                                                       % (v['n'], jmeno(p))})
+        if p['typ'] in ('and', 'or', 'xor', 'ptrig', 'ntrig') and p['id'] not in spotr:
+            ch.append({'id': p['id'], 'varovani': True,
+                       'chyba': 'Box %s nevede nikam — výstup bez přiřazení (varování)' % jmeno(p)})
+        if f_blok and p['typ'] == 'volani' and p.get('nazev') in set(ne_f):
+            ch.append({'id': p['id'], 'chyba': 'V F-bloku smí být jen F-instrukce a F-bloky — %s není F-blok' % jmeno(p)})
+        if f_blok and p['typ'] in ('volani', 'instrukce') and p['vstupy'] and p['vstupy'][0]['pin'] == 'EN' \
+                and (p['vstupy'][0]['operand'] or p['vstupy'][0].get('signal')):
+            ch.append({'id': p['id'], 'chyba': 'V F-bloku nejde EN zapojit: %s' % jmeno(p)})
     return ch
+
+
+# ---------- místa vložení (editor) ----------
+
+def mista(m, kresba):
+    """Na každém vstupu boxu (do = {id, vstup}), pod posledním vstupem &/>=1/x (nový vstup) a nová logická cesta."""
+    if not kresba:
+        return []
+    P = {p['id']: p for p in m['prvky']}
+    vys = []
+    for d in kresba['boxy']:
+        if d['id'] not in P:
+            continue
+        for v in d['vstupy']:
+            vys.append({'x': round(d['x'] - (17 if v['neg'] else 9), 1), 'y': v['y'], 'fbd': True,
+                        'do': {'id': d['id'], 'vstup': v['n']}})
+        if P[d['id']]['typ'] in ('and', 'or', 'xor') and d['vstupy']:
+            vys.append({'x': round(d['x'] - 9, 1), 'y': d['vstupy'][-1]['y'] + L, 'fbd': True, 'novy_vstup': True,
+                        'do': {'id': d['id'], 'vstup': len(d['vstupy']) + 1}})
+    vys.append({'x': 30, 'y': round(kresba['vyska'] - L / 2, 1), 'fbd': True, 'do': None})
+    return vys
+
+
+# ---------- kontrola exportem (shoda podle obsahu) ----------
+
+KOMUT = {'and', 'or', 'xor'}
+
+
+def _j(x):
+    return json.dumps(x, sort_keys=True, ensure_ascii=False)
+
+
+def _obsah(p, zdroj):
+    """Obsah boxu bez id; vstup = [pin, neg, operand | zdroj(signal)]; u &/>=1/x bez pinu a seřazené;
+    prázdné piny volání se ignorují."""
+    d = {k: p[k].strip() for k in ('operand', 'nazev', 'instance', 'sablona') if isinstance(p.get(k), str) and p[k].strip()}
+    d['typ'] = p['typ']
+    if p.get('neg_vystup'):
+        d['neg_vystup'] = True
+    vst = []
+    for v in p['vstupy']:
+        x = zdroj(v['signal']) if v.get('signal') else v['operand'].strip()
+        if p['typ'] in ('volani', 'instrukce') and x == '':
+            continue
+        vst.append([bool(v.get('neg')), x] if p['typ'] in KOMUT else [v['pin'], bool(v.get('neg')), x])
+    d['vstupy'] = sorted(vst, key=_j) if p['typ'] in KOMUT else vst
+    d['vystupy'] = [[v['pin'], bool(v.get('neg')), v['operand'].strip()] for v in p.get('vystupy', []) if v['operand'].strip()]
+    return d
+
+
+def kanon(prvky):
+    """Zapojení jako seřazený seznam stromů od výstupů (boxů bez spotřebiče); sdílený zdroj se opakuje."""
+    P = {p['id']: p for p in prvky}
+    spotr = {v['signal'] for p in prvky for v in p['vstupy'] if v.get('signal')}
+
+    def k(i):
+        return _obsah(P[i], k) if i in P else '?'
+    return sorted((_j(k(p['id'])) for p in prvky if p['id'] not in spotr))
+
+
+def popis(p):
+    vst = ', '.join(('NOT ' if v.get('neg') else '') + ('(signál)' if v.get('signal') else v['operand'] or '…')
+                    for v in p['vstupy'] if not (p['typ'] in ('volani', 'instrukce') and not v['operand'] and not v.get('signal')))
+    return '%s (%s)' % (jmeno(p), vst)
+
+
+def shoda_obsahu(navrh, export):
+    """-> (shoda, [rozdíly čitelně]) — boxy podle obsahu (u &, >=1, x bez ohledu na pořadí vstupů), pak zapojení."""
+    def mnozina(prvky):
+        d = {}
+        for p in prvky:
+            d.setdefault(_j(_obsah(p, lambda s: 'signál')), []).append(p)
+        return d
+    a, b = mnozina(navrh['prvky']), mnozina(export['prvky'])
+    chybi = [p for k, v in a.items() for p in v[len(b.get(k, [])):]]
+    navic = [p for k, v in b.items() for p in v[len(a.get(k, [])):]]
+    vys = []
+    for p in list(chybi):
+        q = next((x for x in navic if x['typ'] == p['typ'] and x.get('nazev') == p.get('nazev')), None)
+        if q is not None:
+            chybi.remove(p)
+            navic.remove(q)
+            vys.append('jiný box %s: návrh %s, export %s' % (TITUL.get(p['typ']) or p.get('nazev'), popis(p), popis(q)))
+    vys += ['chybí v exportu: %s' % popis(p) for p in chybi]
+    vys += ['navíc v exportu: %s' % popis(p) for p in navic]
+    if not vys and kanon(navrh['prvky']) != kanon(export['prvky']):
+        vys.append('boxy sedí, ale liší se zapojení signálů')
+    return not vys, vys
+
+
+# ---------- „zobrazit jako LAD" (jen ke čtení) ----------
+
+def jako_lad(prvky):
+    """Network jen z &, >=1, negací a = -> (rungy, prvky) LAD modelu; jinak None. Každé přiřazení = vlastní rung
+    od lišty (sdílené části se opakují), & = série, >=1 = paralelní větve, negace = rozpínací kontakt / NOT."""
+    if not prvky or any(p['typ'] not in ('and', 'or', 'assign') or p.get('neg_vystup') for p in prvky):
+        return None
+    P = {p['id']: p for p in prvky}
+    lad, rungy, w = [], [], [0]
+
+    def novy(p):
+        p['id'] = 'p%d' % (len(lad) + 1)
+        lad.append(p)
+        return p['id']
+
+    def wire():
+        w[0] += 1
+        return 'w%d' % w[0]
+
+    def vyraz(v):
+        e = ('box', v['signal']) if v.get('signal') else ('op', v['operand'])
+        return ('not', e) if v.get('neg') else e
+
+    def rozbal(e):
+        while e[0] == 'box':
+            p = P[e[1]]
+            if p['typ'] == 'assign':
+                e = vyraz(p['vstupy'][0]) if p['vstupy'] else ('op', '')
+            else:
+                return ('S' if p['typ'] == 'and' else 'P', [vyraz(v) for v in p['vstupy']])
+        return e
+
+    def serie(e, cesta, uzel):
+        """Přidá výraz do cesty rungu; uzel = pojmenovaný uzel na aktuální pozici (nebo None) -> uzel za výrazem."""
+        e = rozbal(e)
+        if e[0] == 'op':
+            cesta.append(novy({'typ': 'kontakt', 'operand': e[1]}))
+            return None
+        if e[0] == 'not':
+            x = rozbal(e[1])
+            if x[0] == 'op':
+                cesta.append(novy({'typ': 'kontakt_nc', 'operand': x[1]}))
+            else:
+                serie(x, cesta, uzel)
+                cesta.append(novy({'typ': 'not'}))
+            return None
+        if e[0] == 'S':
+            for x in e[1]:
+                uzel = serie(x, cesta, uzel)
+            return uzel
+        if uzel is None:
+            uzel = wire()
+            cesta.append('wire#' + uzel)
+        konec = wire()
+        serie(e[1][0], cesta, uzel)
+        for x in e[1][1:]:
+            r = {'z': uzel, 'cesta': [], 'do': konec}
+            rungy.append(r)
+            serie(x, r['cesta'], uzel)
+        cesta.append('wire#' + konec)
+        return konec
+
+    for p in prvky:
+        if p['typ'] == 'assign':
+            r = {'z': 'powerrail', 'cesta': [], 'do': None}
+            rungy.append(r)
+            serie(vyraz(p['vstupy'][0]) if p['vstupy'] else ('op', ''), r['cesta'], 'powerrail')
+            r['cesta'].append(novy({'typ': 'civka', 'operand': p.get('operand') or ''}))
+    return (rungy, lad) if lad else None
 
 
 # ---------- rozdíl: smazané boxy jako přízraky ----------
@@ -400,10 +724,10 @@ def _tw(s):
 def _prave(p):
     """Piny vpravo: [{pin, operand|None, neg, hlavni}] — hlavní výstup (řetěz) první."""
     if p['typ'] in ('volani', 'instrukce'):
-        hl = [{'pin': 'ENO', 'operand': None, 'neg': False, 'hlavni': True}] \
+        hl = [{'pin': 'ENO', 'operand': None, 'neg': bool(p.get('neg_vystup')), 'hlavni': True}] \
             if p['vstupy'] and p['vstupy'][0]['pin'] == 'EN' else []
         return hl + [dict(v, hlavni=False) for v in p['vystupy']]
-    return [{'pin': 'Q' if p['typ'] in PINY_VIDET else '', 'operand': None, 'neg': False, 'hlavni': True}]
+    return [{'pin': 'Q' if p['typ'] in PINY_VIDET else '', 'operand': None, 'neg': bool(p.get('neg_vystup')), 'hlavni': True}]
 
 
 def _hlavicka(p):
@@ -447,7 +771,7 @@ def rozloz(prvky, min_sirka=0):
             if s and rodic.get(s) == (b, i):
                 hc, ac = mer(s)
                 if dole is not None:
-                    r = max(r, dole + 1 + ac)
+                    r = max(r, dole + 2 + ac)                   # volný řádek mezi sousedními podstromy
                 dole = r - ac + hc - 1
                 top = min(top, r - ac)
             elif s:                                     # signál odjinud: řádek vlevo musí být volný

@@ -71,7 +71,7 @@ def rozhrani(text):
     b = s7dcl.parse_blok(hlava_bez + '\n')
     hm = re.search(r'S7_BlockNumber\s*:=\s*"(\d+)"', hlava)
     vys = {'druh': b['druh'], 'nazev': b['nazev'], 'cislo': int(hm.group(1)) if hm else None,
-           'instance_typ': b['instance_typ'], 'sekce': {}}
+           'instance_typ': b['instance_typ'], 'sekce': {}, 'f': bool(re.search(r'S7_Safety\s*:=\s*"TRUE"', hlava))}
     sekce, hloubka = None, 0
     for r in hlava_bez.splitlines():
         s = r.strip()
@@ -181,11 +181,13 @@ def katalog(root, projekt):
             instance = inst.get(b['nazev'], [])
             vys_bloky.append({'klic': '%s:%s' % (b['druh'].lower(), b['nazev']), 'nazev': b['nazev'],
                               'druh': b['druh'], 'cislo': b['cislo'], 'rozhrani': b['sekce'], 'instance': instance,
+                              'f': b.get('f', False),
                               'prvek': sablona_bloku(b, instance[0] if instance else '')})
     tagy = []
     for cesta in _nejnovejsi(root, projekt, '.xml', 'Tags').values():
         tagy += _cti_cache(cesta, tag_tabulka) or []
-    return {'projekt': projekt, 'instrukce': INSTRUKCE, 'bloky': vys_bloky,
+    import fbd                                       # líně: fbd importuje s7dcl
+    return {'projekt': projekt, 'instrukce': INSTRUKCE, 'bloky': vys_bloky, 'fbd': fbd.PALETA,
             'db': [{'nazev': d['nazev'], 'cislo': d['cislo'], 'instance_typ': d['instance_typ'],
                     'cleny': [] if d['instance_typ'] else [c for v in d['sekce'].values() for c in v]} for d in dbs],
             'tagy': sorted(tagy, key=lambda t: t['jmeno'].casefold())}

@@ -9,6 +9,7 @@ VZORKY = os.path.join(KOREN, 'tests', 'vzorky')
 PROJEKT = 'Demo_Linka'
 TS0 = '20261012-120000'      # původní export (20261012-140000 = export po zápisu úpravy NW1)
 TS1 = '20261012-140000'
+TS2 = '20261012-150000'     # export po zápisu FBD úpravy (jen FB_Bezpecnost, NW1: & + in4, = #Povoleni_Pohon)
 
 
 def po_nw2(net):

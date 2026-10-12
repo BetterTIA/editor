@@ -1,6 +1,7 @@
 """Kontrola „export po zápisu = návrh" (M4) — CLI pro Clauda i Honzu.
 
 python kontrola.py --server http://localhost:8765 --uprava U003 [--export-ts 20261012-140000]
+python kontrola.py --postup U003        # vytiskne postup skládání pro TIA (markdown) — F2
 
 Server najde v export rootu nejnovější (nebo zadaný) export bloku úpravy, network podle titulku (pak podle čísla),
 porovná ho s modelem „po" podle obsahu (typ + operand/piny + série/větve, bez id a rozložení) a zapíše kontrolu.
@@ -21,13 +22,25 @@ def kontrola(server, uprava, export_ts=None):
         return json.loads(f.read().decode('utf-8'))
 
 
+def postup(server, uprava):
+    with urllib.request.urlopen('%s/api/uprava/%s/postup' % (server.rstrip('/'), uprava), timeout=60) as f:
+        return json.loads(f.read().decode('utf-8'))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='LADEditor: kontrola exportu po zápisu proti návrhu')
     ap.add_argument('--server', default='http://localhost:8765')
-    ap.add_argument('--uprava', required=True)
+    g = ap.add_mutually_exclusive_group(required=True)
+    g.add_argument('--uprava', help='zkontroluje export po zápisu proti návrhu')
+    g.add_argument('--postup', metavar='UPRAVA', help='vytiskne postup skládání pro TIA (markdown)')
     ap.add_argument('--export-ts', help='timestamp exportu (jinak nejnovější s blokem)')
     a = ap.parse_args(argv)
     try:
+        if a.postup:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8')     # konzole Windows (cp1250) by spadla na „⟦
+            print(postup(a.server, a.postup)['markdown'], end='')
+            return 0
         k = kontrola(a.server, a.uprava, a.export_ts)
     except urllib.error.HTTPError as e:
         try:

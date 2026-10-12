@@ -1,0 +1,194 @@
+{
+    S7_BlockNumber := "30";
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "FBD";
+    S7_Safety := "TRUE";
+    S7_Version := "0.1"
+}
+FUNCTION_BLOCK "FB_Bezpecnost"
+    VAR_INPUT
+        Start : Bool;
+        Servis : Bool;
+        Porucha : Bool;
+        Kvitace_Tl : Bool;
+        Kvitace_HMI : Bool;
+        Kvitace_Dalkova : Bool;
+        Dvere_Zavreny : Bool;
+        Zamek_OK : Bool;
+        Snimac_A : Bool;
+        Snimac_B : Bool;
+    END_VAR
+    VAR_OUTPUT
+        Povoleni : Bool;
+        Povoleni_Pohon : Bool;
+        Nouz_OK : Bool;
+        Ochrana_OK : Bool;
+    END_VAR
+    VAR
+        NouzStop : ESTOP1;
+        Dvere : SFDOOR;
+        Blokace : Bool;
+        Kvitace : Bool;
+        Kvitace_Pamet : Bool;
+        Kvitace_Nutna : Bool;
+        Kvitace_Pozadavek : Bool;
+        Kontrolka_Zelena : Bool;
+        Kontrolka_Cervena : Bool;
+        Porucha_Pamet : Bool;
+        Pamet_SR : Bool;
+        Stav_SR : Bool;
+        Nuluj : Bool;
+        Vzdy_1 : Bool;
+        Krok : Int;
+        Nesoulad_Pamet : Bool;
+        Nesoulad_Hrana : Bool;
+    END_VAR
+
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG #Start
+            O( in2 := #Servis )
+            A(
+                in2 := NOT #Porucha,
+                in3 := "DB_Stroj".Bezpecnost_OK,
+                in4 := #Zamek_OK
+            )
+            Coil( #Povoleni_Pohon )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_2"
+    }
+    NETWORK
+        RUNG #Kvitace_Tl
+            A( in2 := wire#w1 )
+            Coil( #Kvitace )
+        END_RUNG
+        RUNG #Kvitace_HMI
+            O(
+                in2 := #Kvitace_Dalkova,
+                in3 := NOT #Blokace
+            )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_3"
+    }
+    NETWORK
+        RUNG #Dvere_Zavreny
+            A( in2 := #Zamek_OK )
+            wire#w2
+            Coil( #Ochrana_OK )
+            Coil( #Kontrolka_Zelena )
+        END_RUNG
+        RUNG wire#w2
+            NOT Coil( #Kontrolka_Cervena )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_4"
+    }
+    NETWORK
+        RUNG
+            {
+                f_user_card := "1";
+                f_image_card := "0"
+            }
+            #NouzStop.ESTOP1(
+                E_STOP := "Nouzovy_Stop",
+                ACK_NEC := NOT #Kvitace_Nutna,
+                ACK := wire#w1,
+                TIME_DEL :=  ,
+                Q => #Nouz_OK,
+                Q_DELAY =>  ,
+                ACK_REQ => #Kvitace_Pozadavek,
+                DIAG =>
+            )
+        END_RUNG
+        RUNG #Kvitace
+            P_Trig( #Kvitace_Pamet )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_5"
+    }
+    NETWORK
+        RUNG
+            {
+                f_user_card := "1";
+                f_image_card := "0"
+            }
+            #Dvere.SFDOOR(
+                IN1 := "Dvere_K1",
+                IN2 := "Dvere_K2",
+                QBAD_IN1 := NOT "Modul_K1".QBAD,
+                QBAD_IN2 := NOT "Modul_K2".QBAD,
+                OPEN_NEC := #Kvitace_Nutna,
+                ACK_NEC := #Kvitace_Nutna,
+                ACK := #Kvitace,
+                Q =>  ,
+                ACK_REQ =>  ,
+                DIAG =>
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_6"
+    }
+    NETWORK
+        RUNG #Porucha
+            S_Coil( #Porucha_Pamet )
+        END_RUNG
+        RUNG #Kvitace
+            R_Coil( #Porucha_Pamet )
+        END_RUNG
+        RUNG #Porucha_Pamet
+            S_SR(
+                r1 := #Nuluj,
+                operand := #Pamet_SR
+            )
+            Coil( #Stav_SR )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_7"
+    }
+    NETWORK
+        RUNG true
+            Coil( #Vzdy_1 )
+        END_RUNG
+        RUNG TRUE
+            Move(
+                in := 1,
+                out1 => #Krok
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD";
+        S7_NetworkTitle := "MLC_8"
+    }
+    NETWORK
+        RUNG #Snimac_A
+            X( in2 := #Snimac_B )
+            N_Trig( #Nesoulad_Pamet )
+            Coil( #Nesoulad_Hrana )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "FBD"
+    }
+    NETWORK
+        RUNG
+        END_RUNG
+    END_NETWORK
+END_FUNCTION_BLOCK

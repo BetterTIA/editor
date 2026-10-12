@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT
+from tests.spolecne import VZORKY, PROJEKT, TS0, TS2
 import fbd
 import rozdil
 import s7dcl
@@ -16,8 +16,8 @@ import server
 BLOK = 'FB_Bezpecnost'
 
 
-def nw(n):
-    _, b = server._nacti(VZORKY, PROJEKT, BLOK)
+def nw(n, ts=TS0):
+    _, b = server._nacti(VZORKY, PROJEKT, BLOK, ts)
     return b['networky'][n - 1]
 
 
@@ -35,7 +35,7 @@ def obal(text):
 
 class TestParserFBD(unittest.TestCase):
     def test_vsechny_networky(self):
-        _, b = server._nacti(VZORKY, PROJEKT, BLOK)
+        _, b = server._nacti(VZORKY, PROJEKT, BLOK, TS0)
         self.assertEqual((b['druh'], b['cislo'], b['jazyk'], len(b['networky'])), ('FB', 30, 'FBD', 9))
         for n in b['networky']:
             self.assertEqual(n['jazyk'], 'FBD')
@@ -159,9 +159,9 @@ class TestOperaceARozdilFBD(unittest.TestCase):
                        {'typ': 'negace', 'id': 'b9', 'vstup': 1}, {'typ': 'negace', 'id': 'b2', 'vstup': 7}):
             with self.assertRaises(fbd.ChybaOperace):
                 fbd.proved(m, spatna)
-        self.assertEqual(fbd.validuj(m), [])
+        self.assertEqual([(c['id'], c.get('varovani')) for c in fbd.validuj(m)], [('b1', True)])   # >=1 odpojen (F2)
         m['prvky'][2]['operand'] = ''
-        self.assertEqual([c['id'] for c in fbd.validuj(m)], ['b3'])
+        self.assertEqual([c['id'] for c in fbd.validuj(m)], ['b1', 'b3'])
 
     def test_over_model(self):
         p = copy.deepcopy(nw(1)['prvky'])
@@ -209,7 +209,7 @@ class TestApiFBD(unittest.TestCase):
         return r.status, t
 
     def test_network_a_navrh(self):
-        s, n = self.req('GET', '/api/network?projekt=%s&blok=%s&nw=1' % (PROJEKT, BLOK))
+        s, n = self.req('GET', '/api/network?projekt=%s&blok=%s&nw=1&ts=%s' % (PROJEKT, BLOK, TS0))
         self.assertEqual((s, n['jazyk'], n['kresba']['fbd'], len(n['signaly'])), (200, 'FBD', True, 2))
         # Claude: zkouška operací (nic neukládá) -> návrh
         s, r = self.req('POST', '/api/rozlozeni', {'projekt': PROJEKT, 'po': {'jazyk': 'FBD', 'prvky': n['prvky']},
@@ -222,21 +222,19 @@ class TestApiFBD(unittest.TestCase):
                                                 'po': {'prvky': r['po']['prvky']}, 'cislo_bloku': 999, 'titulek': 'x'})
         self.assertEqual((s, u['stav'], u['jazyk'], u['cislo_bloku'], u['titulek']),
                          (201, 'Proposal', 'FBD', 30, 'Povolení — >=1, & s negací, přiřazení'))
-        self.assertEqual((u['pred']['jazyk'], u['pred']['export_ts'], u['po']['jazyk']), ('FBD', '20261012-120000', 'FBD'))
+        self.assertEqual((u['pred']['jazyk'], u['pred']['export_ts'], u['po']['jazyk'], u['f']), ('FBD', TS2, 'FBD', True))
         self.assertEqual(len(u['po']['signaly']), 2)
-        s, d = self.req('GET', '/api/uprava/%s' % u['id'])
-        self.assertEqual((s, d['jazyk'], d['kresba']['fbd'], d['rozdil'], d['chyby']),
-                         (200, 'FBD', True, {'b2': 'zmeneny', 'b3': 'zmeneny'}, []))
+        s, d = self.req('GET', '/api/uprava/%s' % u['id'])                # „před" = nejnovější export, ten už úpravu má
+        self.assertEqual((s, d['jazyk'], d['kresba']['fbd'], d['rozdil'], d['chyby']), (200, 'FBD', True, {}, []))
         # uložení „po" editorem: jazyk se nemění
         s, _ = self.req('POST', '/api/uprava/%s/po' % u['id'], {'po': {'prvky': [], 'rungy': []}})
         self.assertEqual(s, 400)
         s, x = self.req('POST', '/api/uprava/%s/po' % u['id'], {'po': {'jazyk': 'FBD', 'prvky': n['prvky']}})
         self.assertEqual(s, 200)
-        # kontrola exportem pro FBD až v F2 — nesmí spadnout
+        # „po" = export před úpravou -> shoda, ale s poznámkou (F2: kontrola FBD po obsahu)
         self.req('POST', '/api/uprava/%s/stav' % u['id'], {'stav': 'Approved', 'kdo': 'test'})
-        s, k = self.req('POST', '/api/uprava/%s/kontrola-exportem' % u['id'], {})
-        self.assertEqual((s, k['shoda']), (200, False))
-        self.assertIn('F2', k['poznamka'])
+        s, k = self.req('POST', '/api/uprava/%s/kontrola-exportem' % u['id'], {'export_ts': TS0})
+        self.assertEqual((s, k['shoda']), (200, True))
 
     def test_spatny_navrh(self):
         p = {'jazyk': 'FBD', 'prvky': [{'id': 'b1', 'typ': 'assign', 'operand': '#X', 'vystupy': [],
