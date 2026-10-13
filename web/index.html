@@ -206,6 +206,9 @@ header a:hover { color: var(--accent); }
 .add input[type=text] { flex: 1; min-width: 220px; font-family: Consolas, monospace; padding: 4px 8px; }
 .add .note { color: var(--warning); font-size: 12px; margin-top: 4px; }
 .add .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.add pre { margin: 0 0 4px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--edge); border-radius: 4px;
+            font: 12px Consolas, monospace; overflow-x: auto; white-space: pre; }
+.add code { font-family: Consolas, monospace; }
 .empty-state { border: 1px dashed var(--edge); border-radius: 6px; padding: 18px; color: var(--muted); }
 .empty-state b { color: var(--text); }
 @media (max-width: 700px) { .add .opt { grid-template-columns: 1fr; } .status { margin-left: 0; } header { flex-wrap: wrap; } }
@@ -1012,8 +1015,14 @@ function statusHtml(st) {
   else tia = chip('', 'TIA', st.checked === false ? 'not checked' : 'unknown');
   return tia + chip(tool(st.writer), 'Writer', st.writer || '—') +
     chip(tool(st.reader), 'Reader', st.reader || '—', st.reader_export_root ? `${st.reader} · Reader export root: ${st.reader_export_root}` : st.reader) +
-    chip('', 'AI', st.ai || 'no client', 'filled in by the editor MCP server (later)') +
+    aiChip(st, chip) +
     `<button id="status-refresh" title="check TIA Portal, Writer and Reader again">${st.busy ? 'Busy…' : 'Refresh'}</button>`;
+}
+function aiChip(st, chip) {
+  const cl = st.ai_clients || [];
+  if (!cl.length) return chip('', 'AI', 'no client', 'no AI agent connected — see "Connect an AI agent" on the home page');
+  return chip('ok', 'AI', `connected (${cl.map(c => c.name).join(', ')})`,
+    cl.map(c => `${c.name} ${c.version || ''} · connected ${c.since} · last heartbeat ${c.last_seen}`).join(' | '));
 }
 async function loadStatus(refresh, portalId) {
   if (refresh) $('status').innerHTML = statusHtml(Object.assign({}, tiaStatus, {busy: true}));
@@ -1072,6 +1081,17 @@ function addHtml() {
   <div id="add-job"></div><div id="add-error"></div>
 </div>`;
 }
+function aiHtml() {
+  const server = location.origin;
+  const cfg = JSON.stringify({mcpServers: {'bettertia-editor': {command: 'python', args: ['mcp_server.py', '--server', server]}}}, null, 2);
+  const items = [['Claude Code', '.mcp.json in the project folder', cfg], ['Cursor', '.cursor/mcp.json', cfg],
+                 ['Any MCP client', 'stdio command', `python mcp_server.py --server ${server}`]];
+  return `<div class="add ai">${items.map(([t, sub, text], i) => `<div class="opt"><div><b>${t}</b><span>${sub}</span></div>` +
+    `<div><pre id="ai-cfg-${i}">${esc(text)}</pre><button data-copy="${i}">copy</button></div></div>`).join('')}` +
+    `<div class="hint">The command runs in the client's working folder: use the full path of this repository's <code>mcp_server.py</code> ` +
+    `when the client starts elsewhere. The agent reads projects and networks, proposes edits and checks exports; ` +
+    `approving an edit and writing it to TIA Portal stay with you, here in the editor.</div></div>`;
+}
 let homeJob = null;
 async function showHome() {
   document.querySelector('.main').classList.add('home');
@@ -1081,10 +1101,14 @@ async function showHome() {
   h += r.projects.length ? `<div class="cards">${r.projects.map(cardHtml).join('')}</div>` :
     `<div class="empty-state"><b>No projects yet.</b> Add a Reader export folder that is already on disk, connect to the project ` +
     `open in TIA Portal, or open an .ap21 file. Each project keeps a snapshot (a Reader export) the edits are drawn from.</div>`;
-  h += `<h2>Add project</h2>${addHtml()}</div>`;
+  h += `<h2>Add project</h2>${addHtml()}<h2>Connect an AI agent</h2>${aiHtml()}</div>`;
   $('content').innerHTML = h;
   const job = homeJob || (r.running_job && !r.running_job.project ? r.running_job : null);
   if (job) $('add-job').innerHTML = jobHtml(job, '');
+  for (const b of document.querySelectorAll('[data-copy]')) b.onclick = async () => {
+    try { await navigator.clipboard.writeText($('ai-cfg-' + b.dataset.copy).textContent); b.textContent = 'copied'; }
+    catch (e) { b.textContent = 'cannot copy'; }
+  };
   const fail = e => { $('add-error').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`; };
   $('add-exports').onclick = () => apiJson('POST', '/api/projects', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
   $('add-tia').onclick = () => startJob('/api/projects', {source: 'tia'}).catch(fail);
@@ -1131,6 +1155,9 @@ async function start() {
   }
   await status;
   document.body.dataset.done = '1';
+  if (q.get('screenshot') !== '1') setInterval(async () => {   // an AI agent connects / leaves -> update the chip
+    try { if ((await api('/api/tia/status')).ai !== tiaStatus.ai) await loadStatus(false); } catch (e) {}
+  }, 10000);
 }
 start().catch(e => {
   $('content').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`;

@@ -103,6 +103,7 @@ class TestProjects(unittest.TestCase):
         c.close()
         self.assertIn(b'id="status"', html)
         self.assertIn(b'showHome', html)
+        self.assertIn(b'Connect an AI agent', html)
 
     def test_edit_counts(self):
         self.start()
