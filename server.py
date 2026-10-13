@@ -267,6 +267,11 @@ def _after_model(after, language):
     return m
 
 
+def _before(u):
+    """The "before" model of an edit with a model: a new network starts empty."""
+    return dict(_empty_model(u['after']), export_ts=u['before'].get('export_ts')) if u.get('kind') == 'new_network' else u['before']
+
+
 def _empty_model(after):
     return {'language': 'FBD', 'elements': [], 'signals': [], 'layout': {}} if fbd.is_fbd(after) else \
         {'elements': [], 'rungs': [], 'wires': [], 'layout': {}}
@@ -376,6 +381,41 @@ def _new_interface(root, project, block, body):
             'before': {'interface': iface, 'export_ts': t}, '_block': b}
 
 
+def _one_line(v, what, required=False, n=300):
+    if v is None or v == '':
+        if required:
+            raise state.StateError('%s is required' % what, 400)
+        return None
+    if not isinstance(v, str) or len(v) > n or '\r' in v or ('\n' in v and what != 'comment'):
+        raise state.StateError('%s must be text%s (at most %d characters)' % (what, '' if what == 'comment' else ' on one line', n), 400)
+    return v.strip() if what != 'comment' else v.strip('\r\n')
+
+
+def _new_net(root, project, block, body):
+    """New network after NW after_nw (0 = at the start): title, comment?, language (LAD|FBD, default the block's), after."""
+    t, b = _load(root, project, block)
+    try:
+        after_nw = int(body.get('after_nw'))
+    except (TypeError, ValueError):
+        raise state.StateError('after_nw: the number of the network the new one follows (0 = at the start)', 400)
+    if not 0 <= after_nw <= len(b['networks']):
+        raise state.StateError('after_nw must be 0…%d (the block has %d networks)' % (len(b['networks']), len(b['networks'])), 400)
+    language = body.get('language') or b['language']
+    if language not in ('LAD', 'FBD'):
+        raise state.StateError('language must be LAD or FBD (the block language is %s)' % (b['language'] or '?'), 400)
+    u = {'block': block, 'nw': after_nw + 1, 'after_nw': after_nw,
+         'after_title': b['networks'][after_nw - 1]['title'] if after_nw else '',
+         'title': _one_line(body.get('title'), 'title', True), 'language': language,
+         'after': _after_model(body.get('after'), language), 'before': {'export_ts': t}, '_block': b}
+    comment = _one_line(body.get('comment'), 'comment', n=2000)
+    if comment:
+        u['comment'] = comment
+    if any(n['title'] == u['title'] for n in b['networks']):
+        raise state.StateError('a network titled "%s" is already in the block — the export check finds a new network by '
+                               'its title, give it a unique one' % u['title'], 400)
+    return u
+
+
 def _new_change(root, project, block, body):
     net = api_network(root, project, block, int(body.get('nw', 0)))
     if net['language'] == 'FBD' and net.get('signals') is not None:
@@ -397,7 +437,7 @@ def api_edit_create(root, data, body):
     if kind not in state.KINDS:
         raise state.StateError('kind must be one of %s' % ', '.join(state.KINDS), 400)
     state._file(data, project)                      # checks --data and the project name
-    u = {'interface': _new_interface, 'network': _new_change}[kind](root, project, block, body)
+    u = {'interface': _new_interface, 'network': _new_change, 'new_network': _new_net}[kind](root, project, block, body)
     b = u.pop('_block', None) or _load(root, project, u['block'])[1]
     f = bool(u.pop('f_net', None) or b['attributes'].get('S7_Safety') == 'TRUE' or body.get('f'))
     when, by = state.now(), str(body.get('by') or 'editor')[:80]
@@ -498,7 +538,7 @@ def api_edit_detail(data, uid, width=0, root=None):
     if u.get('kind') == 'interface':
         res = {'interface': _interface_rows(u), 'diff': {}, 'drawing': None, 'elements': [], 'rungs': [], 'warnings': []}
     else:
-        res = _diff_drawing(u['before'] if u.get('kind') == 'network' else _empty_model(u['after']), u['after'], width)
+        res = _diff_drawing(_before(u), u['after'], width)
         if root:
             res['warnings'] += _operand_warnings(root, data, u)
     res['tia'] = s.get('tia')
@@ -631,7 +671,15 @@ def api_check_export(root, data, uid, body):
     t, b = _load(root, u['project'], u['block'], str(body['export_ts']) if body.get('export_ts') else None)
     notes = []
     cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
-    if cand:
+    if u.get('kind') == 'new_network':                # found only by its title (and language); its number is a note
+        cand = [n for n in cand if n['language'] == u['language']] or cand
+        n = next((x for x in cand if x['nw'] == u['nw']), cand[0] if cand else None)
+        if n:
+            notes.append('the new network is NW %d in the export%s' % (
+                n['nw'], '' if n['nw'] == u['nw'] else ' (expected NW %d, after NW %d)' % (u['nw'], u['after_nw'])))
+        if len(cand) > 1:
+            notes.append('the title occurs %d× in the block, compared NW %d' % (len(cand), n['nw']))
+    elif cand:
         n = next((x for x in cand if x['nw'] == u['nw']), cand[0])
         if n['nw'] != u['nw']:
             notes.append('the network moved: NW %d → NW %d (by title "%s")' % (u['nw'], n['nw'], u['title']))
@@ -642,7 +690,8 @@ def api_check_export(root, data, uid, body):
         if u.get('title'):
             notes.append('title "%s" is not in the export — compared by number NW %d' % (u['title'], u['nw']))
     if n is None:
-        match, diffs = False, ['network %d is not in the export' % u['nw']]
+        match, diffs = False, ['network %d is not in the export' % u['nw'] if u.get('kind') != 'new_network'
+                               else 'no network titled "%s" in the export' % u['title']]
     elif fbd.is_fbd(u['after']):
         if n['language'] != 'FBD' or 'elements' not in n:
             match, diffs = False, ['NW %d in the export is in %s' % (n['nw'], n['language']) if n['language'] != 'FBD'
@@ -675,7 +724,7 @@ def api_edit_after(data, uid, body):
                 u['section'] = _section(body['section'])
             if body.get('members') is not None:
                 u['members'] = _members(body['members'], [m['name'] for v in u['before']['interface'].values() for m in v])
-        else:
+        elif body.get('after') is not None or u.get('kind') == 'network':
             if body.get('after') is None:
                 raise state.StateError('after: the network model is required', 400)
             after = _after_model(body['after'], 'FBD' if fbd.is_fbd(body['after']) else 'LAD')
@@ -684,6 +733,11 @@ def api_edit_after(data, uid, body):
             if fbd.is_fbd(after) != fbd.is_fbd(u['after']):
                 raise state.StateError('the language of the proposal (LAD/FBD) must stay the same', 400)
             u['after'] = after
+        if u.get('kind') == 'new_network':
+            if body.get('title') is not None:
+                u['title'] = _one_line(body['title'], 'title', True)
+            if body.get('comment') is not None:
+                u['comment'] = _one_line(body['comment'], 'comment', n=2000) or ''
         u['edited'] = state.now()
         if body.get('note') is not None:
             u['note'] = str(body['note'])
@@ -739,6 +793,34 @@ def _add_members_in_file(file, bom, text, u):
         ' — comments are not written to the document (%s): add them in TIA' % ', '.join(comments)) if comments else '')
 
 
+def _insert_in_file(file, bom, text, b, u):
+    """New network: inserted after NW after_nw (no title attribute — the title is set after the import through the Writer's
+    SetNetworkText); the text is parsed again and the new network must match the proposal."""
+    if u['after_nw'] > len(b['networks']):
+        raise s7dcl_write.WriteError('NW %d is not in the exported block (it has %d networks)' % (u['after_nw'], len(b['networks'])))
+    if u['after_nw'] and u.get('after_title') and b['networks'][u['after_nw'] - 1]['title'] != u['after_title']:
+        raise s7dcl_write.WriteError('NW %d in the project is "%s", the proposal follows "%s" — the networks moved, propose again'
+                                     % (u['after_nw'], b['networks'][u['after_nw'] - 1]['title'], u['after_title']))
+    new_value = s7dcl_write.insert_network(text, u['after_nw'], s7dcl_write.network_text(u['after']), u['language'])
+    nets = s7dcl.parse_block(new_value.replace('\r\n', '\n'))['networks']
+    if len(nets) != len(b['networks']) + 1:
+        raise s7dcl_write.WriteError('the block does not have one network more after the insertion')
+    back = nets[u['after_nw']]
+    m = (fbd.content_match if u['language'] == 'FBD' else diff.content_match)(_without_call_names(u['after']), _without_call_names(back))
+    if not m[0]:
+        raise s7dcl_write.WriteError('the serialized proposal does not match the proposal: %s' % '; '.join(m[1]))
+    with open(file, 'wb') as f:
+        f.write((b'\xef\xbb\xbf' if bom else b'') + new_value.encode('utf-8'))
+    return 'new %s network inserted as NW %d (after NW %d)' % (u['language'], u['after_nw'] + 1, u['after_nw'])
+
+
+def _network_texts(u, file):
+    """(network number, title, comment) to set through SetNetworkText after the import, or None."""
+    if u.get('kind') == 'new_network':
+        return u['after_nw'] + 1, u['title'], u.get('comment') or None
+    return None
+
+
 def _replace_in_file(file, u):
     """Replace the change's network (by title, otherwise by number) in the exported .s7dcl with the "after" model -> description.
     Safeguards: no F-block and no network in another language is overwritten; the replaced text is parsed again and must match the proposal."""
@@ -751,6 +833,8 @@ def _replace_in_file(file, u):
         raise s7dcl_write.WriteError('the block is an F-block (S7_Safety) — Upload is for non-safety blocks only, change it by hand')
     if u.get('kind') == 'interface':
         return _add_members_in_file(file, bom, text, u)
+    if u.get('kind') == 'new_network':
+        return _insert_in_file(file, bom, text, b, u)
     cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
     n = next((x for x in cand if x['nw'] == u['nw']), cand[0]) if cand else \
         (b['networks'][u['nw'] - 1] if u['nw'] <= len(b['networks']) else None)
@@ -855,13 +939,20 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
                 if not files:
                     raise s7dcl_write.WriteError('the Writer did not export %s.s7dcl' % block)
                 folder = os.path.dirname(files[0])
-                step({'interface': 'Add interface members in .s7dcl'}.get(u.get('kind'), 'Replace the network in .s7dcl'),
+                step({'interface': 'Add interface members in .s7dcl', 'new_network': 'Insert the network in .s7dcl'}.get(
+                    u.get('kind'), 'Replace the network in .s7dcl'),
                      lambda: _replace_in_file(files[0], u))
                 preview = step('PreviewImport', lambda: k.call('PreviewImport', {
                     'softwarePath': sp, 'importPath': folder, 'kind': 'block', 'groupPath': grp}))
                 step('ImportFromDocuments', lambda: k.call('ImportFromDocuments', {
                     'softwarePath': sp, 'groupPath': grp, 'importPath': folder, 'fileNameWithoutExtension': block,
                     'importOption': 'Override'}))
+                texts = _network_texts(u, files[0])
+                if texts:                             # title / comment: the Writer edits the texts of the imported block
+                    arg = {'softwarePath': sp, 'blockPath': (grp + '/' if grp else '') + block, 'network': texts[0],
+                           'dryRun': False}
+                    arg.update({k_: v for k_, v in (('title', texts[1]), ('comment', texts[2])) if v is not None})
+                    step('SetNetworkText', lambda: k.call('SetNetworkText', arg))
             ok, message = True, ('written to the project (%s, group %s) — save the project in TIA (the Writer does not call '
                                    'SaveProject)') % (sp, grp or '/')
         except mcp_client.MCPError as e:

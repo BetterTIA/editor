@@ -620,6 +620,8 @@ async function showNetwork(project, block) {
     const d = document.createElement('div');
     d.className = 'tools';
     d.innerHTML = `<button class="hl" id="proposal">Propose edit</button> round <input id="proposal-round" value="${esc(round)}">` +
+                  `<span class="sep"></span><button id="proposal-new" title="an empty ${esc(net.language)} network after NW ${net.nw}, composed in the editor">Propose new network after this one</button>` +
+                  `<input id="proposal-title" placeholder="title of the new network" style="width:220px">` +
                   (net.as_lad ? `<button id="as-lad" class="${q.get('lad') === '1' ? 'active' : ''}" title="read-only; only for a network made of &, >=1, negations and =">` +
                                   `${q.get('lad') === '1' ? 'Show as FBD' : 'Show as LAD'}</button>` : '') +
                   `<span class="mode" id="proposal-error"></span>`;
@@ -629,6 +631,16 @@ async function showNetwork(project, block) {
       try {
         const u = await apiJson('POST', '/api/edits', {project, round: $('proposal-round').value.trim() || 'Round 1', block, nw,
                                  after: fbd ? {language: 'FBD', elements: net.elements} : {elements: net.elements, rungs: net.rungs}, note: ''});
+        location.href = `?edit=${enc(u.id)}&edit_mode=1`;
+      } catch (e) { $('proposal-error').textContent = '⚠ ' + e.message; }
+    };
+    $('proposal-new').onclick = async () => {
+      const title = $('proposal-title').value.trim();
+      if (!title) { $('proposal-error').textContent = '⚠ give the new network a title (it finds the network in the export)'; $('proposal-title').focus(); return; }
+      try {
+        const u = await apiJson('POST', '/api/edits', {project, round: $('proposal-round').value.trim() || 'Round 1', block, kind: 'new_network',
+                                 after_nw: nw, title, language: net.language,
+                                 after: fbd ? {language: 'FBD', elements: []} : {elements: [], rungs: [{from: 'powerrail', path: [], to: null}]}, note: ''});
         location.href = `?edit=${enc(u.id)}&edit_mode=1`;
       } catch (e) { $('proposal-error').textContent = '⚠ ' + e.message; }
     };
@@ -663,7 +675,7 @@ async function showEdit(uid, error) {
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
-    left += networksHtml(b, u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
+    left += networksHtml(b, u.kind === 'new_network' ? u.after_nw : u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
   } catch (e) { /* block no longer in the export: the tree is enough */ }
   $('nw').innerHTML = left;
   const m = $('content');
@@ -871,7 +883,8 @@ async function editor(uid) {
   if (u.kind === 'interface') { await showEdit(uid, 'An interface edit has no canvas — change its members with update_edit (MCP) or POST /api/edits/<id>/after.'); return; }
   const fbd = u.after.language === 'FBD';
   Object.assign(ed, {u, fbd, f: !!u.f, input: null,
-                     before: fbd ? {language: 'FBD', elements: u.before.elements} : {elements: u.before.elements, rungs: u.before.rungs},
+                     before: u.kind === 'new_network' ? (fbd ? {language: 'FBD', elements: []} : {elements: [], rungs: []})
+                           : fbd ? {language: 'FBD', elements: u.before.elements} : {elements: u.before.elements, rungs: u.before.rungs},
                      after: fbd ? {language: 'FBD', elements: u.after.elements} : {elements: u.after.elements, rungs: u.after.rungs},
                      hist: [], redo: [], select: null, insert: null, branch: null, changed: false});
   ed.cat = await api(`/api/catalog?project=${enc(u.project)}`);
@@ -880,7 +893,7 @@ async function editor(uid) {
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
-    left += networksHtml(b, u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
+    left += networksHtml(b, u.kind === 'new_network' ? u.after_nw : u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
   } catch (e) { /* block not in the export */ }
   $('nw').innerHTML = left;
   document.querySelector('.main').classList.add('edit');
@@ -1246,8 +1259,8 @@ function statusHtml(st) {
     `<select id="portal"><option value="">choose instance…</option>${st.instances.map(i =>
       `<option value="${esc(i.portalId)}">${esc(i.project || '?')} (${esc(i.portalId)})</option>`).join('')}</select>`;
   else tia = chip('', 'TIA', st.checked === false ? 'not checked' : 'unknown');
-  return tia + chip(tool(st.writer), 'Writer', (st.writer || '—') + fake) +
-    chip(tool(st.reader), 'Reader', (st.reader || '—') + fake, st.reader_export_root ? `${st.reader} · Reader export root: ${st.reader_export_root}` : st.reader) +
+  return tia + chip(tool(st.writer), 'Writer', (st.writer || '—') + (st.writer ? fake : '')) +
+    chip(tool(st.reader), 'Reader', (st.reader || '—') + (st.reader ? fake : ''), st.reader_export_root ? `${st.reader} · Reader export root: ${st.reader_export_root}` : st.reader) +
     aiChip(st, chip) +
     `<button id="status-refresh" title="check TIA Portal, Writer and Reader again">${st.busy ? 'Busy…' : 'Refresh'}</button>`;
 }

@@ -240,7 +240,8 @@ MODEL = {'type': 'object', 'description': 'network model: LAD {elements, rungs} 
                                           'start from get_network, keep the ids of kept elements, new ids for new ones'}
 TS = {'type': 'string', 'description': 'export timestamp YYYYMMDD-HHMMSS (default: the newest export of the block)'}
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
-KIND = {'type': 'string', 'enum': ['network', 'interface'], 'description': 'what the edit changes (default network)'}
+KIND = {'type': 'string', 'enum': ['network', 'interface', 'new_network'],
+        'description': 'what the edit changes (default network)'}
 SECTION = {'type': 'string', 'enum': ['Input', 'Output', 'InOut', 'Static', 'Temp', 'Constant'],
            'description': 'interface section the members are added to'}
 MEMBERS = {'type': 'array', 'description': 'interface members to add (adding only; changing or removing is not offered)',
@@ -261,16 +262,24 @@ TOOLS = [
      _schema({'id': S}, ['id']), get_edit),
     ('propose_edit', 'Create a new edit in state Proposal. kind "network" (default): an "after" model of network nw. '
                      'kind "interface": add members to one section of the block interface (section + members). '
+                     'kind "new_network": a new network after NW after_nw (0 = at the start) with a unique title, '
+                     'optional comment and language (LAD/FBD, default the block language) and its "after" model. '
                      'Returns the id, LAD/FBD rule errors and warnings (e.g. a #operand missing from the interface). '
                      'A human reviews and approves it in the editor.',
      _schema({'project': S, 'round': {'type': 'string', 'description': 'round / topic the edit belongs to'},
               'block': S, 'kind': KIND, 'nw': I, 'after': MODEL, 'note': S,
               'section': SECTION, 'members': MEMBERS,
+              'after_nw': {'type': 'integer', 'minimum': 0, 'description': 'new_network: the network it follows (0 = at the start)'},
+              'title': {'type': 'string', 'description': 'new_network: title (unique in the block)'},
+              'comment': {'type': 'string', 'description': 'new_network: network comment'},
+              'language': {'type': 'string', 'enum': ['LAD', 'FBD'], 'description': 'new_network: default the block language'},
               'by': {'type': 'string', 'description': 'author shown in the history (default: the client name)'}},
              ['project', 'round', 'block']), propose_edit),
     ('update_edit', 'Change a Proposal: the "after" model of a network edit, the members/section of an interface edit, '
                     'and the note.',
-     _schema({'id': S, 'after': MODEL, 'note': S, 'section': SECTION, 'members': MEMBERS}, ['id']), update_edit),
+     _schema({'id': S, 'after': MODEL, 'note': S, 'section': SECTION, 'members': MEMBERS,
+              'title': {'type': 'string', 'description': 'new_network: title'},
+              'comment': {'type': 'string', 'description': 'new_network: comment'}}, ['id']), update_edit),
     ('run_check', 'Compare an export (newest or given) with the edit\'s "after" model and record the check.',
      _schema({'id': S, 'export_ts': TS}, ['id']), run_check),
     ('get_procedure', 'Step-by-step instructions for making the edit by hand in TIA Portal (markdown).',

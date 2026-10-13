@@ -257,6 +257,36 @@ def replace_network(text_s7dcl, nw_number, new_text):
     return t.replace('\n', '\r\n') if crlf else t
 
 
+def insert_network(text_s7dcl, after_nw, network_body, language='LAD'):
+    """Inserts a new `{ S7_Language := "…" } NETWORK … END_NETWORK` after the after_nw-th network (0 = before the first;
+    a block without networks gets it before END_FUNCTION_BLOCK / END_FUNCTION / END_ORGANIZATION_BLOCK). No title or
+    comment attribute: their `.s7res` ids are not derived here — the title is set after the import (SetNetworkText)."""
+    if language not in ('LAD', 'FBD'):
+        raise WriteError('a new network is LAD or FBD, not %r' % (language,))
+    crlf = '\r\n' in text_s7dcl
+    t = text_s7dcl.replace('\r\n', '\n')
+    # a network = its attribute block (if any, braces never nest there) + NETWORK
+    starts = list(re.finditer(r'(?:^[ \t]*\{[^{}]*\}[ \t]*\n)?^[ \t]*NETWORK[ \t]*\n', t, re.M))
+    if not 0 <= after_nw <= len(starts):
+        raise WriteError('cannot insert after network %d (networks in block: %d)' % (after_nw, len(starts)))
+    body = network_body.replace('\r\n', '\n')
+    new_value = '    { S7_Language := "%s" }\n    NETWORK\n%s%s    END_NETWORK\n' % (language, body, '' if body.endswith('\n') else '\n')
+    if after_nw:
+        k = re.compile(r'^[ \t]*END_NETWORK[ \t]*\n', re.M).search(t, starts[after_nw - 1].end())
+        if not k:
+            raise WriteError('NETWORK without END_NETWORK')
+        at = k.end()
+    elif starts:
+        at = starts[0].start()
+    else:
+        k = re.compile(r'^END_(FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\b', re.M).search(t)
+        if not k:
+            raise WriteError('end of the block not found')
+        at = k.start()
+    t = t[:at] + new_value + t[at:]
+    return t.replace('\n', '\r\n') if crlf else t
+
+
 # ---------- block interface (E2) ----------
 
 # section of an interface edit -> the keyword line that opens it in `.s7dcl`

@@ -6,7 +6,8 @@ python tests\\fake_mcp.py reader --export-root DIR --project Demo_Line [--state 
 "TIA project" = the --state folder (default %TEMP%\\tiac_fake_tia): a block appears there after its first import;
 until then it is read from --sample (default: the Demo_Line sample 20261012-120000\\PLC_1\\Blocks).
 Writer: Connect, ResolveObjectPath, ExportBlocksAsDocuments (copies .s7dcl/.s7res to exportPath), PreviewImport,
-ImportFromDocuments (copies the documents to --state and appends a line to <state>\\imports.jsonl).
+ImportFromDocuments (copies the documents to --state and appends a line to <state>\\imports.jsonl), SetNetworkText
+(title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res).
 Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
 --multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
 CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
@@ -18,6 +19,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -106,7 +108,49 @@ def writer(a, nm, arg):
         with open(os.path.join(a.state, 'imports.jsonl'), 'a', encoding='utf-8') as f:
             f.write(json.dumps(dict(arg, file=os.path.join(target, block + '.s7dcl')), ensure_ascii=False) + '\n')
         return 'Imported %s (%s)' % (block, arg.get('importOption'))
+    if nm == 'SetNetworkText':
+        return set_network_text(a, arg)
     raise ValueError('unknown tool %s for the fake Writer' % nm)
+
+
+def set_network_text(a, arg):
+    """Title / comment of network n: the attribute ids in .s7dcl (a new MLC_fake_N when missing) and their en-US text in
+    .s7res. The block is copied into --state first (= written to the "TIA project")."""
+    block = arg['blockPath'].strip('/').split('/')[-1]
+    z, group = find(a, block)
+    target = os.path.join(a.state, *[x for x in group.split('/') if x])
+    if os.path.normcase(os.path.abspath(z)) != os.path.normcase(os.path.abspath(target)):
+        copy_tree(z, target, block)
+    p = os.path.join(target, block + '.s7dcl')
+    with open(p, 'rb') as f:
+        t = f.read().decode('utf-8-sig')
+    if 'S7_Safety := "TRUE"' in t and not arg.get('allowFailsafe'):
+        raise ValueError('fail-safe block: pass allowFailsafe')
+    texts = {k: arg.get(v) for k, v in (('S7_NetworkTitle', 'title'), ('S7_NetworkComment', 'comment')) if arg.get(v) is not None}
+    if arg.get('dryRun', True):
+        return 'dry run: NW %s of %s would get %s' % (arg['network'], block, texts)
+    crlf, t = '\r\n' in t, t.replace('\r\n', '\n')
+    nets = list(re.finditer(r'(?:^([ \t]*)\{([^{}]*)\}[ \t]*\n)?^[ \t]*NETWORK[ \t]*\n', t, re.M))
+    m = nets[int(arg['network']) - 1]
+    attrs = dict(re.findall(r'(S7_\w+)\s*:=\s*"([^"]*)"', m.group(2) or ''))
+    rp = p[:-6] + '.s7res'
+    res = open(rp, encoding='utf-8-sig').read().replace('\r\n', '\n') if os.path.exists(rp) else 'MultiLingualTexts:\n'
+    for k, v in texts.items():
+        ident = attrs.get(k)
+        if not ident:
+            n = 1
+            while 'MLC_fake_%d' % n in res:
+                n += 1
+            ident = attrs[k] = 'MLC_fake_%d' % n
+        res = re.sub(r'(?m)^  - id: %s\n(?:    .*\n?)*' % re.escape(ident), '', res)        # drop the old entry
+        res = res.rstrip('\n') + "\n  - id: %s\n    en-US: '%s'\n" % (ident, v.replace("'", "''").replace('\n', ' '))
+    head = '    {\n' + ';\n'.join('        %s := "%s"' % kv for kv in attrs.items()) + '\n    }\n'
+    t = t[:m.start()] + head + re.search(r'^[ \t]*NETWORK[ \t]*\n', m.group(0), re.M).group(0) + t[m.end():]
+    with open(p, 'wb') as f:
+        f.write((t.replace('\n', '\r\n') if crlf else t).encode('utf-8'))
+    with open(rp, 'wb') as f:
+        f.write((res.replace('\n', '\r\n') if crlf else res).encode('utf-8'))
+    return 'NW %s of %s: %s set (fake)' % (arg['network'], block, ', '.join(texts))
 
 
 RUNS = {}

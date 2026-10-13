@@ -257,6 +257,18 @@ def procedure(u):
     if u.get('kind') == 'interface':
         inner = steps_interface(u)
         steps = ['Open the block %s (the interface is the upper part of the program editor).' % _c(block_name(u))]
+    elif u.get('kind') == 'new_network':
+        empty = {'language': 'FBD', 'elements': []} if fbd.is_fbd(u['after']) else {'elements': [], 'rungs': []}
+        if u['after_nw']:
+            steps = ['Open the block %s and select network **NW %s: %s**.' % (_c(block_name(u)), u['after_nw'], u.get('after_title') or ''),
+                     'Insert a network after it: right-click → **Insert network** (`Ctrl+R`) %s.' % N]
+        else:
+            steps = ['Open the block %s and select network **NW 1**.' % _c(block_name(u)),
+                     'Insert a network so that the new one becomes NW 1: **Insert network** (`Ctrl+R`) inserts it below the '
+                     'selection — then move it up %s.' % N]
+        inner = ['The new network is **NW %s**; its language must be **%s** (network properties).' % (u['after_nw'] + 1, u.get('language')),
+                 'Set the network title to **%s**%s.' % (u.get('title') or '', ' and the comment to “%s”' % u['comment'] if u.get('comment') else '')]
+        inner += (steps_fbd if fbd.is_fbd(u['after']) else steps_lad)(dict(u, before=empty)) or ['Leave the network empty.']
     else:
         inner = steps_fbd(u) if fbd.is_fbd(u['after']) else steps_lad(u)
         steps = ['Open the block %s and find network **NW %s: %s**.' % (_c(block_name(u)), u['nw'], u.get('title') or '')]
