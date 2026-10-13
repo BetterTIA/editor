@@ -1132,6 +1132,103 @@ def api_snapshot(h, name, body, source=None):
         str(body.get('softwarePath') or '') or None, bool(body.get('close'))))
 
 
+# ---------- changelog (D3): one timeline from state.json, export folders and jobs — no storage of its own ----------
+
+def _ts_time(ts):
+    return '%s-%s-%sT%s:%s:%s' % (ts[:4], ts[4:6], ts[6:8], ts[9:11], ts[11:13], ts[13:15])
+
+
+def _full_export(root, project, ts):
+    """A snapshot exports blocks + tag tables, a Check only one block: a Tags folder marks a full export."""
+    return bool(glob.glob(os.path.join(glob.escape(os.path.join(root, project, ts)), '*', 'Tags')))
+
+
+def _cell(s):
+    return str(s if s is not None else '').replace('\r', ' ').replace('\n', ' ').replace('|', '\\|')
+
+
+def changelog_markdown(project, items):
+    """Markdown: one table per day; every edit row carries block + number + network title, the way TIA shows it."""
+    out, day = ['# Changelog — %s' % project, ''], None
+    if not items:
+        out.append('Nothing recorded yet.')
+    for x in items:
+        if x['time'][:10] != day:
+            day = x['time'][:10]
+            out += ['', '## %s' % day, '', '| Time | Event | Block · network | By | Details |', '|---|---|---|---|---|']
+        what = '%s %s' % (x['edit'], x['kind']) if x.get('edit') else x['kind']
+        where = procedure.header(dict(x, kind=x.get('block_kind'))) if x.get('edit') else ''
+        out.append('| %s | %s | %s | %s | %s |' % tuple(_cell(v) for v in (x['time'][11:19], what, where, x['by'], x['summary'])))
+    return '\n'.join(out) + '\n'
+
+
+def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_state=None, block=None):
+    """-> {project, items: [{time, kind, edit?, block, nw, title, by, summary, …}]} oldest first.
+    kind: proposed | state | upload | write | check | snapshot. state/block filter the edit items (snapshots are dropped then)."""
+    exp = project_index(root, project)
+    edits = state.load(data, project)['edits'] if data else []
+    if not exp and not edits:
+        raise KeyError('unknown project')
+    items = []
+
+    def add(time_, kind, summary, u=None, by=''):
+        x = {'time': time_ or '', 'kind': kind, 'block': '', 'nw': None, 'title': '', 'by': by or '', 'summary': summary}
+        if u:
+            x.update(edit=u['id'], block=u['block'], nw=u['nw'], title=u.get('title') or '', block_kind=u.get('kind'),
+                     block_number=u.get('block_number'), state=u['state'])
+        items.append(x)
+    for u in edits:
+        hist = u.get('history') or []
+        add(u.get('time'), 'proposed', u.get('note') or 'proposal', u, u.get('author'))
+        for i, h in enumerate(hist):
+            if i:                                     # the first entry is the proposal itself
+                add(h.get('time'), 'state', '%s → %s' % (hist[i - 1]['state'], h['state']), u, h.get('by'))
+        reader_ts = set()
+        for w in u.get('writes') or []:
+            steps = w.get('steps') or []
+            ts = [k['step'][len('Export check '):] for k in steps if k.get('step', '').startswith('Export check ')]
+            if ts:                                    # a Check that ran: the check item below says the same
+                reader_ts.update(ts)
+                continue
+            add(w.get('time'), 'upload' if w.get('tool') == 'TIAC_Writer' else 'write',
+                '%s %s' % ('✓' if w.get('ok') else '✗', w.get('message') or ''), u, w.get('tool'))
+        for k in u.get('checks') or []:
+            add(k.get('time'), 'check', '%s · export %s%s' % ('match' if k.get('match') else 'MISMATCH', k.get('export_ts') or '?',
+                                                             ' · ' + k['note'] if k.get('note') else ''),
+                u, 'TIAC_Reader' if k.get('export_ts') in reader_ts else 'export check')
+    checked = {k.get('export_ts'): u['id'] for u in edits for k in u.get('checks') or []}
+    snap_jobs = [j for j in (jobs or {}).values() if j.get('kind') == 'snapshot' and j.get('project') == project]
+    by_job = {j['result']['export_ts']: j for j in snap_jobs if j.get('result')}
+    for ts in sorted(exp):
+        if _full_export(root, project, ts):
+            summary = 'snapshot: full export, %d blocks' % len(exp[ts])
+        else:
+            summary = 'partial export: %s' % ', '.join(sorted(exp[ts])[:5]) + (' …' if len(exp[ts]) > 5 else '')
+        j = by_job.get(ts)
+        if j:
+            summary += ' (job %s)' % j['id']
+        elif ts in checked:
+            summary += ' (Check %s)' % checked[ts]
+        add(_ts_time(ts), 'snapshot', summary, by='TIAC_Reader' if j or ts in checked else '')
+    for j in snap_jobs:
+        if j.get('state') == 'error':
+            add(j.get('finished') or j.get('started'), 'snapshot', 'snapshot failed (job %s): %s' % (j['id'], j.get('error')),
+                by='TIAC_Reader')
+
+    def when(x):
+        x = str(x or '')
+        return _ts_time(x) if TS.match(x) else x
+    since, until = when(since), when(until)
+    items = [x for x in items if (not since or x['time'] >= since) and (not until or x['time'][:len(until)] <= until)
+             and (not edit_state or x.get('state') == edit_state) and (not block or x.get('block') == block)]
+    # shortcut: times have one-second resolution, so ties follow the usual causal order (a write, then the state it set;
+    # an export, then its check); a user's click within the same second as a tool may sort wrong — add a sequence if it matters
+    rank = {'proposed': 0, 'upload': 2, 'write': 2, 'snapshot': 4, 'check': 5}
+    items.sort(key=lambda x: (x['time'], rank.get(x['kind']) if x['kind'] != 'state' else
+                              1 if x['by'] not in ('TIAC_Writer', 'TIAC_Reader') else 3 if x['by'] == 'TIAC_Writer' else 6))
+    return {'project': project, 'items': items}
+
+
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
@@ -1145,10 +1242,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def _json(self, obj, code=200):
-        b = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+    def _json(self, obj, code=200, content_type='application/json'):
+        b = (obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)).encode('utf-8')
         self.send_response(code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Type', content_type + '; charset=utf-8')
         self.send_header('Content-Length', str(len(b)))
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
@@ -1237,6 +1334,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(api_project_delete(self.data, unquote(c.split('/')[3])))
             elif method == 'POST' and re.fullmatch(r'/api/projects/[^/]+/snapshot', c):
                 self._json({'job': api_snapshot(self, unquote(c.split('/')[3]), self._body())}, 202)
+            elif method == 'GET' and re.fullmatch(r'/api/projects/[^/]+/changelog', c):
+                name = unquote(c.split('/')[3])
+                r = api_changelog(root(name), self.data, name, self.jobs, q.get('since'), q.get('until'), q.get('state'),
+                                  q.get('block'))
+                if q.get('format') == 'md':
+                    self._json(changelog_markdown(name, r['items']), content_type='text/markdown')
+                else:
+                    self._json(r)
             elif method == 'GET' and c == '/api/jobs':
                 self._json({'jobs': list(self.jobs.values())})
             elif method == 'GET' and re.fullmatch(r'/api/jobs/[\w-]+', c):

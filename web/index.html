@@ -268,6 +268,13 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
             font: 12px/1.5 var(--mono); overflow-x: auto; white-space: pre; }
 .code button { position: absolute; top: 6px; right: 6px; font-size: 12px; padding: 2px 8px; }
 .add code, .hint code { font-family: var(--mono); }
+.log > div { display: flex; gap: var(--s2); align-items: baseline; padding: 3px 0; border-bottom: 1px dashed var(--edge); flex-wrap: wrap; }
+.log > div:last-child { border-bottom: 0; }
+.log .t { font: 12px var(--mono); color: var(--muted); }
+.log .k { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--edge-strong); border-radius: 999px; padding: 0 8px; }
+.log .k.check-bad { color: var(--deleted); border-color: var(--deleted); }
+.log .by { color: var(--muted); font-size: 12px; }
+.log .sum { min-width: 0; overflow-wrap: anywhere; }
 .empty-state { border: 1px dashed var(--edge-strong); border-radius: var(--r); padding: var(--s5); display: grid; grid-template-columns: auto 1fr;
                gap: var(--s5); align-items: center; background: var(--panel); }
 .empty-state b { display: block; font-size: 16px; margin-bottom: var(--s1); }
@@ -492,15 +499,20 @@ function rungList(net) {
 }
 
 // ---------- page ----------
+// project page: Blocks | Changelog | Versions
+function projectTabs(project, view) {
+  return `<div class="tools" role="tablist">` + [['blocks', 'Blocks'], ['changelog', 'Changelog'], ['versions', 'Versions']].map(([v, t]) =>
+    `<button role="tab" class="${view === v ? 'active' : ''}" aria-selected="${view === v}" onclick="location.href='${link({view: v === 'blocks' ? null : v})}'">${t}</button>`).join('') + `</div>`;
+}
 async function showExports(project) {
   const ex = await api('/api/exports');
-  let h = '<h1>Exports</h1>';
+  let h = (project ? projectTabs(project, 'blocks') : '') + '<h1>Exports</h1>';
   if (project) $('info').textContent = project;
   for (const p of ex.projects.filter(x => !project || x.project === project)) {
     h += `<h2>${esc(p.project)}</h2><ul class="select">` +
       p.blocks.map(b => `<li><a href="${link({project: p.project, block: b.block, nw: null})}">${esc(b.block)}</a></li>`).join('') + '</ul>';
   }
-  $('content').innerHTML = h !== '<h1>Exports</h1>' ? h : `<div class="notice"><b>No exports for this project</b>` +
+  $('content').innerHTML = !h.endsWith('<h1>Exports</h1>') ? h : `<div class="notice"><b>No exports for this project</b>` +
     `<span>Take a New snapshot on the <a href="/">home page</a>, or add a folder with a Reader export.</span></div>`;
 }
 const enc = encodeURIComponent;
@@ -717,6 +729,41 @@ function procedurePanel(p) {
     e.preventDefault();   // a button in <summary> would otherwise toggle the panel
     try { await navigator.clipboard.writeText(p.markdown); $('procedure-copy').textContent = 'Copied'; }
     catch (e) { $('procedure-copy').textContent = 'Cannot copy'; }
+  };
+}
+
+// ---------- D3: changelog of a project ----------
+const KIND_TEXT = {proposed: 'proposed', state: 'state', upload: 'upload', write: 'write', check: 'check', snapshot: 'snapshot'};
+async function showChangelog(project) {
+  $('info').textContent = project;
+  document.title = `BetterTIA Editor — ${project} changelog`;
+  const f = {state: q.get('state') || '', block: q.get('block_filter') || ''};
+  const par = new URLSearchParams(Object.entries({state: f.state, block: f.block}).filter(([, v]) => v));
+  const [all, r] = await Promise.all([api(`/api/projects/${enc(project)}/changelog`), api(`/api/projects/${enc(project)}/changelog?${par}`)]);
+  const blocks = [...new Set(all.items.filter(x => x.block).map(x => x.block))].sort();
+  const days = new Map();
+  for (const x of r.items) { const d = x.time.slice(0, 10); if (!days.has(d)) days.set(d, []); days.get(d).push(x); }
+  const row = x => `<div><span class="t">${esc(x.time.slice(11, 19))}</span>` +
+    `<span class="k${x.kind === 'check' && x.summary.startsWith('MISMATCH') ? ' check-bad' : ''}">${esc(KIND_TEXT[x.kind] || x.kind)}</span>` +
+    (x.edit ? `<a class="c" href="?edit=${enc(x.edit)}">${esc(x.edit)}</a><span class="state s-${esc(x.state)}">${esc(x.state)}</span>` +
+      `<b>${esc(x.block_kind || '')}${x.block_number ?? ''} "${esc(x.block)}" · NW ${x.nw}: ${esc(x.title || '(no title)')}</b>` : '') +
+    `<span class="sum">${esc(x.summary)}</span>${x.by ? `<span class="by">by ${esc(x.by)}</span>` : ''}</div>`;
+  $('content').innerHTML = projectTabs(project, 'changelog') +
+    `<h1>Changelog <span class="c">${esc(project)}</span></h1>` +
+    `<p class="comment">What changed in the project and when: proposals, approvals, writes to TIA, export checks and snapshots.</p>` +
+    `<div class="tools"><label>State <select id="log-state"><option value="">all</option>${STATES.map(x => `<option ${x === f.state ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` +
+    `<label>Block <select id="log-block"><option value="">all</option>${blocks.map(b => `<option ${b === f.block ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>` +
+    `<span class="sep"></span><button id="log-copy" title="the same list as a Markdown table per day">Copy as Markdown</button><span class="hint" id="log-copied"></span></div>` +
+    (r.items.length ? [...days].reverse().map(([d, xs]) => `<details class="panel" open><summary>${esc(d)} <span class="sum">${xs.length} event${xs.length === 1 ? '' : 's'}</span></summary>` +
+      `<div class="body log">${xs.map(row).join('')}</div></details>`).join('')
+      : `<div class="notice"><b>Nothing here yet</b><span>${f.state || f.block ? 'No events match the filter.' : 'Propose an edit or take a snapshot — every step is recorded.'}</span></div>`);
+  const go = () => { location.href = link({state: $('log-state').value || null, block_filter: $('log-block').value || null}); };
+  $('log-state').onchange = go; $('log-block').onchange = go;
+  $('log-copy').onclick = async () => {
+    try {
+      const t = await (await fetch(`/api/projects/${enc(project)}/changelog?format=md&${par}`)).text();
+      await navigator.clipboard.writeText(t); $('log-copied').textContent = 'Copied';
+    } catch (e) { $('log-copied').textContent = 'Cannot copy: ' + e.message; }
   };
 }
 
@@ -1153,6 +1200,7 @@ function cardHtml(p) {
     (p.project_path ? `<dt>TIA project</dt><dd class="path">${esc(p.project_path)}</dd>` : '') + `</dl>` +
     `<div class="edits">${edits.length ? edits.map(([s, n]) => `<span class="state s-${esc(s)}">${esc(s)} ${n}</span>`).join('') : 'No edits yet'}</div>` +
     `<div class="row"><button class="primary" data-open="${esc(p.name)}">Open</button>` +
+    `<button data-log="${esc(p.name)}" title="what changed in the project and when">Changelog</button>` +
     `<button data-snap="${esc(p.name)}" ${running ? 'disabled' : ''} title="export the whole PLC from TIA Portal through the Reader">New snapshot</button>` +
     `<button data-remove="${esc(p.name)}" ${running ? 'disabled' : ''} title="remove from the list (exports and edits stay on disk)">Remove</button></div>` +
     jobHtml(p.job, p.name) + '</div>';
@@ -1221,6 +1269,7 @@ async function showHome() {
     catch (e) { b.textContent = 'Cannot copy'; }
   };
   for (const b of document.querySelectorAll('[data-open]')) b.onclick = () => { location.href = `?project=${enc(b.dataset.open)}`; };
+  for (const b of document.querySelectorAll('[data-log]')) b.onclick = () => { location.href = `?project=${enc(b.dataset.log)}&view=changelog`; };
   const fail = e => { $('add-error').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`; };
   $('add-exports').onclick = () => apiJson('POST', '/api/projects', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
   $('add-tia').onclick = () => startJob('/api/projects', {source: 'tia'}).catch(fail);
@@ -1263,7 +1312,11 @@ async function start() {
   if (q.get('edit') && q.get('edit_mode') === '1') await editor(q.get('edit'));
   else if (q.get('edit')) await showEdit(q.get('edit'));
   else if (project && block) await showNetwork(project, block);
-  else if (project) { $('nw').innerHTML = await loadTree(null); await showExports(project); }
+  else if (project) {
+    $('nw').innerHTML = await loadTree(null);
+    const view = q.get('view');
+    await (view === 'changelog' ? showChangelog(project) : view === 'versions' ? showVersions(project) : showExports(project));
+  }
   else {                                     // home: shown at once, the TIA check (autoconnect) re-renders it
     statusChanged = showHome;
     await status;
