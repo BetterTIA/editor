@@ -3,6 +3,8 @@
 A local web app for viewing and editing single LAD and FBD networks of a TIA Portal project, built on top of
 the text export (`.s7dcl` / `.s7res`, SIMATIC source documents, TIA Portal V20+).
 
+![Network, editor, proposal, upload and check](docs/demo.gif)
+
 It is the third tool of the BetterTIA set:
 
 | Tool | Role |
