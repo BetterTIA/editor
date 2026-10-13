@@ -1153,9 +1153,9 @@ def _cell(s):
 
 def changelog_markdown(project, items):
     """Markdown: one table per day; every edit row carries block + number + network title, the way TIA shows it."""
-    out, day = ['# Changelog — %s' % project, ''], None
+    out, day = ['# Changelog — %s' % project], None
     if not items:
-        out.append('Nothing recorded yet.')
+        out += ['', 'Nothing recorded yet.']
     for x in items:
         if x['time'][:10] != day:
             day = x['time'][:10]
@@ -1173,7 +1173,7 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
     edits = state.load(data, project)['edits'] if data else []
     if not exp and not edits:
         raise KeyError('unknown project')
-    items = []
+    items, checked = [], {}                          # checked: export ts -> edit whose Check (Reader) made it
 
     def add(time_, kind, summary, u=None, by=''):
         x = {'time': time_ or '', 'kind': kind, 'block': '', 'nw': None, 'title': '', 'by': by or '', 'summary': summary}
@@ -1193,6 +1193,7 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
             ts = [k['step'][len('Export check '):] for k in steps if k.get('step', '').startswith('Export check ')]
             if ts:                                    # a Check that ran: the check item below says the same
                 reader_ts.update(ts)
+                checked.update({t: u['id'] for t in ts})
                 continue
             add(w.get('time'), 'upload' if w.get('tool') == 'TIAC_Writer' else 'write',
                 '%s %s' % ('✓' if w.get('ok') else '✗', w.get('message') or ''), u, w.get('tool'))
@@ -1200,7 +1201,6 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
             add(k.get('time'), 'check', '%s · export %s%s' % ('match' if k.get('match') else 'MISMATCH', k.get('export_ts') or '?',
                                                              ' · ' + k['note'] if k.get('note') else ''),
                 u, 'TIAC_Reader' if k.get('export_ts') in reader_ts else 'export check')
-    checked = {k.get('export_ts'): u['id'] for u in edits for k in u.get('checks') or []}
     snap_jobs = [j for j in (jobs or {}).values() if j.get('kind') == 'snapshot' and j.get('project') == project]
     by_job = {j['result']['export_ts']: j for j in snap_jobs if j.get('result')}
     for ts in sorted(exp):
