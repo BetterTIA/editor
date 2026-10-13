@@ -108,7 +108,7 @@ class TestUploadCheck(unittest.TestCase):
         u = r['edit']
         self.assertEqual((u['state'], u['history'][-1]['by']), ('Signed', 'TIAC_Writer'))
         self.assertEqual([k['step'] for k in u['writes'][0]['steps']],
-                         ['Connect', 'ResolveObjectPath', 'ExportBlocksAsDocuments', 'Replace the network in .s7dcl',
+                         ['GetPortals', 'Connect', 'ResolveObjectPath', 'ExportBlocksAsDocuments', 'Replace the network in .s7dcl',
                           'PreviewImport', 'ImportFromDocuments'])
         imp = self.imports()
         self.assertEqual((len(imp), imp[0]['groupPath'], imp[0]['importOption'], imp[0]['fileNameWithoutExtension']),
@@ -159,9 +159,8 @@ class TestUploadCheck(unittest.TestCase):
         uid = self.proposal(ops=self.OPS)
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertEqual((s, r['ok'], r['edit']['state']), (200, False, 'Approved'))
-        self.assertTrue(r['message'].startswith('TIA is busy or the Writer/Reader cannot be started: '))
-        self.assertIn('More than one', r['message'])
-        self.assertEqual(r['edit']['writes'][0]['steps'][0]['ok'], False)
+        self.assertTrue(r['message'].startswith('More than one TIA Portal instance'), r['message'])
+        self.assertEqual([k['step'] for k in r['edit']['writes'][0]['steps']], ['GetPortals'])
         self.stop()                                                            # Writer that cannot be started
         self.srv = server.create_server(0, self.root, self.data, mcp={'writer': ([os.path.join(self.tia, 'not.exe')], None)})
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
@@ -170,6 +169,17 @@ class TestUploadCheck(unittest.TestCase):
         self.assertIn('cannot be started', r['message'])
         s, r = self.req('GET', '/api/edits/%s' % uid)
         self.assertEqual((r['tia'], len(r['edit']['writes'])), (TIA, 2))
+
+    def test_upload_tia_not_running_does_not_connect(self):
+        self.stop()
+        self.start('--no-portal')
+        self.set_tia()
+        uid = self.proposal(ops=self.OPS)
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertEqual((s, r['ok'], r['edit']['state']), (200, False, 'Approved'))
+        self.assertTrue(r['message'].startswith('TIA Portal is not running'), r['message'])
+        with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:
+            self.assertEqual([json.loads(x)['tool'] for x in f], ['GetPortals'])     # no Connect = TIA not started
 
     def test_lock(self):
         self.set_tia()

@@ -330,7 +330,9 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 ## Upload and Check
 **Upload** — `POST /api/edits/<id>/upload` (only **Approved** and a non-F change; F-block, another state, missing
 `tia`, another Upload/Check running → **409**). The server starts TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
-1. `Connect {}` (no `portalId`; several TIA instances = error → "TIA is busy…", nothing else is done),
+1. `GetPortals {}` → `Connect {portalId}` (the instance attached in the status, otherwise the only running one). No
+   instance → `ok: false` "TIA Portal is not running" and **no `Connect`** (Upload never starts TIA Portal); several
+   instances and none attached → `ok: false` "More than one TIA Portal instance…"; nothing else is done,
 2. `ResolveObjectPath {softwarePath, name: block, kind: "block"}` → `groupPath` (skipped when `tia.groupPath` is set),
 3. `ExportBlocksAsDocuments {softwarePath, exportPath: <temp>, regexName: "^block$", preservePath: false}`,
 4. replaces the network in `.s7dcl` (`s7dcl_write.py`): the network by **title** (otherwise number); safeguards: a block
@@ -411,7 +413,8 @@ and replacing a network with itself gives a block the parser reads the same (FB_
   (`SrcType`/`DestType` guessed), the shape of `P_Contact`/`N_Contact`, `ReturnTrue()`, a negated call output
   `Q => NOT x`, an empty FBD rung without an operand;
 - F-blocks have no Upload (409 + the `S7_Safety` safeguard in the export) — nothing here changes the F-signature;
-- `Connect` without `portalId` may **start** TIA Portal when no instance is running (per the Writer's tool description).
+- `Connect` without `portalId` may **start** TIA Portal when no instance is running (per the Writer's tool description)
+  — the editor therefore always calls `GetPortals` first and `Connect` only with a `portalId`.
 - home page / snapshots: the answer shapes of `GetPortals`, `GetProject`, `GetProjectTree`, `GetDevices`,
   `OpenTiaProject`, `get_project_status` and of a whole-PLC `export_to_folder` are only guessed (parsed tolerantly:
   `portalId`, `projectPath`/`path`/`name`, `softwarePath` anywhere in the JSON); how long `OpenTiaProject` takes when it

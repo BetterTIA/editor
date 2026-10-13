@@ -621,8 +621,8 @@ def _is_f_edit(root, u):
         return True
 
 
-def api_upload(root, data, uid, mcp, timeout=300):
-    """Approved non-safety change -> TIAC_Writer: Connect, ResolveObjectPath, export the block as documents,
+def api_upload(root, data, uid, mcp, timeout=300, portal=None):
+    """Approved non-safety change -> TIAC_Writer: GetPortals, Connect {portalId}, ResolveObjectPath, export the block as documents,
     replace the network, PreviewImport, ImportFromDocuments Override -> Signed (by TIAC_Writer)."""
     _, s, u = state.find(data, uid)
     if u['state'] != 'Approved':
@@ -646,7 +646,16 @@ def api_upload(root, data, uid, mcp, timeout=300):
         sp, block = tia['softwarePath'], u['block']
         try:
             with _client(mcp, 'writer', timeout) as k:
-                step('Connect', lambda: k.call('Connect', {}))
+                # GetPortals first: Connect without portalId would start TIA Portal when none is running
+                inst = portal_instances(step('GetPortals', lambda: k.call('GetPortals', {}))) or []
+                if not inst:
+                    raise SnapshotError('TIA Portal is not running — open the project in TIA Portal first '
+                                        '(Upload does not start TIA)')
+                chosen = next((x for x in inst if str(x['portalId']) == str(portal)), None) if portal else None
+                if chosen is None and len(inst) > 1:
+                    raise SnapshotError('More than one TIA Portal instance is running — choose one in the status bar')
+                pid = (chosen or inst[0])['portalId']
+                step('Connect', lambda: k.call('Connect', {'portalId': pid}))
                 grp = tia.get('groupPath')
                 if not grp:
                     fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
@@ -668,6 +677,8 @@ def api_upload(root, data, uid, mcp, timeout=300):
                                    'SaveProject)') % (sp, grp or '/')
         except mcp_client.MCPError as e:
             ok, message, preview = False, CONNECTION_ERROR + str(e), None
+        except SnapshotError as e:
+            ok, message, preview = False, str(e), None
         except (s7dcl_write.WriteError, s7dcl.SourceParseError, OSError, ValueError) as e:
             ok, message, preview = False, 'Upload stopped: %s' % e, None
         write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
@@ -1177,7 +1188,8 @@ class Handler(BaseHTTPRequestHandler):
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check-export', c):
                 self._json(api_check_export(root_of(c.split('/')[3]), self.data, c.split('/')[3], self._body()))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/upload', c):
-                self._json(api_upload(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
+                self._json(api_upload(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout,
+                                      self.tia_status.get('portalId') if self.tia_status.get('tia') == 'attached' else None))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check', c):
                 self._json(api_check(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
             elif method == 'GET' and c == '/api/projects':
