@@ -45,7 +45,8 @@ class Editor:
                                    data=json.dumps(body).encode('utf-8') if body is not None else None)
         try:
             with urllib.request.urlopen(r, timeout=timeout) as f:
-                return json.loads(f.read().decode('utf-8'))
+                t = f.read().decode('utf-8')
+                return t if f.headers.get_content_type() == 'text/markdown' else json.loads(t)
         except urllib.error.HTTPError as e:
             try:
                 message = json.loads(e.read().decode('utf-8')).get('error')
@@ -196,6 +197,19 @@ def take_screenshot(e, a):
     return [{'type': 'image', 'data': png, 'mimeType': 'image/png'}, {'type': 'text', 'text': url}]
 
 
+def get_changelog(e, a):
+    return e.get('/api/projects/%s/changelog' % q(a['project']), format='md' if a.get('format') == 'md' else None,
+                 since=a.get('since'), until=a.get('until'))
+
+
+def list_snapshots(e, a):
+    return e.get('/api/projects/%s/snapshots' % q(a['project']))
+
+
+def compare_snapshots(e, a):
+    return e.get('/api/projects/%s/compare' % q(a['project']), block=a.get('block'), **{'from': a['from'], 'to': a['to']})
+
+
 def _schema(props, required=()):
     return {'type': 'object', 'properties': props, 'required': list(required), 'additionalProperties': False}
 
@@ -235,6 +249,18 @@ TOOLS = [
     ('take_snapshot', 'Start a background job that exports the whole PLC of a project from TIA Portal; returns the job.',
      _schema({'project': S}, ['project']), take_snapshot),
     ('get_job', 'State and steps of a background job (snapshot).', _schema({'id': S}, ['id']), get_job),
+    ('get_changelog', 'What changed in a project and when: edits proposed, state changes (who), writes to TIA, export checks '
+                      'and snapshots, oldest first. format "md" = a Markdown table per day.',
+     _schema({'project': S, 'format': {'type': 'string', 'enum': ['json', 'md']},
+              'since': {'type': 'string', 'description': 'from this time (YYYY-MM-DD[THH:MM:SS] or YYYYMMDD-HHMMSS)'},
+              'until': {'type': 'string', 'description': 'up to this time, inclusive (same formats)'}}, ['project']), get_changelog),
+    ('list_snapshots', 'Snapshots (Reader exports) of a project, newest first: timestamp, full or partial, block count.',
+     _schema({'project': S}, ['project']), list_snapshots),
+    ('compare_snapshots', 'Compare two snapshots without TIA Portal: changed blocks and, per block, the networks added / '
+                          'removed / changed / moved, with the differences and the edits they match.',
+     _schema({'project': S, 'from': {'type': 'string', 'description': 'older snapshot timestamp YYYYMMDD-HHMMSS'},
+              'to': {'type': 'string', 'description': 'newer snapshot timestamp YYYYMMDD-HHMMSS'}, 'block': S},
+             ['project', 'from', 'to']), compare_snapshots),
     ('screenshot', 'PNG of an edit (diff) or of a network as the editor draws it (headless Chrome or Edge).',
      _schema({'edit': S, 'project': S, 'block': S, 'nw': I, 'width': I, 'height': I,
               'theme': {'type': 'string', 'enum': ['dark', 'light']}}), take_screenshot),

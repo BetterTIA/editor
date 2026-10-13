@@ -3,11 +3,13 @@ import http.client
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
 
-from tests.common import SAMPLES, PROJECT, TS0, TS1, TS2
+from tests.common import ROOT, SAMPLES, PROJECT, TS0, TS1, TS2
+import mcp_client
 import server
 
 TS3 = '20261012-160000'      # FB_Conveyor of TS1 with a new network inserted before NW 1 (partial)
@@ -158,6 +160,35 @@ class TestCompareApi(unittest.TestCase):
         f = lambda x: {'language': 'FBD', 'elements': x['elements']}
         s, d = self.req('POST', '/api/layout', {'project': PROJECT, 'before': f(a), 'after': f(b), 'align': True})
         self.assertEqual((s, d['diff']), (200, {'b2': 'changed', 'b3': 'changed'}))
+
+
+    def test_mcp_tools(self):
+        """get_changelog, list_snapshots, compare_snapshots through mcp_server.py driven by mcp_client.py."""
+        n = self.net(TS1)
+        uid = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'R', 'block': 'FB_Conveyor', 'nw': 1,
+                                              'after': {'elements': n['elements'], 'rungs': n['rungs']}})[1]['id']
+        k = mcp_client.Client([sys.executable, os.path.join(ROOT, 'mcp_server.py'), '--server',
+                               'http://127.0.0.1:%d' % self.srv.server_address[1]], timeout=60, display_name='mcp_server',
+                              client_info={'name': 'test-agent', 'version': '1.0'})
+        k.start()
+        try:
+            s = json.loads(k.call('list_snapshots', {'project': PROJECT}))['snapshots']
+            self.assertEqual([x['ts'] for x in s], [TS2, TS1, TS0])
+            r = json.loads(k.call('compare_snapshots', {'project': PROJECT, 'from': TS0, 'to': TS1}))
+            self.assertEqual([(b['block'], b['networks'][0]['nw_to'], b['networks'][0]['matches']) for b in r['blocks']],
+                             [('FB_Conveyor', 1, [uid])])
+            r = json.loads(k.call('compare_snapshots', {'project': PROJECT, 'from': TS0, 'to': TS2, 'block': 'FB_Safety'}))
+            self.assertEqual([b['block'] for b in r['blocks']], ['FB_Safety'])
+            items = json.loads(k.call('get_changelog', {'project': PROJECT}))['items']
+            self.assertEqual([x['kind'] for x in items], ['snapshot', 'snapshot', 'snapshot', 'proposed'])
+            self.assertEqual(len(json.loads(k.call('get_changelog', {'project': PROJECT, 'until': TS1}))['items']), 2)
+            md = k.call('get_changelog', {'project': PROJECT, 'format': 'md'})
+            self.assertIn('| %s proposed | FB10 "FB_Conveyor" · NW 1: ' % uid, md)
+            with self.assertRaises(mcp_client.MCPError) as e:
+                k.call('compare_snapshots', {'project': PROJECT, 'from': TS0, 'to': '20990101-000000'})
+            self.assertIn('HTTP 404', str(e.exception))
+        finally:
+            k.close()
 
 
 if __name__ == '__main__':

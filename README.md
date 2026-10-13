@@ -99,7 +99,8 @@ client does not start in this folder. The home page shows the same blocks to cop
 **AI: connected (&lt;client&gt;)** once the agent is attached.
 
 Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
-`run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `screenshot` — see
+`run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
+`compare_snapshots`, `screenshot` — see
 [docs/reference.md](docs/reference.md#mcp-server).
 
 **Why the agent cannot approve or upload:** a change of a PLC program ends up on a real machine. The agent proposes

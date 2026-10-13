@@ -17,7 +17,8 @@ import server
 
 MCP_SERVER = os.path.join(ROOT, 'mcp_server.py')
 TOOLS = {'list_projects', 'list_blocks', 'get_network', 'list_edits', 'get_edit', 'propose_edit', 'update_edit',
-         'run_check', 'get_procedure', 'tia_status', 'take_snapshot', 'get_job', 'screenshot'}
+         'run_check', 'get_procedure', 'tia_status', 'take_snapshot', 'get_job', 'screenshot', 'get_changelog',
+         'list_snapshots', 'compare_snapshots'}
 OPS = [{'type': 'insert', 'place': {'r': 0, 'k': 3}, 'element': 'NO'},
        {'type': 'change', 'id': 'n1', 'values': {'operand': '"Fuse_OK"'}}]
 

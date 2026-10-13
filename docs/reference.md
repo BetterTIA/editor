@@ -448,7 +448,7 @@ killed client). `GET /api/ai/clients` and `GET /api/tia/status` return `ai: "con
 status bar shows a green **AI: connected (<name>)** chip with the last heartbeat in its tooltip. If the editor is not
 running, `initialize` still succeeds and every tool answers with an error that says so.
 
-**Tools** (output = JSON text, `screenshot` = an `image` content with a base64 PNG plus the page URL as text; an HTTP
+**Tools** (output = JSON text, `get_changelog` with `format: "md"` = Markdown text, `screenshot` = an `image` content with a base64 PNG plus the page URL as text; an HTTP
 error of the editor = `isError: true` with its message):
 
 | Tool | Arguments | Returns / does |
@@ -465,6 +465,9 @@ error of the editor = `isError: true` with its message):
 | `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` checks TIA Portal again) |
 | `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |
 | `get_job` | `id` | the job record (steps, chunks, result, error) |
+| `get_changelog` | `project`, `format?` (`json`/`md`), `since?`, `until?` | the project changelog (see [Changelog and versions](#changelog-and-versions)); `md` = the Markdown text |
+| `list_snapshots` | `project` | `GET /api/projects/<name>/snapshots` — snapshots newest first, full or partial |
+| `compare_snapshots` | `project`, `from`, `to`, `block?` | `GET /api/projects/<name>/compare` — changed blocks → networks with the differences and `matches` (edit ids) |
 | `screenshot` | `edit` or `project`+`block`+`nw`, `width?` (1400), `height?` (900), `theme?` (`dark`/`light`) | PNG through `screenshot.py`; without Chrome/Edge an error with a hint to use `get_network` / `get_edit` |
 
 A typical flow: `list_projects` → `list_blocks` → `get_network` → change `elements`/`rungs` (keep the ids of kept
