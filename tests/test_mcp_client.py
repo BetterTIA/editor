@@ -7,13 +7,13 @@ import tempfile
 import time
 import unittest
 
-from tests.common import KOREN, PROJEKT
+from tests.common import ROOT, PROJECT
 import mcp_client
 
-FALESNY = os.path.join(KOREN, 'tests', 'fake_mcp.py')
+FAKE = os.path.join(ROOT, 'tests', 'fake_mcp.py')
 
 
-class TestKlient(unittest.TestCase):
+class TestClient(unittest.TestCase):
     def setUp(self):
         self.state = tempfile.mkdtemp()
         self.root = tempfile.mkdtemp()
@@ -22,71 +22,71 @@ class TestKlient(unittest.TestCase):
         shutil.rmtree(self.state, ignore_errors=True)
         shutil.rmtree(self.root, ignore_errors=True)
 
-    def writer(self, *navic):
-        return [sys.executable, FALESNY, 'writer', '--state', self.state] + list(navic)
+    def writer(self, *extra):
+        return [sys.executable, FAKE, 'writer', '--state', self.state] + list(extra)
 
-    def test_writer_export_a_import(self):
-        prac = tempfile.mkdtemp()
+    def test_writer_export_and_import(self):
+        work = tempfile.mkdtemp()
         try:
-            with mcp_client.Klient(self.writer(), timeout=20) as k:
-                self.assertIn('Connected', k.zavolej('Connect', {}))
-                cesta = json.loads(k.zavolej('ResolveObjectPath', {'softwarePath': 'PLC_1', 'name': 'FB_Dopravnik',
+            with mcp_client.Client(self.writer(), timeout=20) as k:
+                self.assertIn('Connected', k.call('Connect', {}))
+                fpath = json.loads(k.call('ResolveObjectPath', {'softwarePath': 'PLC_1', 'name': 'FB_Dopravnik',
                                                                    'kind': 'block'}))['path']
-                self.assertEqual(cesta, 'Dopravnik/FB_Dopravnik')
-                k.zavolej('ExportBlocksAsDocuments', {'softwarePath': 'PLC_1', 'exportPath': prac,
+                self.assertEqual(fpath, 'Dopravnik/FB_Dopravnik')
+                k.call('ExportBlocksAsDocuments', {'softwarePath': 'PLC_1', 'exportPath': work,
                                                       'regexName': '^FB_Dopravnik$', 'preservePath': False})
-                self.assertTrue(os.path.exists(os.path.join(prac, 'FB_Dopravnik.s7res')))
-                with open(os.path.join(prac, 'FB_Dopravnik.s7dcl'), 'a', encoding='utf-8') as f:
+                self.assertTrue(os.path.exists(os.path.join(work, 'FB_Dopravnik.s7res')))
+                with open(os.path.join(work, 'FB_Dopravnik.s7dcl'), 'a', encoding='utf-8') as f:
                     f.write('// změna\n')
-                k.zavolej('ImportFromDocuments', {'softwarePath': 'PLC_1', 'groupPath': 'Dopravnik', 'importPath': prac,
+                k.call('ImportFromDocuments', {'softwarePath': 'PLC_1', 'groupPath': 'Dopravnik', 'importPath': work,
                                                   'fileNameWithoutExtension': 'FB_Dopravnik', 'importOption': 'Override'})
-            with open(os.path.join(self.state, 'importy.jsonl'), encoding='utf-8') as f:
+            with open(os.path.join(self.state, 'imports.jsonl'), encoding='utf-8') as f:
                 imp = json.loads(f.readline())
             self.assertEqual(imp['importOption'], 'Override')
-            with open(imp['soubor'], encoding='utf-8') as f:
+            with open(imp['file'], encoding='utf-8') as f:
                 self.assertTrue(f.read().endswith('// změna\n'))
         finally:
-            shutil.rmtree(prac, ignore_errors=True)
+            shutil.rmtree(work, ignore_errors=True)
 
-    def test_reader_nova_slozka(self):
-        p = [sys.executable, FALESNY, 'reader', '--state', self.state, '--export-root', self.root, '--projekt', PROJEKT]
-        with mcp_client.Klient(p, timeout=20) as k:
-            r = json.loads(k.zavolej('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Dopravnik/FB_Dopravnik'],
+    def test_reader_new_folder(self):
+        p = [sys.executable, FAKE, 'reader', '--state', self.state, '--export-root', self.root, '--project', PROJECT]
+        with mcp_client.Client(p, timeout=20) as k:
+            r = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Dopravnik/FB_Dopravnik'],
                                                           'include': ['blocks'], 'formats': ['documents']}))
-            r2 = json.loads(k.zavolej('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Dopravnik/FB_Dopravnik']}))
+            r2 = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Dopravnik/FB_Dopravnik']}))
         self.assertTrue(r['complete'])
         self.assertNotEqual(r['exportFolder'], r2['exportFolder'])          # druhý export = nové razítko
         self.assertTrue(os.path.exists(os.path.join(r['exportFolder'], 'PLC_1', 'Blocks', 'Dopravnik', 'FB_Dopravnik.s7dcl')))
 
-    def test_chyby(self):
-        with self.assertRaises(mcp_client.ChybaMCP) as e:
-            mcp_client.Klient([os.path.join(self.root, 'neni.exe')]).spust()
-        self.assertIn('nejde spustit', str(e.exception))
-        with mcp_client.Klient(self.writer('--vice-instanci'), timeout=20) as k:
-            with self.assertRaises(mcp_client.ChybaMCP) as e:
-                k.zavolej('Connect', {})
+    def test_errors(self):
+        with self.assertRaises(mcp_client.MCPError) as e:
+            mcp_client.Client([os.path.join(self.root, 'not.exe')]).start()
+        self.assertIn('fails spustit', str(e.exception))
+        with mcp_client.Client(self.writer('--multi-instances'), timeout=20) as k:
+            with self.assertRaises(mcp_client.MCPError) as e:
+                k.call('Connect', {})
             self.assertIn('More than one', str(e.exception))
-            with self.assertRaises(mcp_client.ChybaMCP):
-                k.zavolej('ExportBlocksAsDocuments', {})                     # isError: chybí softwarePath
+            with self.assertRaises(mcp_client.MCPError):
+                k.call('ExportBlocksAsDocuments', {})                     # isError: chybí softwarePath
         t = time.time()
-        with mcp_client.Klient(self.writer('--pomalu', '10'), timeout=20) as k:
-            with self.assertRaises(mcp_client.ChybaMCP) as e:
-                k.zavolej('Connect', {}, timeout=1)
+        with mcp_client.Client(self.writer('--slow', '10'), timeout=20) as k:
+            with self.assertRaises(mcp_client.MCPError) as e:
+                k.call('Connect', {}, timeout=1)
         self.assertIn('timeout', str(e.exception))
         self.assertLess(time.time() - t, 8)
-        with self.assertRaises(mcp_client.ChybaMCP) as e:                    # proces skončí hned (špatné argumenty)
-            mcp_client.Klient([sys.executable, FALESNY, 'nic'], timeout=20).spust()
+        with self.assertRaises(mcp_client.MCPError) as e:                    # proces skončí hned (špatné argumenty)
+            mcp_client.Client([sys.executable, FAKE, 'nothing'], timeout=20).start()
         self.assertIn('skončil', str(e.exception))
 
-    def test_prikazy(self):
-        self.assertEqual(mcp_client.prikaz_z_textu(r'python "C:\a b\f.py" writer'), ['python', r'C:\a b\f.py', 'writer'])
+    def test_commands(self):
+        self.assertEqual(mcp_client.command_from_text(r'python "C:\a b\f.py" writer'), ['python', r'C:\a b\f.py', 'writer'])
         j = os.path.join(self.root, 'mcp.json')
         with open(j, 'w', encoding='utf-8') as f:
             json.dump({'mcpServers': {'TIAC_Writer': {'command': 'w.exe', 'args': ['--allow-write']},
                                       'tia-portal': {'command': 'r.exe', 'args': [], 'env': {'X': '1'}}}}, f)
-        self.assertEqual(mcp_client.z_mcp_json(j, 'TIAC_Writer'), (['w.exe', '--allow-write'], None))
-        self.assertEqual(mcp_client.z_mcp_json(j, 'tia-portal'), (['r.exe'], {'X': '1'}))
-        self.assertIsNone(mcp_client.z_mcp_json(j, 'neni'))
+        self.assertEqual(mcp_client.from_mcp_json(j, 'TIAC_Writer'), (['w.exe', '--allow-write'], None))
+        self.assertEqual(mcp_client.from_mcp_json(j, 'tia-portal'), (['r.exe'], {'X': '1'}))
+        self.assertIsNone(mcp_client.from_mcp_json(j, 'not'))
 
 
 if __name__ == '__main__':

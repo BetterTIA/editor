@@ -14,11 +14,11 @@ import time
 import unittest
 import urllib.request
 
-from tests.common import VZORKY, PROJEKT, TS0
+from tests.common import SAMPLES, PROJECT, TS0
 import server
 import screenshot
 
-CHROME = next((p for p in screenshot.PROHLIZECE if os.path.exists(p)), None)
+CHROME = next((p for p in screenshot.BROWSERS if os.path.exists(p)), None)
 
 
 class WS:
@@ -28,44 +28,44 @@ class WS:
         host, _, path = url[len('ws://'):].partition('/')
         h, _, p = host.partition(':')
         self.s = socket.create_connection((h, int(p)), timeout=20)
-        klic = base64.b64encode(os.urandom(16)).decode()
+        key = base64.b64encode(os.urandom(16)).decode()
         self.s.sendall(('GET /%s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
-                        'Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' % (path, host, klic)).encode())
-        odp = b''
-        while b'\r\n\r\n' not in odp:
-            odp += self.s.recv(4096)
-        if b' 101 ' not in odp.split(b'\r\n')[0]:
-            raise RuntimeError(odp[:200])
-        self.zbytek, self.id = odp.split(b'\r\n\r\n', 1)[1], 0
+                        'Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' % (path, host, key)).encode())
+        resp = b''
+        while b'\r\n\r\n' not in resp:
+            resp += self.s.recv(4096)
+        if b' 101 ' not in resp.split(b'\r\n')[0]:
+            raise RuntimeError(resp[:200])
+        self.rest, self.id = resp.split(b'\r\n\r\n', 1)[1], 0
 
-    def _cti(self, n):
-        while len(self.zbytek) < n:
-            self.zbytek += self.s.recv(65536)
-        x, self.zbytek = self.zbytek[:n], self.zbytek[n:]
+    def _read(self, n):
+        while len(self.rest) < n:
+            self.rest += self.s.recv(65536)
+        x, self.rest = self.rest[:n], self.rest[n:]
         return x
 
-    def prijmi(self):
+    def receive(self):
         data = b''
         while True:
-            b1, b2 = self._cti(2)
+            b1, b2 = self._read(2)
             n = b2 & 0x7f
             if n == 126:
-                n = struct.unpack('>H', self._cti(2))[0]
+                n = struct.unpack('>H', self._read(2))[0]
             elif n == 127:
-                n = struct.unpack('>Q', self._cti(8))[0]
-            data += self._cti(n)
+                n = struct.unpack('>Q', self._read(8))[0]
+            data += self._read(n)
             if b1 & 0x80:
                 return json.loads(data)
 
-    def volej(self, metoda, **params):
+    def call(self, method, **params):
         self.id += 1
-        d = json.dumps({'id': self.id, 'method': metoda, 'params': params}).encode()
-        maska = os.urandom(4)
+        d = json.dumps({'id': self.id, 'method': method, 'params': params}).encode()
+        mask = os.urandom(4)
         hl = bytes([0x81]) + (bytes([0x80 | len(d)]) if len(d) < 126 else bytes([0x80 | 126]) + struct.pack('>H', len(d))
                               if len(d) < 65536 else bytes([0x80 | 127]) + struct.pack('>Q', len(d)))
-        self.s.sendall(hl + maska + bytes(c ^ maska[i % 4] for i, c in enumerate(d)))
+        self.s.sendall(hl + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(d)))
         while True:
-            m = self.prijmi()
+            m = self.receive()
             if m.get('id') == self.id:
                 if 'error' in m:
                     raise RuntimeError(m['error'])
@@ -73,29 +73,29 @@ class WS:
 
 
 @unittest.skipUnless(CHROME, 'chybí Chrome/Edge')
-class TestKlikani(unittest.TestCase):
+class TestClicks(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.data = tempfile.mkdtemp()
-        cls.srv = server.vytvor_server(0, VZORKY, cls.data)
+        cls.srv = server.create_server(0, SAMPLES, cls.data)
         cls.url = 'http://127.0.0.1:%d' % cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
         cls.prof = tempfile.mkdtemp()
         cls.chrome = subprocess.Popen([CHROME, '--headless=new', '--disable-gpu', '--remote-debugging-port=0',
                                        '--user-data-dir=' + cls.prof, '--window-size=1500,900', 'about:blank'],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        soubor = os.path.join(cls.prof, 'DevToolsActivePort')
-        obsah = ''
+        file = os.path.join(cls.prof, 'DevToolsActivePort')
+        content = ''
         for _ in range(100):
-            if os.path.exists(soubor):
-                with open(soubor) as f:
-                    obsah = f.read().strip()
-                if obsah:
+            if os.path.exists(file):
+                with open(file) as f:
+                    content = f.read().strip()
+                if content:
                     break
             time.sleep(0.1)
-        port = obsah.split()[0]
-        cile = json.loads(urllib.request.urlopen('http://127.0.0.1:%s/json/list' % port, timeout=10).read())
-        cls.ws = WS(next(c for c in cile if c['type'] == 'page')['webSocketDebuggerUrl'])
+        port = content.split()[0]
+        targets = json.loads(urllib.request.urlopen('http://127.0.0.1:%s/json/list' % port, timeout=10).read())
+        cls.ws = WS(next(c for c in targets if c['type'] == 'page')['webSocketDebuggerUrl'])
 
     @classmethod
     def tearDownClass(cls):
@@ -107,61 +107,61 @@ class TestKlikani(unittest.TestCase):
         shutil.rmtree(cls.data, ignore_errors=True)
         shutil.rmtree(cls.prof, ignore_errors=True)
 
-    def uprava(self, blok, nw, fbd):
-        net = server.api_network(VZORKY, PROJEKT, blok, nw, TS0)
-        po = {'jazyk': 'FBD', 'prvky': net['prvky']} if fbd else {'prvky': net['prvky'], 'rungy': net['rungy']}
-        return server.api_uprava_nova(VZORKY, self.data, {'projekt': PROJEKT, 'kolo': 'test', 'blok': blok, 'nw': nw,
-                                                          'po': po})['id']
+    def edit(self, block, nw, fbd):
+        net = server.api_network(SAMPLES, PROJECT, block, nw, TS0)
+        after = {'language': 'FBD', 'elements': net['elements']} if fbd else {'elements': net['elements'], 'rungs': net['rungs']}
+        return server.api_edit_create(SAMPLES, self.data, {'project': PROJECT, 'round': 'test', 'block': block, 'nw': nw,
+                                                          'after': after})['id']
 
-    def js(self, vyraz):
-        return self.ws.volej('Runtime.evaluate', expression=vyraz, returnByValue=True, awaitPromise=True)['result'].get('value')
+    def js(self, expr):
+        return self.ws.call('Runtime.evaluate', expression=expr, returnByValue=True, awaitPromise=True)['result'].get('value')
 
-    def cekej(self, vyraz, s=10):
-        konec = time.time() + s
-        while time.time() < konec:
-            if self.js(vyraz):
+    def wait_for(self, expr, s=10):
+        end = time.time() + s
+        while time.time() < end:
+            if self.js(expr):
                 return True
             time.sleep(0.1)
-        self.fail('nesplněno: ' + vyraz)
+        self.fail('nesplněno: ' + expr)
 
-    def otevri(self, cesta):
-        self.ws.volej('Page.navigate', url=self.url + cesta)
-        self.cekej("document.body && document.body.dataset.hotovo === '1' && !!document.querySelector('#ed-platno svg')")
+    def open_page(self, fpath):
+        self.ws.call('Page.navigate', url=self.url + fpath)
+        self.wait_for("document.body && document.body.dataset.done === '1' && !!document.querySelector('#ed-canvas svg')")
 
-    def klik(self, selektor_js):
+    def click(self, selector_js):
         """Skutečný klik doprostřed prvku (selektor_js = JS výraz vracející element)."""
         x, y = self.js('(() => { const r = (%s).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()'
-                       % selektor_js)
-        for typ in ('mouseMoved', 'mousePressed', 'mouseReleased'):
-            self.ws.volej('Input.dispatchMouseEvent', type=typ, x=x, y=y, button='left', clickCount=1)
+                       % selector_js)
+        for etype in ('mouseMoved', 'mousePressed', 'mouseReleased'):
+            self.ws.call('Input.dispatchMouseEvent', type=etype, x=x, y=y, button='left', clickCount=1)
 
-    def test_fbd_vyber_boxu_a_plus_vstup(self):
-        uid = self.uprava('FB_Bezpecnost', 1, True)
-        self.otevri('/?uprava=%s&upravit=1' % uid)
+    def test_fbd_select_box_and_add_input(self):
+        uid = self.edit('FB_Bezpecnost', 1, True)
+        self.open_page('/?edit=%s&edit_mode=1' % uid)
         self.js("window.__u = []; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) "
                 "addEventListener(t, e => __u.push(t + (e.isTrusted ? '' : '!')), true); 1")
-        box = "[...document.querySelectorAll('#ed-platno g[data-id]')].find(g => g.querySelector('text.titul').textContent === '&').querySelector('rect.hit')"
-        self.klik(box)
-        self.cekej("ed.vyber === 'b2'")
+        box = "[...document.querySelectorAll('#ed-canvas g[data-id]')].find(g => g.querySelector('text.symbol').textContent === '&').querySelector('rect.hit')"
+        self.click(box)
+        self.wait_for("ed.select === 'b2'")
         self.assertEqual(self.js('__u'), ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'])   # vše isTrusted
-        self.cekej("!document.getElementById('ed-plus').disabled")
-        self.klik("document.getElementById('ed-plus')")
-        self.cekej("ed.po.prvky.find(p => p.id === 'b2').vstupy.length === 4 && !document.getElementById('ed-zpet').disabled")
+        self.wait_for("!document.getElementById('ed-plus').disabled")
+        self.click("document.getElementById('ed-plus')")
+        self.wait_for("ed.after.elements.find(p => p.id === 'b2').inputs.length === 4 && !document.getElementById('ed-undo').disabled")
         # paleta -> místo vložení (nový vstup &) -> nový box n1
-        self.klik("document.querySelector('#paleta .pol[data-klic=\"OR\"]')")
-        self.cekej("document.querySelectorAll('#ed-platno .misto').length > 0")
-        self.klik("[...document.querySelectorAll('#ed-platno .misto')].find(c => c.querySelector('title').textContent === 'box b2, vstup 4')")
-        self.cekej("ed.po.prvky.some(p => p.id === 'n1' && p.typ === 'or') && ed.vyber === 'n1'")
+        self.click("document.querySelector('#palette .item[data-key=\"OR\"]')")
+        self.wait_for("document.querySelectorAll('#ed-canvas .place').length > 0")
+        self.click("[...document.querySelectorAll('#ed-canvas .place')].find(c => c.querySelector('title').textContent === 'box b2, input 4')")
+        self.wait_for("ed.after.elements.some(p => p.id === 'n1' && p.type === 'or') && ed.select === 'n1'")
 
-    def test_lad_paleta_misto_a_vyber(self):
-        uid = self.uprava('FB_Dopravnik', 1, False)
-        self.otevri('/?uprava=%s&upravit=1' % uid)
-        self.klik("document.querySelector('#ed-platno g[data-id=\"p1\"] rect.hit')")
-        self.cekej("ed.vyber === 'p1'")
-        self.klik("document.querySelector('#paleta .pol[data-klic=\"NO\"]')")
-        self.cekej("document.querySelectorAll('#ed-platno .misto').length > 0")
-        self.klik("document.querySelector('#ed-platno .misto')")
-        self.cekej("ed.po.prvky.some(p => p.id === 'n1')")
+    def test_lad_palette_place_and_select(self):
+        uid = self.edit('FB_Dopravnik', 1, False)
+        self.open_page('/?edit=%s&edit_mode=1' % uid)
+        self.click("document.querySelector('#ed-canvas g[data-id=\"p1\"] rect.hit')")
+        self.wait_for("ed.select === 'p1'")
+        self.click("document.querySelector('#palette .item[data-key=\"NO\"]')")
+        self.wait_for("document.querySelectorAll('#ed-canvas .place').length > 0")
+        self.click("document.querySelector('#ed-canvas .place')")
+        self.wait_for("ed.after.elements.some(p => p.id === 'n1')")
 
 
 if __name__ == '__main__':

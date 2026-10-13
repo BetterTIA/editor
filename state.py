@@ -8,42 +8,43 @@ import re
 import threading
 from datetime import datetime
 
+
 # od 13. 10. 2026 šest stavů: Signed = zapsáno v projektu (Honza / Writer), Checked = Reader export = návrh.
 # Starší stav.json s pěti stavy se načte beze změny (jména stavů zůstala).
-STAVY = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
-ZAMEK = threading.RLock()
+STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
+LOCK = threading.RLock()
 
 
-class ChybaStavu(Exception):
-    def __init__(self, zprava, kod=409):
-        super().__init__(zprava)
-        self.kod = kod
+class StateError(Exception):
+    def __init__(self, message, code=409):
+        super().__init__(message)
+        self.code = code
 
 
-def ted():
+def now():
     return datetime.now().isoformat(timespec='seconds')
 
 
-def _soubor(data, projekt):
+def _file(data, project):
     if not data:
-        raise ChybaStavu('server běží bez --data', 503)
-    if not re.fullmatch(r'[^\\/:*?"<>|]+', projekt or '') or projekt.strip('.') == '':
-        raise ChybaStavu('neplatný projekt', 400)
-    return os.path.join(data, projekt, 'stav.json')
+        raise StateError('the server runs without --data', 503)
+    if not re.fullmatch(r'[^\\/:*?"<>|]+', project or '') or project.strip('.') == '':
+        raise StateError('invalid project', 400)
+    return os.path.join(data, project, 'state.json')
 
 
-def nacti(data, projekt):
-    c = _soubor(data, projekt)
+def load(data, project):
+    c = _file(data, project)
     if not os.path.exists(c):
-        return {'upravy': []}
+        return {'edits': []}
     with open(c, encoding='utf-8') as f:
         return json.load(f)
 
 
-def uloz(data, projekt, obj):
+def save(data, project, obj):
     """Atomický zápis: celý soubor do .tmp ve stejné složce, pak os.replace (starý soubor zůstane při chybě)."""
-    over_strukturu(obj)
-    c = _soubor(data, projekt)
+    verify_structure(obj)
+    c = _file(data, project)
     os.makedirs(os.path.dirname(c), exist_ok=True)
     tmp = '%s.tmp-%d-%d' % (c, os.getpid(), threading.get_ident())
     try:
@@ -57,67 +58,67 @@ def uloz(data, projekt, obj):
             os.remove(tmp)
 
 
-def over_strukturu(obj):
-    if not isinstance(obj, dict) or not isinstance(obj.get('upravy'), list):
-        raise ChybaStavu('stav musí být {"upravy": [...]}', 400)
+def verify_structure(obj):
+    if not isinstance(obj, dict) or not isinstance(obj.get('edits'), list):
+        raise StateError('state must be {"edits": [...]}', 400)
     t = obj.get('tia')
     if t is not None and not (isinstance(t, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in t.items())):
-        raise ChybaStavu('tia musí být {softwarePath, plcName, groupPath?} (texty)', 400)
+        raise StateError('tia must be {softwarePath, plcName, groupPath?} (strings)', 400)
     ids = set()
-    for u in obj['upravy']:
-        if not isinstance(u, dict) or not isinstance(u.get('id'), str) or u.get('stav') not in STAVY:
-            raise ChybaStavu('úprava musí mít id a stav z %s' % STAVY, 400)
+    for u in obj['edits']:
+        if not isinstance(u, dict) or not isinstance(u.get('id'), str) or u.get('state') not in STATES:
+            raise StateError('a change needs an id and a state from %s' % STATES, 400)
         if u['id'] in ids:
-            raise ChybaStavu('duplicitní id ' + u['id'], 400)
+            raise StateError('duplicate id %s' % u['id'], 400)
         ids.add(u['id'])
 
 
-def projekty(data):
+def projects(data):
     if not data or not os.path.isdir(data):
         return []
-    return sorted(p for p in os.listdir(data) if os.path.isfile(os.path.join(data, p, 'stav.json')))
+    return sorted(p for p in os.listdir(data) if os.path.isfile(os.path.join(data, p, 'state.json')))
 
 
-def nove_id(data):
+def new_id(data):
     """Id úprav jsou jedinečná přes všechny projekty (?uprava=U001 pak nepotřebuje projekt)."""
     n = 0
-    for p in projekty(data):
-        for u in nacti(data, p)['upravy']:
+    for p in projects(data):
+        for u in load(data, p)['edits']:
             m = re.fullmatch(r'U(\d+)', u['id'])
             if m:
                 n = max(n, int(m.group(1)))
     return 'U%03d' % (n + 1)
 
 
-def najdi(data, uid):
+def find(data, uid):
     """-> (projekt, stav, uprava) ; KeyError když není."""
-    for p in projekty(data):
-        s = nacti(data, p)
-        for u in s['upravy']:
+    for p in projects(data):
+        s = load(data, p)
+        for u in s['edits']:
             if u['id'] == uid:
                 return p, s, u
-    raise KeyError('úprava %s neexistuje' % uid)
+    raise KeyError('change %s does not exist' % uid)
 
 
-def checked_povolen(u):
+def checked_allowed(u):
     """O odemknutí Checked rozhoduje poslední kontrola (pozdější neshoda zase zamkne); Signed je volný."""
-    k = u.get('kontroly') or []
-    return bool(k) and k[-1].get('shoda') is True
+    k = u.get('checks') or []
+    return bool(k) and k[-1].get('match') is True
 
 
-def prechody(u):
+def transitions(u):
     """-> (další stav | None, předchozí stav | None)"""
-    i = STAVY.index(u['stav'])
-    return (STAVY[i + 1] if i + 1 < len(STAVY) else None, STAVY[i - 1] if i > 0 else None)
+    i = STATES.index(u['state'])
+    return (STATES[i + 1] if i + 1 < len(STATES) else None, STATES[i - 1] if i > 0 else None)
 
 
-def zmen_stav(u, novy, kdo):
-    if novy not in STAVY:
-        raise ChybaStavu('neznámý stav %r' % novy, 400)
-    i, j = STAVY.index(u['stav']), STAVY.index(novy)
+def change_state(u, new_value, by):
+    if new_value not in STATES:
+        raise StateError('unknown state %r' % (new_value,), 400)
+    i, j = STATES.index(u['state']), STATES.index(new_value)
     if abs(i - j) != 1:
-        raise ChybaStavu('přechod %s → %s není povolen (jen o krok vpřed nebo zpět)' % (u['stav'], novy))
-    if novy == 'Checked' and j > i and not checked_povolen(u):
-        raise ChybaStavu('Checked až po kontrole exportem se shodou (Check / POST /api/kontrola)')
-    u['stav'] = novy
-    u.setdefault('historie', []).append({'stav': novy, 'cas': ted(), 'kdo': kdo or 'Honza'})
+        raise StateError('transition %s → %s is not allowed (only one step forward or back)' % (u['state'], new_value))
+    if new_value == 'Checked' and j > i and not checked_allowed(u):
+        raise StateError('Checked only after an export check with a match (Check / POST /api/check)')
+    u['state'] = new_value
+    u.setdefault('history', []).append({'state': new_value, 'time': now(), 'by': by or 'user'})

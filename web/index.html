@@ -6,399 +6,399 @@
 <title>TIAC_Editor</title>
 <style>
 :root {
-  --bg: #1e1e1e; --panel: #252526; --hrana: #3a3a3a; --text: #f0f0f0; --tlum: #a8a8a8;
-  --akcent: #00D7FF; --vodic: #8A8A8A; --varovani: #fb923c; --vyber: #0e3a47;
+  --bg: #1e1e1e; --panel: #252526; --edge: #3a3a3a; --text: #f0f0f0; --muted: #a8a8a8;
+  --accent: #00D7FF; --wire: #8A8A8A; --warnings: #fb923c; --select: #0e3a47;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #ffffff; --panel: #f3f3f3; --hrana: #d0d0d0; --text: #111111; --tlum: #555555;
-    --akcent: #0a7ea4; --vodic: #4a4a4a; --varovani: #c2410c; --vyber: #d6f1fa;
+    --bg: #ffffff; --panel: #f3f3f3; --edge: #d0d0d0; --text: #111111; --muted: #555555;
+    --accent: #0a7ea4; --wire: #4a4a4a; --warnings: #c2410c; --select: #d6f1fa;
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
-  --bg: #ffffff; --panel: #f3f3f3; --hrana: #d0d0d0; --text: #111111; --tlum: #555555;
-  --akcent: #0a7ea4; --vodic: #4a4a4a; --varovani: #c2410c; --vyber: #d6f1fa;
+  --bg: #ffffff; --panel: #f3f3f3; --edge: #d0d0d0; --text: #111111; --muted: #555555;
+  --accent: #0a7ea4; --wire: #4a4a4a; --warnings: #c2410c; --select: #d6f1fa;
   color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
        display: grid; grid-template-rows: auto 1fr; }
-header { display: flex; gap: 16px; align-items: baseline; padding: 8px 16px; border-bottom: 1px solid var(--hrana);
+header { display: flex; gap: 16px; align-items: baseline; padding: 8px 16px; border-bottom: 1px solid var(--edge);
          background: var(--panel); }
-header b { color: var(--akcent); font-size: 15px; }
-header .info { color: var(--tlum); }
-.hlavni { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
-aside { border-right: 1px solid var(--hrana); overflow: auto; background: var(--panel); }
-aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 12px 12px 6px; }
+header b { color: var(--accent); font-size: 15px; }
+header .info { color: var(--muted); }
+.main { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+aside { border-right: 1px solid var(--edge); overflow: auto; background: var(--panel); }
+aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 12px 6px; }
 aside a { display: block; padding: 5px 12px; color: var(--text); text-decoration: none; border-left: 3px solid transparent;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-aside a:hover { background: var(--vyber); }
-aside a.akt { border-left-color: var(--akcent); background: var(--vyber); }
-aside a .c { color: var(--akcent); font-family: Consolas, monospace; margin-right: 6px; }
-aside a .j { color: var(--tlum); font-size: 11px; margin-left: 4px; }
+aside a:hover { background: var(--select); }
+aside a.active { border-left-color: var(--accent); background: var(--select); }
+aside a .c { color: var(--accent); font-family: Consolas, monospace; margin-right: 6px; }
+aside a .j { color: var(--muted); font-size: 11px; margin-left: 4px; }
 main { overflow: auto; padding: 14px 18px; min-width: 0; }
 h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
-h1 .c { color: var(--akcent); font-family: Consolas, monospace; }
-.komentar { color: var(--tlum); margin: 0 0 8px; white-space: pre-wrap; }
-.varovani { color: var(--varovani); border: 1px solid var(--varovani); padding: 6px 10px; border-radius: 4px; margin: 8px 0; }
-.platno { overflow: auto; border: 1px solid var(--hrana); border-radius: 4px; background: var(--bg); padding: 6px 0; }
+h1 .c { color: var(--accent); font-family: Consolas, monospace; }
+.comment { color: var(--muted); margin: 0 0 8px; white-space: pre-wrap; }
+.warnings { color: var(--warnings); border: 1px solid var(--warnings); padding: 6px 10px; border-radius: 4px; margin: 8px 0; }
+.canvas { overflow: auto; border: 1px solid var(--edge); border-radius: 4px; background: var(--bg); padding: 6px 0; }
 svg text { font: 12px Consolas, "DejaVu Sans Mono", monospace; fill: var(--text); }
-svg .pin { font-size: 11px; fill: var(--tlum); }
-svg .titul { font-weight: bold; fill: var(--akcent); }
-svg .prazdny { fill: var(--tlum); }
-svg .vod { stroke: var(--vodic); stroke-width: 1.5; fill: none; }
-svg .lista { stroke: var(--akcent); stroke-width: 4; }
-svg .prv { stroke: var(--akcent); stroke-width: 2; fill: none; }
-svg .box { stroke: var(--akcent); stroke-width: 1.5; fill: var(--bg); }
-svg .maska { fill: var(--bg); stroke: none; }
+svg .pin { font-size: 11px; fill: var(--muted); }
+svg .symbol { font-weight: bold; fill: var(--accent); }
+svg .empty { fill: var(--muted); }
+svg .wire { stroke: var(--wire); stroke-width: 1.5; fill: none; }
+svg .rail { stroke: var(--accent); stroke-width: 4; }
+svg .el { stroke: var(--accent); stroke-width: 2; fill: none; }
+svg .box { stroke: var(--accent); stroke-width: 1.5; fill: var(--bg); }
+svg .mask { fill: var(--bg); stroke: none; }
 svg .neg { fill: var(--bg); stroke-width: 1.5; }
-svg .uzel { fill: var(--vodic); stroke: none; }
+svg .node { fill: var(--wire); stroke: none; }
 svg .hit-pin { fill: transparent; cursor: pointer; }
-.postup ol { margin: 4px 0 8px; padding-left: 22px; font-size: 13px; }
-.postup li { margin: 3px 0; }
-.postup code { font: 12px Consolas, monospace; color: var(--akcent); }
-.postup h3 { display: flex; gap: 10px; align-items: center; }
-.postup button { font: inherit; font-size: 12px; padding: 1px 9px; border-radius: 4px; border: 1px solid var(--hrana);
+.procedure ol { margin: 4px 0 8px; padding-left: 22px; font-size: 13px; }
+.procedure li { margin: 3px 0; }
+.procedure code { font: 12px Consolas, monospace; color: var(--accent); }
+.procedure h3 { display: flex; gap: 10px; align-items: center; }
+.procedure button { font: inherit; font-size: 12px; padding: 1px 9px; border-radius: 4px; border: 1px solid var(--edge);
                  background: var(--panel); color: var(--text); cursor: pointer; text-transform: none; letter-spacing: 0; }
-.chyby .var { color: var(--tlum); }
-svg g.d-zmeneny text.beze-zmeny { fill: var(--text); font-weight: normal; }   /* FBD: u změněného boxu jen změněné piny */
-pre, .rungy { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
-.rungy div { border-bottom: 1px dashed var(--hrana); padding: 2px 0; }
-ul.vyber { list-style: none; padding: 0; columns: 3 220px; }
-ul.vyber a { color: var(--text); }
+.errors .var { color: var(--muted); }
+svg g.d-changed text.without-changes { fill: var(--text); font-weight: normal; }   /* FBD: u změněného boxu jen změněné piny */
+pre, .rungs { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
+.rungs div { border-bottom: 1px dashed var(--edge); padding: 2px 0; }
+ul.select { list-style: none; padding: 0; columns: 3 220px; }
+ul.select a { color: var(--text); }
 /* M2: rozdíl a stavy */
-:root { --pridany: #4ade80; --zmeneny: #fb923c; --smazany: #f87171;
+:root { --added: #4ade80; --changed: #fb923c; --deleted: #f87171;
         --s-Proposal: #a8a8a8; --s-Approved: #00D7FF; --s-Signed: #c084fc; --s-Checked: #2dd4bf; --s-Uploaded: #facc15; --s-Tested: #4ade80; }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) { --pridany: #15803d; --zmeneny: #c2410c; --smazany: #b91c1c;
+  :root:not([data-theme="dark"]) { --added: #15803d; --changed: #c2410c; --deleted: #b91c1c;
     --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Checked: #0f766e; --s-Uploaded: #a16207; --s-Tested: #15803d; }
 }
-:root[data-theme="light"] { --pridany: #15803d; --zmeneny: #c2410c; --smazany: #b91c1c;
+:root[data-theme="light"] { --added: #15803d; --changed: #c2410c; --deleted: #b91c1c;
   --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Checked: #0f766e; --s-Uploaded: #a16207; --s-Tested: #15803d; }
-svg g.d-pridany .prv, svg g.d-pridany .box { stroke: var(--pridany); stroke-width: 2.5; }
-svg g.d-pridany text, svg g.d-pridany .titul { fill: var(--pridany); font-weight: bold; }
-svg g.d-zmeneny .prv, svg g.d-zmeneny .box { stroke: var(--zmeneny); stroke-width: 2.5; }
-svg g.d-zmeneny text, svg g.d-zmeneny .titul { fill: var(--zmeneny); font-weight: bold; }
-svg g.d-smazany .prv, svg g.d-smazany .box { stroke: var(--smazany); stroke-width: 2.5; stroke-dasharray: 3 2; }
-svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decoration: line-through; }
-.strom { padding-bottom: 6px; border-bottom: 1px solid var(--hrana); }
-.strom .u0, .strom .u1, .strom .u2 { padding: 3px 12px; color: var(--tlum); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.strom .u0 { color: var(--text); font-weight: 600; }
-.strom .u1 { padding-left: 22px; }
-.strom .u2 { padding-left: 32px; }
-.strom a.u3 { padding-left: 42px; font-size: 13px; }
-.strom a.u4 { padding-left: 54px; font-size: 13px; }
-.strom .prazdno { padding: 3px 12px; color: var(--tlum); font-size: 12px; margin: 0; }
-.stav { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; font-weight: 600; margin: 0 6px;
+svg g.d-added .el, svg g.d-added .box { stroke: var(--added); stroke-width: 2.5; }
+svg g.d-added text, svg g.d-added .symbol { fill: var(--added); font-weight: bold; }
+svg g.d-changed .el, svg g.d-changed .box { stroke: var(--changed); stroke-width: 2.5; }
+svg g.d-changed text, svg g.d-changed .symbol { fill: var(--changed); font-weight: bold; }
+svg g.d-deleted .el, svg g.d-deleted .box { stroke: var(--deleted); stroke-width: 2.5; stroke-dasharray: 3 2; }
+svg g.d-deleted text, svg g.d-deleted .symbol { fill: var(--deleted); text-decoration: line-through; }
+.tree { padding-bottom: 6px; border-bottom: 1px solid var(--edge); }
+.tree .u0, .tree .u1, .tree .u2 { padding: 3px 12px; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree .u0 { color: var(--text); font-weight: 600; }
+.tree .u1 { padding-left: 22px; }
+.tree .u2 { padding-left: 32px; }
+.tree a.u3 { padding-left: 42px; font-size: 13px; }
+.tree a.u4 { padding-left: 54px; font-size: 13px; }
+.tree .empty { padding: 3px 12px; color: var(--muted); font-size: 12px; margin: 0; }
+.state { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; font-weight: 600; margin: 0 6px;
         border: 1px solid var(--sc); color: var(--sc); }
 .s-Proposal { --sc: var(--s-Proposal); } .s-Approved { --sc: var(--s-Approved); } .s-Signed { --sc: var(--s-Signed); }
 .s-Checked { --sc: var(--s-Checked); } .s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); }
-.hlavicka { color: var(--tlum); margin: 2px 0 8px; }
-.hlavicka b { color: var(--text); font-weight: 600; }
-.tlacitka { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.tlacitka button { font: inherit; padding: 5px 14px; border-radius: 4px; border: 1px solid var(--akcent); background: transparent;
-                   color: var(--akcent); cursor: pointer; }
-.tlacitka button.vpred { background: var(--akcent); color: var(--bg); font-weight: 600; }
-.tlacitka button:disabled { border-color: var(--hrana); background: transparent; color: var(--tlum); cursor: not-allowed; }
-.kontroly { font-size: 13px; margin: 6px 0 10px; }
-.kontroly h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 0 0 4px; }
-.kontroly .ok { color: var(--pridany); } .kontroly .ne { color: var(--smazany); }
+.header { color: var(--muted); margin: 2px 0 8px; }
+.header b { color: var(--text); font-weight: 600; }
+.buttons { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.buttons button { font: inherit; padding: 5px 14px; border-radius: 4px; border: 1px solid var(--accent); background: transparent;
+                   color: var(--accent); cursor: pointer; }
+.buttons button.forward { background: var(--accent); color: var(--bg); font-weight: 600; }
+.buttons button:disabled { border-color: var(--edge); background: transparent; color: var(--muted); cursor: not-allowed; }
+.checks { font-size: 13px; margin: 6px 0 10px; }
+.checks h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px; }
+.checks .ok { color: var(--added); } .checks .bad { color: var(--deleted); }
 /* M5: Upload / Check, zápisy, nastavení TIA */
-.tlacitka button.tia { border-color: var(--s-Signed); color: var(--s-Signed); font-weight: 600; }
-.tlacitka button.tia.check { border-color: var(--s-Checked); color: var(--s-Checked); }
-.tlacitka .fblok { font-size: 12px; color: var(--varovani); align-self: center; }
-.prubeh { font-size: 12px; color: var(--tlum); align-self: center; }
-.zapisy ol { margin: 2px 0 6px 18px; padding: 0; color: var(--tlum); font-size: 12px; }
-.zapisy ol li.ne { color: var(--smazany); }
-details.tia-nast { font-size: 12px; color: var(--tlum); margin: 4px 0 8px; }
-details.tia-nast input { font: 12px Consolas, monospace; width: 150px; margin: 2px 6px 2px 2px; background: transparent;
-                         color: var(--text); border: 1px solid var(--hrana); border-radius: 3px; padding: 2px 4px; }
-.legenda { font-size: 12px; color: var(--tlum); margin: 4px 0; display: flex; gap: 14px; }
-.legenda span::before { content: '■ '; } .legenda .p { color: var(--pridany); } .legenda .z { color: var(--zmeneny); }
-.legenda .s { color: var(--smazany); }
-.stavy-leg { font-size: 11px; color: var(--tlum); margin: 4px 0; } .stavy-leg .stav { margin: 0 3px; opacity: .55; }
-.stavy-leg .stav.akt { opacity: 1; background: color-mix(in srgb, var(--sc) 18%, transparent); }
+.buttons button.tia { border-color: var(--s-Signed); color: var(--s-Signed); font-weight: 600; }
+.buttons button.tia.check { border-color: var(--s-Checked); color: var(--s-Checked); }
+.buttons .fblock { font-size: 12px; color: var(--warnings); align-self: center; }
+.progress { font-size: 12px; color: var(--muted); align-self: center; }
+.writes ol { margin: 2px 0 6px 18px; padding: 0; color: var(--muted); font-size: 12px; }
+.writes ol li.bad { color: var(--deleted); }
+details.tia-settings { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+details.tia-settings input { font: 12px Consolas, monospace; width: 150px; margin: 2px 6px 2px 2px; background: transparent;
+                         color: var(--text); border: 1px solid var(--edge); border-radius: 3px; padding: 2px 4px; }
+.legend { font-size: 12px; color: var(--muted); margin: 4px 0; display: flex; gap: 14px; }
+.legend span::before { content: '■ '; } .legend .p { color: var(--added); } .legend .z { color: var(--changed); }
+.legend .s { color: var(--deleted); }
+.states-leg { font-size: 11px; color: var(--muted); margin: 4px 0; } .states-leg .state { margin: 0 3px; opacity: .55; }
+.states-leg .state.active { opacity: 1; background: color-mix(in srgb, var(--sc) 18%, transparent); }
 /* M3: editor */
-.hlavni.edit { grid-template-columns: 280px 1fr 250px; }
-#paleta { border-left: 1px solid var(--hrana); border-right: 0; }
-#paleta input { width: calc(100% - 24px); margin: 4px 12px 6px; font: inherit; padding: 4px 8px; background: var(--bg);
-                color: var(--text); border: 1px solid var(--hrana); border-radius: 4px; }
-#paleta .pol { display: flex; gap: 8px; align-items: baseline; padding: 4px 12px; cursor: grab; border-left: 3px solid transparent;
+.main.edit { grid-template-columns: 280px 1fr 250px; }
+#palette { border-left: 1px solid var(--edge); border-right: 0; }
+#palette input { width: calc(100% - 24px); margin: 4px 12px 6px; font: inherit; padding: 4px 8px; background: var(--bg);
+                color: var(--text); border: 1px solid var(--edge); border-radius: 4px; }
+#palette .item { display: flex; gap: 8px; align-items: baseline; padding: 4px 12px; cursor: grab; border-left: 3px solid transparent;
                white-space: nowrap; overflow: hidden; }
-#paleta .pol:hover { background: var(--vyber); }
-#paleta .pol.akt { border-left-color: var(--akcent); background: var(--vyber); }
-#paleta .pol b { font: 600 12px Consolas, monospace; color: var(--akcent); min-width: 64px; }
-#paleta .pol span { color: var(--tlum); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-.nastroje { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
-.nastroje button { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 4px; border: 1px solid var(--hrana);
+#palette .item:hover { background: var(--select); }
+#palette .item.active { border-left-color: var(--accent); background: var(--select); }
+#palette .item b { font: 600 12px Consolas, monospace; color: var(--accent); min-width: 64px; }
+#palette .item span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.tools button { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 4px; border: 1px solid var(--edge);
                    background: var(--panel); color: var(--text); cursor: pointer; }
-.nastroje button:hover:not(:disabled) { border-color: var(--akcent); }
-.nastroje button.akt { border-color: var(--akcent); color: var(--akcent); }
-.nastroje button.hl { background: var(--akcent); color: var(--bg); border-color: var(--akcent); font-weight: 600; }
-.nastroje button:disabled { color: var(--tlum); cursor: not-allowed; }
-.nastroje input { font: inherit; font-size: 13px; padding: 3px 8px; width: 110px; background: var(--bg); color: var(--text);
-                  border: 1px solid var(--hrana); border-radius: 4px; }
-.rezim { color: var(--akcent); font-size: 13px; min-height: 19px; }
-.rezim.zprava { color: var(--pridany); }
-svg .misto { fill: var(--akcent); fill-opacity: .25; stroke: var(--akcent); stroke-width: 2; cursor: pointer; }
-svg .misto:hover, svg .misto.blizko { fill-opacity: .9; }
-svg .misto.zvolene { fill: var(--zmeneny); stroke: var(--zmeneny); fill-opacity: .9; }
+.tools button:hover:not(:disabled) { border-color: var(--accent); }
+.tools button.active { border-color: var(--accent); color: var(--accent); }
+.tools button.hl { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.tools button:disabled { color: var(--muted); cursor: not-allowed; }
+.tools input { font: inherit; font-size: 13px; padding: 3px 8px; width: 110px; background: var(--bg); color: var(--text);
+                  border: 1px solid var(--edge); border-radius: 4px; }
+.mode { color: var(--accent); font-size: 13px; min-height: 19px; }
+.mode.message { color: var(--added); }
+svg .place { fill: var(--accent); fill-opacity: .25; stroke: var(--accent); stroke-width: 2; cursor: pointer; }
+svg .place:hover, svg .place.near { fill-opacity: .9; }
+svg .place.chosen { fill: var(--changed); stroke: var(--changed); fill-opacity: .9; }
 svg .hit { fill: transparent; cursor: pointer; }
-svg .ram-vyber { fill: var(--akcent); fill-opacity: .10; stroke: var(--akcent); stroke-width: 1.5; stroke-dasharray: 4 3; }
-svg .ram-chyba { fill: none; stroke: var(--varovani); stroke-width: 2; }
-.editor-spod { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 16px; margin-top: 10px; }
-.editor-spod h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 0 0 6px; }
-.chyby div { color: var(--varovani); padding: 3px 0; cursor: pointer; font-size: 13px; }
-.chyby .ok { color: var(--pridany); cursor: default; }
-.editor-spod > div { min-width: 0; }
-.vlastnosti table { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
-.vlastnosti td { padding: 2px 6px 2px 0; }
-.vlastnosti td:first-child { color: var(--tlum); font-family: Consolas, monospace; white-space: nowrap; width: 96px; overflow: hidden; text-overflow: ellipsis; }
-.vlastnosti input, .vlastnosti select { width: 100%; font: 13px Consolas, monospace; padding: 3px 6px; background: var(--bg);
-                    color: var(--text); border: 1px solid var(--hrana); border-radius: 3px; }
-.vlastnosti input:focus { border-color: var(--akcent); outline: none; }
-.vlastnosti .sekce td { color: var(--akcent); font-family: inherit; padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
-.znacka-chyb { color: var(--varovani); font-weight: 600; margin-left: 8px; }
+svg .frame-select { fill: var(--accent); fill-opacity: .10; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .frame-error { fill: none; stroke: var(--warnings); stroke-width: 2; }
+.editor-bottom { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 16px; margin-top: 10px; }
+.editor-bottom h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+.errors div { color: var(--warnings); padding: 3px 0; cursor: pointer; font-size: 13px; }
+.errors .ok { color: var(--added); cursor: default; }
+.editor-bottom > div { min-width: 0; }
+.properties table { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
+.properties td { padding: 2px 6px 2px 0; }
+.properties td:first-child { color: var(--muted); font-family: Consolas, monospace; white-space: nowrap; width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.properties input, .properties select { width: 100%; font: 13px Consolas, monospace; padding: 3px 6px; background: var(--bg);
+                    color: var(--text); border: 1px solid var(--edge); border-radius: 3px; }
+.properties input:focus { border-color: var(--accent); outline: none; }
+.properties .section td { color: var(--accent); font-family: inherit; padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
+.mark-errors { color: var(--warnings); font-weight: 600; margin-left: 8px; }
 </style>
 </head>
 <body>
 <header><b>TIAC_Editor</b><span class="info" id="info">prohlížeč a úpravy</span></header>
-<div class="hlavni">
+<div class="main">
   <aside id="nw"></aside>
-  <main id="obsah"></main>
-  <aside id="paleta" hidden></aside>
+  <main id="content"></main>
+  <aside id="palette" hidden></aside>
 </div>
-<datalist id="operandy"></datalist>
+<datalist id="operands"></datalist>
 <script>
 'use strict';
 const q = new URLSearchParams(location.search);
-if (q.get('tema') === 'svetly') document.documentElement.dataset.theme = 'light';
-if (q.get('tema') === 'tmavy') document.documentElement.dataset.theme = 'dark';
+if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
+if (q.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
 const $ = id => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
-const L = 18, MAXZN = 30;
+const L = 18, MAX_CHARS = 30;
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
-async function api(cesta) {
-  const r = await fetch(cesta);
+async function api(path) {
+  const r = await fetch(path);
   const j = await r.json();
-  if (!r.ok) throw new Error(j.chyba || r.status);
+  if (!r.ok) throw new Error(j.error || r.status);
   return j;
 }
-function odkaz(par) {
+function link(par) {
   const u = new URLSearchParams(q);
   for (const [k, v] of Object.entries(par)) v == null ? u.delete(k) : u.set(k, v);
   return '?' + u.toString();
 }
 
 // ---------- SVG ----------
-function el(rodic, jm, attrs, text) {
-  const e = document.createElementNS(NS, jm);
+function el(parent, nm, attrs, text) {
+  const e = document.createElementNS(NS, nm);
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
   if (text != null) e.textContent = text;
-  rodic.appendChild(e);
+  parent.appendChild(e);
   return e;
 }
-function popis(g, x, y, s, kotva, trida) {
-  const prazdny = !s;
-  let t = prazdny ? '...' : s;
-  const zkr = t.length > MAXZN ? t.slice(0, MAXZN - 1) + '…' : t;
-  const e = el(g, 'text', {x, y, 'text-anchor': kotva || 'middle', class: (trida || '') + (prazdny ? ' prazdny' : '')}, zkr);
-  if (zkr !== t) el(e, 'title', {}, t);
+function description(g, x, y, s, anchor, cls) {
+  const empty = !s;
+  let t = empty ? '...' : s;
+  const short = t.length > MAX_CHARS ? t.slice(0, MAX_CHARS - 1) + '…' : t;
+  const e = el(g, 'text', {x, y, 'text-anchor': anchor || 'middle', class: (cls || '') + (empty ? ' empty' : '')}, short);
+  if (short !== t) el(e, 'title', {}, t);
   return e;
 }
-function kontakt(g, d, p) {
+function contact(g, d, p) {
   const {cx, y} = d;
-  el(g, 'rect', {class: 'maska', x: cx - 8, y: y - 10, width: 16, height: 20});
-  el(g, 'line', {class: 'prv', x1: cx - 7, y1: y - 9, x2: cx - 7, y2: y + 9});
-  el(g, 'line', {class: 'prv', x1: cx + 7, y1: y - 9, x2: cx + 7, y2: y + 9});
-  if (p.typ === 'kontakt_nc') el(g, 'line', {class: 'prv', x1: cx - 4, y1: y + 7, x2: cx + 4, y2: y - 7});
-  if (p.typ === 'kontakt_p' || p.typ === 'kontakt_n') {
-    el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, p.typ === 'kontakt_p' ? 'P' : 'N');
-    popis(g, cx, y + L + 4, p.bit);
+  el(g, 'rect', {class: 'mask', x: cx - 8, y: y - 10, width: 16, height: 20});
+  el(g, 'line', {class: 'el', x1: cx - 7, y1: y - 9, x2: cx - 7, y2: y + 9});
+  el(g, 'line', {class: 'el', x1: cx + 7, y1: y - 9, x2: cx + 7, y2: y + 9});
+  if (p.type === 'contact_nc') el(g, 'line', {class: 'el', x1: cx - 4, y1: y + 7, x2: cx + 4, y2: y - 7});
+  if (p.type === 'contact_p' || p.type === 'contact_n') {
+    el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'symbol'}, p.type === 'contact_p' ? 'P' : 'N');
+    description(g, cx, y + L + 4, p.bit);
   }
-  popis(g, cx, y - 13, p.operand);
+  description(g, cx, y - 13, p.operand);
 }
-function civka(g, d, p) {
+function coil(g, d, p) {
   const {cx, y} = d;
-  el(g, 'rect', {class: 'maska', x: cx - 9, y: y - 10, width: 18, height: 20});
-  el(g, 'path', {class: 'prv', d: `M${cx - 4} ${y - 9} A 13 13 0 0 0 ${cx - 4} ${y + 9}`});
-  el(g, 'path', {class: 'prv', d: `M${cx + 4} ${y - 9} A 13 13 0 0 1 ${cx + 4} ${y + 9}`});
-  const zn = {civka_s: 'S', civka_r: 'R', civka_p: 'P', civka_n: 'N'}[p.typ];
-  if (zn) el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, zn);
-  if (p.typ === 'civka_neg') el(g, 'line', {class: 'prv', x1: cx - 3, y1: y + 6, x2: cx + 3, y2: y - 6});
-  if (p.typ === 'ret') {
-    el(g, 'rect', {class: 'maska', x: cx - 16, y: y - 8, width: 32, height: 16});
-    el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, 'RET');
-    if (p.operand) popis(g, cx, y - 13, p.operand);
+  el(g, 'rect', {class: 'mask', x: cx - 9, y: y - 10, width: 18, height: 20});
+  el(g, 'path', {class: 'el', d: `M${cx - 4} ${y - 9} A 13 13 0 0 0 ${cx - 4} ${y + 9}`});
+  el(g, 'path', {class: 'el', d: `M${cx + 4} ${y - 9} A 13 13 0 0 1 ${cx + 4} ${y + 9}`});
+  const sym = {coil_s: 'S', coil_r: 'R', coil_p: 'P', coil_n: 'N'}[p.type];
+  if (sym) el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'symbol'}, sym);
+  if (p.type === 'coil_neg') el(g, 'line', {class: 'el', x1: cx - 3, y1: y + 6, x2: cx + 3, y2: y - 6});
+  if (p.type === 'ret') {
+    el(g, 'rect', {class: 'mask', x: cx - 16, y: y - 8, width: 32, height: 16});
+    el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'symbol'}, 'RET');
+    if (p.operand) description(g, cx, y - 13, p.operand);
     return;
   }
-  popis(g, cx, y - 13, p.operand);
+  description(g, cx, y - 13, p.operand);
 }
-function porovnani(g, d, p) {
+function comparison(g, d, p) {
   const {cx, y} = d;
-  el(g, 'rect', {class: 'maska', x: cx - 16, y: y - 10, width: 32, height: 20});
-  el(g, 'line', {class: 'prv', x1: cx - 15, y1: y - 9, x2: cx - 15, y2: y + 9});
-  el(g, 'line', {class: 'prv', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
-  el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, p.op);
-  popis(g, cx, y - 13, p.in1);
-  if (p.sablona) el(g, 'text', {x: cx, y: y + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.sablona);
-  popis(g, cx, y + L * (p.sablona ? 2 : 1) + 4, p.in2);
+  el(g, 'rect', {class: 'mask', x: cx - 16, y: y - 10, width: 32, height: 20});
+  el(g, 'line', {class: 'el', x1: cx - 15, y1: y - 9, x2: cx - 15, y2: y + 9});
+  el(g, 'line', {class: 'el', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
+  el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'symbol'}, p.op);
+  description(g, cx, y - 13, p.in1);
+  if (p.template) el(g, 'text', {x: cx, y: y + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.template);
+  description(g, cx, y + L * (p.template ? 2 : 1) + 4, p.in2);
 }
-function negace(g, d) {
+function negate(g, d) {
   const {cx, y} = d;
-  el(g, 'rect', {class: 'maska', x: cx - 16, y: y - 10, width: 32, height: 20});
-  el(g, 'line', {class: 'prv', x1: cx - 15, y1: y - 9, x2: cx - 15, y2: y + 9});
-  el(g, 'line', {class: 'prv', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
-  el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'titul'}, 'NOT');
+  el(g, 'rect', {class: 'mask', x: cx - 16, y: y - 10, width: 32, height: 20});
+  el(g, 'line', {class: 'el', x1: cx - 15, y1: y - 9, x2: cx - 15, y2: y + 9});
+  el(g, 'line', {class: 'el', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
+  el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'symbol'}, 'NOT');
 }
 function box(g, d, p) {
-  const {bx, bw, y_hl, radky, radky_r} = d;
-  const top = y_hl - 13, spodek = Math.max(...radky, ...radky_r) + 11;
-  el(g, 'rect', {class: 'box', x: bx, y: top, width: bw, height: spodek - top, rx: 2});
-  el(g, 'text', {x: bx + bw / 2, y: y_hl + 4, 'text-anchor': 'middle', class: 'titul'}, p.nazev || '');
-  if (p.sablona) el(g, 'text', {x: bx + bw / 2, y: y_hl + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.sablona);
-  if (p.instance) popis(g, bx + bw / 2, top - 6, p.instance);
+  const {bx, bw, y_hl, rows, rows_r} = d;
+  const top = y_hl - 13, bottom = Math.max(...rows, ...rows_r) + 11;
+  el(g, 'rect', {class: 'box', x: bx, y: top, width: bw, height: bottom - top, rx: 2});
+  el(g, 'text', {x: bx + bw / 2, y: y_hl + 4, 'text-anchor': 'middle', class: 'symbol'}, p.name || '');
+  if (p.template) el(g, 'text', {x: bx + bw / 2, y: y_hl + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.template);
+  if (p.instance) description(g, bx + bw / 2, top - 6, p.instance);
   // vstupy: [napájení, ...vstupy]
-  [{pin: p.napajeni[0], operand: null}, ...p.vstupy].forEach((pin, i) => {
-    const yy = radky[i];
-    const privod = String(pin.operand).startsWith('wire#');   // přívod: vodič vede až z buňky vlevo
-    if (i > 0) el(g, 'line', {class: 'vod', x1: privod ? d.x : bx - 12, y1: yy, x2: bx, y2: yy});
+  [{pin: p.power[0], operand: null}, ...p.inputs].forEach((pin, i) => {
+    const yy = rows[i];
+    const feed = String(pin.operand).startsWith('wire#');   // přívod: vodič vede až z buňky left
+    if (i > 0) el(g, 'line', {class: 'wire', x1: feed ? d.x : bx - 12, y1: yy, x2: bx, y2: yy});
     if (pin.pin) el(g, 'text', {x: bx + 5, y: yy + 4, class: 'pin'}, pin.pin);
-    if (i > 0 && !privod) popis(g, bx - 15, yy + 4, pin.operand, 'end');
+    if (i > 0 && !feed) description(g, bx - 15, yy + 4, pin.operand, 'end');
   });
-  [{pin: p.napajeni[1], operand: null}, ...p.vystupy].forEach((pin, i) => {
-    const yy = radky_r[i];
-    if (i > 0) el(g, 'line', {class: 'vod', x1: bx + bw, y1: yy, x2: bx + bw + 12, y2: yy});
+  [{pin: p.power[1], operand: null}, ...p.outputs].forEach((pin, i) => {
+    const yy = rows_r[i];
+    if (i > 0) el(g, 'line', {class: 'wire', x1: bx + bw, y1: yy, x2: bx + bw + 12, y2: yy});
     if (pin.pin) el(g, 'text', {x: bx + bw - 5, y: yy + 4, 'text-anchor': 'end', class: 'pin'}, pin.pin);
-    if (i > 0) popis(g, bx + bw + 15, yy + 4, pin.operand, 'start');
+    if (i > 0) description(g, bx + bw + 15, yy + 4, pin.operand, 'start');
   });
-  if (p.pod) popis(g, bx + bw / 2, spodek + 14, p.pod);
+  if (p.below) description(g, bx + bw / 2, bottom + 14, p.below);
 }
 // FBD (F1): geometrie z fbd.rozloz — boxy s piny, negace kroužkem, signály ortogonálně, uzly odboček
-function kresliFBD(net, rozdil) {
-  const k = net.kresba;
+function drawFBD(net, diff) {
+  const k = net.drawing;
   const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('width', k.sirka); svg.setAttribute('height', k.vyska);
-  svg.setAttribute('viewBox', `0 0 ${k.sirka} ${k.vyska}`);
-  const vod = el(svg, 'g', {});
-  for (const [x1, y1, x2, y2] of k.cary) el(vod, 'line', {class: 'vod', x1, y1, x2, y2});
-  for (const [cx, cy] of k.uzly) el(vod, 'circle', {class: 'uzel', cx, cy, r: 3});
+  svg.setAttribute('width', k.width); svg.setAttribute('height', k.height);
+  svg.setAttribute('viewBox', `0 0 ${k.width} ${k.height}`);
+  const wire = el(svg, 'g', {});
+  for (const [x1, y1, x2, y2] of k.lines) el(wire, 'line', {class: 'wire', x1, y1, x2, y2});
+  for (const [cx, cy] of k.nodes) el(wire, 'circle', {class: 'node', cx, cy, r: 3});
   const gp = el(svg, 'g', {});
-  const zp = net.rozdil_piny || {};
-  for (const d of k.boxy) {
-    const g = el(gp, 'g', {'data-id': d.id, class: rozdil[d.id] ? 'd-' + rozdil[d.id] : ''});
-    const z = zp[d.id], ticho = (e, zmena) => { if (z && !zmena && e) e.classList.add('beze-zmeny'); };
+  const zp = net.pin_diff || {};
+  for (const d of k.boxes) {
+    const g = el(gp, 'g', {'data-id': d.id, class: diff[d.id] ? 'd-' + diff[d.id] : ''});
+    const z = zp[d.id], quiet = (e, change) => { if (z && !change && e) e.classList.add('without-changes'); };
     el(g, 'rect', {class: 'box', x: d.x, y: d.y, width: d.w, height: d.h, rx: 2});
-    el(g, 'text', {x: d.x + d.w / 2, y: d.y_titul, 'text-anchor': 'middle', class: 'titul'}, d.titul);
-    if (d.sablona) el(g, 'text', {x: d.x + d.w / 2, y: d.y_sablona, 'text-anchor': 'middle', class: 'pin'}, d.sablona);
-    if (d.nad != null) ticho(popis(g, d.x + d.w / 2, d.y_nad, d.nad), z && z.nad);
-    for (const v of d.vstupy) {
+    el(g, 'text', {x: d.x + d.w / 2, y: d.y_symbol, 'text-anchor': 'middle', class: 'symbol'}, d.symbol);
+    if (d.template) el(g, 'text', {x: d.x + d.w / 2, y: d.y_template, 'text-anchor': 'middle', class: 'pin'}, d.template);
+    if (d.above != null) quiet(description(g, d.x + d.w / 2, d.y_above, d.above), z && z.above);
+    for (const v of d.inputs) {
       const xb = d.x - (v.neg ? 8 : 0);
       if (v.operand !== null) {
-        el(g, 'line', {class: 'vod', x1: xb - 14, y1: v.y, x2: xb, y2: v.y});
-        ticho(popis(g, xb - 17, v.y + 4, v.operand, 'end'), z && z.vstupy.includes(v.n));
+        el(g, 'line', {class: 'wire', x1: xb - 14, y1: v.y, x2: xb, y2: v.y});
+        quiet(description(g, xb - 17, v.y + 4, v.operand, 'end'), z && z.inputs.includes(v.n));
       }
-      if (v.neg) el(g, 'circle', {class: 'prv neg', cx: d.x - 4, cy: v.y, r: 4});
-      if (v.pin) ticho(el(g, 'text', {x: d.x + 4, y: v.y + 4, class: 'pin'}, v.pin), z && z.vstupy.includes(v.n));
+      if (v.neg) el(g, 'circle', {class: 'el neg', cx: d.x - 4, cy: v.y, r: 4});
+      if (v.pin) quiet(el(g, 'text', {x: d.x + 4, y: v.y + 4, class: 'pin'}, v.pin), z && z.inputs.includes(v.n));
       el(g, 'rect', {class: 'hit-pin', x: d.x - 70, y: v.y - 7, width: 74, height: 14, 'data-n': v.n});
     }
-    for (const v of d.vystupy) {
+    for (const v of d.outputs) {
       const xa = d.x + d.w + (v.neg ? 8 : 0);
-      if (v.pahyl) el(g, 'line', {class: 'vod', x1: xa, y1: v.y, x2: xa + 12, y2: v.y});
-      if (v.neg) el(g, 'circle', {class: 'prv neg', cx: d.x + d.w + 4, cy: v.y, r: 4});
-      const zm = z && z.vystupy.includes(v.pin);
-      if (v.operand !== null) ticho(popis(g, xa + 15, v.y + 4, v.operand, 'start'), zm);
-      if (v.pin) ticho(el(g, 'text', {x: d.x + d.w - 4, y: v.y + 4, 'text-anchor': 'end', class: 'pin'}, v.pin), zm);
+      if (v.stub) el(g, 'line', {class: 'wire', x1: xa, y1: v.y, x2: xa + 12, y2: v.y});
+      if (v.neg) el(g, 'circle', {class: 'el neg', cx: d.x + d.w + 4, cy: v.y, r: 4});
+      const chg = z && z.outputs.includes(v.pin);
+      if (v.operand !== null) quiet(description(g, xa + 15, v.y + 4, v.operand, 'start'), chg);
+      if (v.pin) quiet(el(g, 'text', {x: d.x + d.w - 4, y: v.y + 4, 'text-anchor': 'end', class: 'pin'}, v.pin), chg);
     }
   }
-  if (k.prazdny) el(svg, 'text', {x: 16, y: k.vyska / 2 + 4, class: 'prazdny'}, '(prázdný network)');
+  if (k.empty) el(svg, 'text', {x: 16, y: k.height / 2 + 4, class: 'empty'}, '(prázdný network)');
   return svg;
 }
-function kresli(net, rozdil) {
-  const k = net.kresba;
-  rozdil = rozdil || {};
-  if (k.fbd) return kresliFBD(net, rozdil);
-  const prvky = Object.fromEntries(net.prvky.map(p => [p.id, p]));
+function draw(net, diff) {
+  const k = net.drawing;
+  diff = diff || {};
+  if (k.fbd) return drawFBD(net, diff);
+  const elements = Object.fromEntries(net.elements.map(p => [p.id, p]));
   const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('width', k.sirka); svg.setAttribute('height', k.vyska);
-  svg.setAttribute('viewBox', `0 0 ${k.sirka} ${k.vyska}`);
-  const vod = el(svg, 'g', {});
-  for (const [x1, y1, x2, y2] of k.cary) el(vod, 'line', {class: 'vod', x1, y1, x2, y2});
+  svg.setAttribute('width', k.width); svg.setAttribute('height', k.height);
+  svg.setAttribute('viewBox', `0 0 ${k.width} ${k.height}`);
+  const wire = el(svg, 'g', {});
+  for (const [x1, y1, x2, y2] of k.lines) el(wire, 'line', {class: 'wire', x1, y1, x2, y2});
   const gp = el(svg, 'g', {});
-  for (const d of k.prvky) {
-    const p = prvky[d.id];
-    const g = el(gp, 'g', {'data-id': d.id, class: rozdil[d.id] ? 'd-' + rozdil[d.id] : ''});
-    if (p.typ.startsWith('kontakt')) kontakt(g, d, p);
-    else if (p.typ.startsWith('civka') || p.typ === 'ret') civka(g, d, p);
-    else if (p.typ === 'porovnani') porovnani(g, d, p);
-    else if (p.typ === 'not') negace(g, d);
+  for (const d of k.elements) {
+    const p = elements[d.id];
+    const g = el(gp, 'g', {'data-id': d.id, class: diff[d.id] ? 'd-' + diff[d.id] : ''});
+    if (p.type.startsWith('contact')) contact(g, d, p);
+    else if (p.type.startsWith('coil') || p.type === 'ret') coil(g, d, p);
+    else if (p.type === 'comparison') comparison(g, d, p);
+    else if (p.type === 'not') negate(g, d);
     else box(g, d, p);
   }
-  el(svg, 'line', {class: 'lista', x1: k.lista.x, y1: k.lista.y1, x2: k.lista.x, y2: k.lista.y2});
-  if (k.prazdny) el(svg, 'text', {x: k.lista.x + 14, y: k.vyska / 2 + 4, class: 'prazdny'}, '(prázdný network)');
+  el(svg, 'line', {class: 'rail', x1: k.rail.x, y1: k.rail.y1, x2: k.rail.x, y2: k.rail.y2});
+  if (k.empty) el(svg, 'text', {x: k.rail.x + 14, y: k.height / 2 + 4, class: 'empty'}, '(prázdný network)');
   return svg;
 }
-function popisPrvku(p) {
+function elementDescription(p) {
   if (!p) return '?';
-  if (p.typ === 'box') return `[${p.instance ? p.instance + ' ' : ''}${p.nazev}(${p.vstupy.map(x => x.pin + ':=' + x.operand).concat(p.vystupy.map(x => x.pin + '=>' + x.operand)).join(', ')})]`;
-  if (p.typ === 'porovnani') return `|${p.in1} ${p.op} ${p.in2}|`;
-  const zn = {kontakt: '| |', kontakt_nc: '|/|', kontakt_p: '|P|', kontakt_n: '|N|', civka: '( )', civka_s: '(S)',
-              civka_r: '(R)', civka_neg: '(/)', ret: '(RET)', not: '|NOT|'}[p.typ] || p.typ;
-  return `${zn} ${p.operand || ''}`;
+  if (p.type === 'box') return `[${p.instance ? p.instance + ' ' : ''}${p.name}(${p.inputs.map(x => x.pin + ':=' + x.operand).concat(p.outputs.map(x => x.pin + '=>' + x.operand)).join(', ')})]`;
+  if (p.type === 'comparison') return `|${p.in1} ${p.op} ${p.in2}|`;
+  const sym = {contact: '| |', contact_nc: '|/|', contact_p: '|P|', contact_n: '|N|', coil: '( )', coil_s: '(S)',
+              coil_r: '(R)', coil_neg: '(/)', ret: '(RET)', not: '|NOT|'}[p.type] || p.type;
+  return `${sym} ${p.operand || ''}`;
 }
-function seznamRungu(net) {
-  const prvky = Object.fromEntries(net.prvky.map(p => [p.id, p]));
+function rungList(net) {
+  const elements = Object.fromEntries(net.elements.map(p => [p.id, p]));
   const div = document.createElement('div');
-  div.className = 'rungy';
-  for (const r of net.rungy) {
-    const casti = [r.z].concat(r.cesta.map(c => c.startsWith('wire#') ? '● ' + c.slice(5) : popisPrvku(prvky[c])));
-    if (r.do) casti.push('→ ' + r.do);
+  div.className = 'rungs';
+  for (const r of net.rungs) {
+    const parts = [r.from].concat(r.path.map(c => c.startsWith('wire#') ? '● ' + c.slice(5) : elementDescription(elements[c])));
+    if (r.to) parts.push('→ ' + r.to);
     const d = document.createElement('div');
-    d.textContent = casti.join('  —  ');
+    d.textContent = parts.join('  —  ');
     div.appendChild(d);
   }
   return div;
 }
 
 // ---------- stránka ----------
-async function vyberExportu() {
-  const ex = await api('/api/exporty');
-  let h = '<h1>Exporty</h1>';
-  for (const p of ex.projekty) {
-    h += `<h2>${esc(p.projekt)}</h2><ul class="vyber">` +
-      p.bloky.map(b => `<li><a href="${odkaz({projekt: p.projekt, blok: b.blok, nw: null})}">${esc(b.blok)}</a></li>`).join('') + '</ul>';
+async function showExports() {
+  const ex = await api('/api/exports');
+  let h = '<h1>Exports</h1>';
+  for (const p of ex.projects) {
+    h += `<h2>${esc(p.project)}</h2><ul class="select">` +
+      p.blocks.map(b => `<li><a href="${link({project: p.project, block: b.block, nw: null})}">${esc(b.block)}</a></li>`).join('') + '</ul>';
   }
-  $('obsah').innerHTML = h || 'Žádné exporty.';
+  $('content').innerHTML = h || 'Žádné exports.';
 }
 const enc = encodeURIComponent;
-const sirkaPlatna = () => Math.max(600, $('obsah').clientWidth - 40);   // cívky k pravému okraji okna jako v TIA
+const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // cívky k pravému edge okna as v TIA
 
 // strom úprav: projekt → kolo → blok → NW → úprava
-function stromHtml(st, aktId) {
-  let h = '<h2>Úpravy</h2><div class="strom">';
-  if (!st.projekty.length) h += '<p class="prazdno">Zatím žádné úpravy.</p>';
-  const skup = (pole, klic) => {
+function treeHtml(st, activeId) {
+  let h = '<h2>Úpravy</h2><div class="tree">';
+  if (!st.projects.length) h += '<p class="empty">Zatím žádné úpravy.</p>';
+  const group = (field, key) => {
     const m = new Map();
-    for (const x of pole) { const k = klic(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+    for (const x of field) { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
     return m;
   };
-  for (const p of st.projekty) {
-    h += `<div class="u0">${esc(p.projekt)}</div>`;
-    for (const [, uk] of skup(p.upravy, u => String(u.kolo ?? '').trim().toLowerCase())) {
-      h += `<div class="u1">Kolo: ${esc(String(uk[0].kolo ?? '').trim())}</div>`;
-      for (const [blok, ub] of skup(uk, u => u.blok)) {
+  for (const p of st.projects) {
+    h += `<div class="u0">${esc(p.project)}</div>`;
+    for (const [, uk] of group(p.edits, u => String(u.round ?? '').trim().toLowerCase())) {
+      h += `<div class="u1">Round: ${esc(String(uk[0].round ?? '').trim())}</div>`;
+      for (const [block, ub] of group(uk, u => u.block)) {
         const u0 = ub[0];
-        h += `<div class="u2">${esc(u0.druh || '')}${u0.cislo_bloku ?? ''} "${esc(blok)}"</div>`;
-        const nws = [...skup(ub, u => u.nw)].sort((a, b) => a[0] - b[0]);
+        h += `<div class="u2">${esc(u0.kind || '')}${u0.block_number ?? ''} "${esc(block)}"</div>`;
+        const nws = [...group(ub, u => u.nw)].sort((a, b) => a[0] - b[0]);
         for (const [nw, un] of nws) {
-          h += `<a class="u3" href="?projekt=${enc(p.projekt)}&blok=${enc(blok)}&nw=${nw}"><span class="c">NW ${nw}</span>${esc(un[0].titulek || '')}</a>`;
+          h += `<a class="u3" href="?project=${enc(p.project)}&block=${enc(block)}&nw=${nw}"><span class="c">NW ${nw}</span>${esc(un[0].title || '')}</a>`;
           for (const u of un) {
-            h += `<a class="u4 ${u.id === aktId ? 'akt' : ''}" href="?uprava=${enc(u.id)}"><span class="c">${esc(u.id)}</span>` +
-                 `<span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span>${esc(u.poznamka || '')}</a>`;
+            h += `<a class="u4 ${u.id === activeId ? 'active' : ''}" href="?edit=${enc(u.id)}"><span class="c">${esc(u.id)}</span>` +
+                 `<span class="state s-${esc(u.state)}">${esc(u.state)}</span>${esc(u.note || '')}</a>`;
           }
         }
       }
@@ -406,24 +406,24 @@ function stromHtml(st, aktId) {
   }
   return h + '</div>';
 }
-let posledniStav = {projekty: []};
-async function stromNacti(aktId) {
-  try { posledniStav = await api('/api/stav'); return stromHtml(posledniStav, aktId); }
-  catch (e) { return `<h2>Úpravy</h2><p class="varovani">⚠ ${esc(e.message)}</p>`; }
+let lastState = {projects: []};
+async function loadTree(activeId) {
+  try { lastState = await api('/api/state'); return treeHtml(lastState, activeId); }
+  catch (e) { return `<h2>Úpravy</h2><p class="warnings">⚠ ${esc(e.message)}</p>`; }
 }
-function networkyHtml(b, nw, url) {
-  return `<h2>${esc(b.blok)} — networky</h2>` + b.networky.map(n =>
-    `<a class="${n.nw === nw ? 'akt' : ''}" href="${url(n.nw)}"><span class="c">NW ${n.nw}</span>${esc(n.titulek || '')}` +
-    `${n.jazyk !== 'LAD' ? `<span class="j">${esc(n.jazyk || '?')}</span>` : ''}</a>`).join('');
+function networksHtml(b, nw, url) {
+  return `<h2>${esc(b.block)} — networks</h2>` + b.networks.map(n =>
+    `<a class="${n.nw === nw ? 'active' : ''}" href="${url(n.nw)}"><span class="c">NW ${n.nw}</span>${esc(n.title || '')}` +
+    `${n.language !== 'LAD' ? `<span class="j">${esc(n.language || '?')}</span>` : ''}</a>`).join('');
 }
-function platno(m, net, rozdil) {
-  if (net.kresba) {
+function canvas(m, net, diff) {
+  if (net.drawing) {
     const pl = document.createElement('div');
-    pl.className = 'platno';
-    pl.appendChild(kresli(net, rozdil));
+    pl.className = 'canvas';
+    pl.appendChild(draw(net, diff));
     m.appendChild(pl);
-  } else if (net.rungy && net.rungy.length) {
-    m.appendChild(seznamRungu(net));
+  } else if (net.rungs && net.rungs.length) {
+    m.appendChild(rungList(net));
   } else if (net.text) {
     const pre = document.createElement('pre');
     pre.textContent = net.text;
@@ -431,536 +431,536 @@ function platno(m, net, rozdil) {
   }
 }
 
-async function zobrazNetwork(projekt, blok) {
+async function showNetwork(project, block) {
   const nw = parseInt(q.get('nw') || '1', 10);
-  const [strom, b] = await Promise.all([stromNacti(null), api(`/api/blok?projekt=${enc(projekt)}&blok=${enc(blok)}`)]);
-  $('info').textContent = `${b.projekt} · export ${b.ts} · ${b.druh}${b.cislo != null ? b.cislo : ''} "${b.blok}"`;
-  document.title = `TIAC_Editor — ${b.blok} NW${nw}`;
-  $('nw').innerHTML = strom + networkyHtml(b, nw, n => odkaz({nw: n}));
-  const net = await api(`/api/network?projekt=${enc(projekt)}&blok=${enc(blok)}&nw=${nw}&sirka=${sirkaPlatna()}`);
-  const m = $('obsah');
-  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.titulek || '')}</h1>` +
-    (net.komentar ? `<p class="komentar">${esc(net.komentar)}</p>` : '') +
-    net.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('');
-  const fbd = net.jazyk === 'FBD' && net.kresba;
-  if (net.jazyk === 'LAD' && net.kresba || fbd) {
-    const pp = posledniStav.projekty.find(p => p.projekt === projekt);
-    const kolo = pp && pp.upravy.length ? pp.upravy[pp.upravy.length - 1].kolo : 'Kolo 1';
+  const [tree, b] = await Promise.all([loadTree(null), api(`/api/block?project=${enc(project)}&block=${enc(block)}`)]);
+  $('info').textContent = `${b.project} · export ${b.ts} · ${b.kind}${b.number != null ? b.number : ''} "${b.block}"`;
+  document.title = `TIAC_Editor — ${b.block} NW${nw}`;
+  $('nw').innerHTML = tree + networksHtml(b, nw, n => link({nw: n}));
+  const net = await api(`/api/network?project=${enc(project)}&block=${enc(block)}&nw=${nw}&width=${canvasWidth()}`);
+  const m = $('content');
+  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.title || '')}</h1>` +
+    (net.comment ? `<p class="comment">${esc(net.comment)}</p>` : '') +
+    net.warnings.map(v => `<div class="warnings">⚠ ${esc(v)}</div>`).join('');
+  const fbd = net.language === 'FBD' && net.drawing;
+  if (net.language === 'LAD' && net.drawing || fbd) {
+    const pp = lastState.projects.find(p => p.project === project);
+    const round = pp && pp.edits.length ? pp.edits[pp.edits.length - 1].round : 'Round 1';
     const d = document.createElement('div');
-    d.className = 'nastroje';
-    d.innerHTML = `<button class="hl" id="navrh">Navrhnout úpravu</button> kolo <input id="navrh-kolo" value="${esc(kolo)}">` +
-                  (net.jako_lad ? `<button id="jako-lad" class="${q.get('lad') === '1' ? 'akt' : ''}" title="jen ke čtení; jen síť z &, >=1, negací a =">` +
-                                  `${q.get('lad') === '1' ? 'Zobrazit jako FBD' : 'Zobrazit jako LAD'}</button>` : '') +
-                  `<span class="rezim" id="navrh-chyba"></span>`;
+    d.className = 'tools';
+    d.innerHTML = `<button class="hl" id="proposal">Propose úpravu</button> round <input id="proposal-round" value="${esc(round)}">` +
+                  (net.as_lad ? `<button id="as-lad" class="${q.get('lad') === '1' ? 'active' : ''}" title="only ke čtení; only síť z &, >=1, negací a =">` +
+                                  `${q.get('lad') === '1' ? 'Zobrazit as FBD' : 'Zobrazit as LAD'}</button>` : '') +
+                  `<span class="mode" id="proposal-error"></span>`;
     m.appendChild(d);
-    if ($('jako-lad')) $('jako-lad').onclick = () => { location.href = odkaz({lad: q.get('lad') === '1' ? null : '1'}); };
-    $('navrh').onclick = async () => {
+    if ($('as-lad')) $('as-lad').onclick = () => { location.href = link({lad: q.get('lad') === '1' ? null : '1'}); };
+    $('proposal').onclick = async () => {
       try {
-        const u = await apiJson('POST', '/api/uprava', {projekt, kolo: $('navrh-kolo').value.trim() || 'Kolo 1', blok, nw,
-                                 po: fbd ? {jazyk: 'FBD', prvky: net.prvky} : {prvky: net.prvky, rungy: net.rungy}, poznamka: ''});
-        location.href = `?uprava=${enc(u.id)}&upravit=1`;
-      } catch (e) { $('navrh-chyba').textContent = '⚠ ' + e.message; }
+        const u = await apiJson('POST', '/api/edits', {project, round: $('proposal-round').value.trim() || 'Round 1', block, nw,
+                                 after: fbd ? {language: 'FBD', elements: net.elements} : {elements: net.elements, rungs: net.rungs}, note: ''});
+        location.href = `?edit=${enc(u.id)}&edit_mode=1`;
+      } catch (e) { $('proposal-error').textContent = '⚠ ' + e.message; }
     };
   }
-  if (net.jako_lad && q.get('lad') === '1') {
-    m.insertAdjacentHTML('beforeend', '<p class="komentar">Zobrazeno jako LAD — jen ke čtení; každé přiřazení je vlastní rung, sdílené části se opakují.</p>');
-    platno(m, {kresba: net.jako_lad.kresba, prvky: net.jako_lad.prvky, rungy: net.jako_lad.rungy});
-  } else platno(m, net);
+  if (net.as_lad && q.get('lad') === '1') {
+    m.insertAdjacentHTML('beforeend', '<p class="comment">Zobrazeno as LAD — only ke čtení; každé přiřazení is vlastní rung, sdílené části se opakují.</p>');
+    canvas(m, {drawing: net.as_lad.drawing, elements: net.as_lad.elements, rungs: net.as_lad.rungs});
+  } else canvas(m, net);
 }
-async function apiJson(metoda, cesta, telo) {
-  const r = await fetch(cesta, {method: metoda, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(telo)});
+async function apiJson(method, path, body) {
+  const r = await fetch(path, {method: method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json();
-  if (!r.ok) throw new Error(j.chyba || r.status);
+  if (!r.ok) throw new Error(j.error || r.status);
   return j;
 }
 
-async function zmenStav(uid, stav) {
-  const r = await fetch(`/api/uprava/${enc(uid)}/stav`, {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({stav, kdo: 'Honza'})});
+async function changeState(uid, state) {
+  const r = await fetch(`/api/edits/${enc(uid)}/state`, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                    body: JSON.stringify({state, by: 'user'})});
   const j = await r.json();
-  if (!r.ok) throw new Error(j.chyba || r.status);
+  if (!r.ok) throw new Error(j.error || r.status);
 }
 
 // od 13. 10. 2026: Signed = zapsáno v projektu (Honza / Upload přes Writer), Checked = Reader export = návrh (Check)
-const STAVY = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested'];
+const STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested'];
 
-async function zobrazUpravu(uid, chyba) {
-  const d = await api(`/api/uprava/${enc(uid)}?sirka=${sirkaPlatna()}`);
-  const u = d.uprava;
-  $('info').textContent = `${u.projekt} · úprava ${u.id} · export před ${u.pred.export_ts}`;
-  document.title = `TIAC_Editor — ${u.id} ${u.blok} NW${u.nw}`;
-  let vlevo = await stromNacti(u.id);
+async function showEdit(uid, error) {
+  const d = await api(`/api/edits/${enc(uid)}?width=${canvasWidth()}`);
+  const u = d.edit;
+  $('info').textContent = `${u.project} · úprava ${u.id} · export před ${u.before.export_ts}`;
+  document.title = `TIAC_Editor — ${u.id} ${u.block} NW${u.nw}`;
+  let left = await loadTree(u.id);
   try {
-    const b = await api(`/api/blok?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}`);
-    vlevo += networkyHtml(b, u.nw, n => `?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}&nw=${n}`);
+    const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
+    left += networksHtml(b, u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
   } catch (e) { /* blok už v exportu není: strom stačí */ }
-  $('nw').innerHTML = vlevo;
-  const m = $('obsah');
-  const tlChecked = d.dalsi === 'Checked' && !d.checked_povolen;
-  const jazyk = d.jazyk || 'LAD';
+  $('nw').innerHTML = left;
+  const m = $('content');
+  const btnChecked = d.next === 'Checked' && !d.checked_allowed;
+  const language = d.language || 'LAD';
   m.innerHTML =
-    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
-    `<div class="hlavicka"><span class="stav s-${esc(u.stav)}">${esc(u.stav)}</span>${d.chyby.length ? `<span class="znacka-chyb">⚠ ${nChyb(d.chyby.length, jazyk)}</span> · ` : ''} kolo <b>${esc(u.kolo)}</b> · autor <b>${esc(u.autor)}</b> · ${esc(u.cas.replace('T', ' '))}</div>` +
-    (u.poznamka ? `<p class="komentar">${esc(u.poznamka)}</p>` : '') +
-    `<div class="tlacitka">` +
-    (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
-    (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlChecked ? 'disabled title="Checked až po poslední kontrole exportem se shodou (Check / Zkontrolovat exportem)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
-    (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : `<button id="kontrola" title="porovná nejnovější export Readeru s návrhem a zapíše kontrolu">Zkontrolovat exportem</button>`) +
-    (u.stav === 'Approved' ? (u.f ? `<span class="fblok">F-blok: zapisuje Honza podle Postupu pro TIA</span>`
-      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer zapíše network do projektu TIA (export bloku → náhrada networku → import Override) → Signed' : 'nejdřív Nastavení TIA projektu'}">Upload →</button>`) : '') +
-    (u.stav === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exportuje blok, porovná s návrhem; při shodě → Checked' : 'nejdřív Nastavení TIA projektu'}">Check →</button>` : '') +
-    `<span class="prubeh" id="prubeh"></span>` +
+    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
+    `<div class="header"><span class="state s-${esc(u.state)}">${esc(u.state)}</span>${d.errors.length ? `<span class="mark-errors">⚠ ${errorCount(d.errors.length, language)}</span> · ` : ''} round <b>${esc(u.round)}</b> · author <b>${esc(u.author)}</b> · ${esc(u.time.replace('T', ' '))}</div>` +
+    (u.note ? `<p class="comment">${esc(u.note)}</p>` : '') +
+    `<div class="buttons">` +
+    (d.previous ? `<button data-state="${esc(d.previous)}">← ${esc(d.previous)}</button>` : '') +
+    (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked až after poslední check export se match (Check / Zkontrolovat export)"' : ''}>${esc(d.next)} →</button>` : '') +
+    (u.state === 'Proposal' ? `<button id="edit_mode">EditMode</button>` : `<button id="check-export" title="porovná nejnovější export Readeru s návrhem a zapíše check">Zkontrolovat export</button>`) +
+    (u.state === 'Approved' ? (u.f ? `<span class="fblock">F-block: writes Honza by Procedure for TIA</span>`
+      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer zapíše network do project TIA (export block → náhrada network → import Override) → Signed' : 'nejdřív Nastavení TIA project'}">Upload →</button>`) : '') +
+    (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exportuje block, porovná s návrhem; při shodě → Checked' : 'nejdřív Nastavení TIA project'}">Check →</button>` : '') +
+    `<span class="progress" id="progress"></span>` +
     `</div>` +
-    `<details class="tia-nast"${d.tia ? '' : ' open'}><summary>Nastavení TIA projektu ${esc(u.projekt)}: ${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'nenastaveno (Upload/Check nejde)'}</summary>` +
+    `<details class="tia-settings"${d.tia ? '' : ' open'}><summary>Nastavení TIA project ${esc(u.project)}: ${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'nenastaveno (Upload/Check fails)'}</summary>` +
     `softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1">` +
     `plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1">` +
     `groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(dohledá Writer)">` +
-    `<button id="tia-uloz">Uložit</button></details>` +
-    (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla ${jazyk} (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
-    (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
-    `<div class="kontroly"><h3>Kontroly exportem</h3>` +
-    (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
-      `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
-      : '<div>Zatím žádná — Checked se odemkne, když poslední kontrola je shoda.</div>') + `</div>` +
-    (u.zapisy && u.zapisy.length ? `<div class="kontroly zapisy"><h3>Upload / Check (Writer, Reader)</h3>` + u.zapisy.map(z =>
-      `<div><span class="${z.ok ? 'ok' : 'ne'}">${z.ok ? '✓' : '✗'} ${esc(z.nastroj)}</span> · ${esc(z.cas.replace('T', ' '))} · ${esc(z.zprava)}</div>` +
-      `<ol>${(z.kroky || []).map(k => `<li class="${k.ok ? '' : 'ne'}" title="${esc(k.zprava)}">${esc(k.krok)}${k.ok ? '' : ': ' + esc(k.zprava)}</li>`).join('')}</ol>`).join('') + `</div>` : '') +
-    `<div class="kontroly postup" id="postup"></div>` +
-    d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
-    `<div class="stavy-leg">Stavy: ${STAVY.map(x => `<span class="stav s-${x}${x === u.stav ? ' akt' : ''}">${x}</span>`).join('→')}</div>` +
-    `<div class="legenda">Model „po“ proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
-  if ($('upravit')) $('upravit').onclick = () => { location.href = `?uprava=${enc(u.id)}&upravit=1`; };
-  if ($('kontrola')) $('kontrola').onclick = async () => {
-    $('kontrola').disabled = true;
+    `<button id="tia-save">Uložit</button></details>` +
+    (d.errors.length ? `<div class="warnings">⚠ Návrh porušuje rules ${language} (${d.errors.length}):<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
+    (error ? `<div class="warnings">⚠ ${esc(error)}</div>` : '') +
+    `<div class="checks"><h3>Checks export</h3>` +
+    (u.checks && u.checks.length ? u.checks.map(k =>
+      `<div><span class="${k.match ? 'ok' : 'bad'}">${k.match ? '✓ match' : '✗ mismatch'}</span> · ${esc(k.time.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.note ? ' · ' + esc(k.note) : ''}</div>`).join('')
+      : '<div>Zatím žádná — Checked se odemkne, když poslední check is match.</div>') + `</div>` +
+    (u.writes && u.writes.length ? `<div class="checks writes"><h3>Upload / Check (Writer, Reader)</h3>` + u.writes.map(z =>
+      `<div><span class="${z.ok ? 'ok' : 'bad'}">${z.ok ? '✓' : '✗'} ${esc(z.tool)}</span> · ${esc(z.time.replace('T', ' '))} · ${esc(z.message)}</div>` +
+      `<ol>${(z.steps || []).map(k => `<li class="${k.ok ? '' : 'bad'}" title="${esc(k.message)}">${esc(k.step)}${k.ok ? '' : ': ' + esc(k.message)}</li>`).join('')}</ol>`).join('') + `</div>` : '') +
+    `<div class="checks procedure" id="procedure"></div>` +
+    d.warnings.map(v => `<div class="warnings">⚠ ${esc(v)}</div>`).join('') +
+    `<div class="states-leg">States: ${STATES.map(x => `<span class="state s-${x}${x === u.state ? ' active' : ''}">${x}</span>`).join('→')}</div>` +
+    `<div class="legend">Model „after“ against export: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
+  if ($('edit_mode')) $('edit_mode').onclick = () => { location.href = `?edit=${enc(u.id)}&edit_mode=1`; };
+  if ($('check-export')) $('check-export').onclick = async () => {
+    $('check-export').disabled = true;
     try {
-      const k = await apiJson('POST', `/api/uprava/${enc(u.id)}/kontrola-exportem`, {});
-      await zobrazUpravu(uid, k.shoda ? null : `Kontrola exportem ${k.export_ts}: ${k.poznamka}`);
-    } catch (e) { await zobrazUpravu(uid, 'Kontrola exportem selhala: ' + e.message); }
+      const k = await apiJson('POST', `/api/edits/${enc(u.id)}/check-export`, {});
+      await showEdit(uid, k.match ? null : `Check export ${k.export_ts}: ${k.note}`);
+    } catch (e) { await showEdit(uid, 'Check export selhala: ' + e.message); }
   };
   // M5: Upload (Writer) / Check (Reader) — běží na serveru, tady jen průběh a výsledek; chyba nesmí shodit stránku
-  for (const [id, cesta, popis] of [['upload', 'upload', 'Upload: TIAC_Writer zapisuje network…'],
-                                    ['check', 'check', 'Check: TIAC_Reader exportuje blok a porovnává…']]) {
+  for (const [id, path, description] of [['upload', 'upload', 'Upload: TIAC_Writer writes network…'],
+                                    ['check', 'check', 'Check: TIAC_Reader exportuje block a porovnává…']]) {
     if (!$(id) || $(id).disabled) continue;
     $(id).onclick = async () => {
-      for (const b of m.querySelectorAll('.tlacitka button')) b.disabled = true;
-      $('prubeh').textContent = popis;
+      for (const b of m.querySelectorAll('.buttons button')) b.disabled = true;
+      $('progress').textContent = description;
       try {
-        const r = await apiJson('POST', `/api/uprava/${enc(u.id)}/${cesta}`, {});
-        await zobrazUpravu(uid, r.ok ? null : r.zprava);
-      } catch (e) { await zobrazUpravu(uid, `${id === 'upload' ? 'Upload' : 'Check'}: ${e.message}`); }
+        const r = await apiJson('POST', `/api/edits/${enc(u.id)}/${path}`, {});
+        await showEdit(uid, r.ok ? null : r.message);
+      } catch (e) { await showEdit(uid, `${id === 'upload' ? 'Upload' : 'Check'}: ${e.message}`); }
     };
   }
-  $('tia-uloz').onclick = async () => {
+  $('tia-save').onclick = async () => {
     try {
-      const st = await api(`/api/stav?projekt=${enc(u.projekt)}`);
+      const st = await api(`/api/state?project=${enc(u.project)}`);
       const t = {softwarePath: $('tia-sp').value.trim(), plcName: $('tia-plc').value.trim(), groupPath: $('tia-grp').value.trim()};
       for (const k of Object.keys(t)) if (!t[k]) delete t[k];
       if (Object.keys(t).length) st.tia = t; else delete st.tia;
-      await apiJson('PUT', `/api/stav?projekt=${enc(u.projekt)}`, st);
-      await zobrazUpravu(uid);
-    } catch (e) { await zobrazUpravu(uid, 'Nastavení TIA: ' + e.message); }
+      await apiJson('PUT', `/api/state?project=${enc(u.project)}`, st);
+      await showEdit(uid);
+    } catch (e) { await showEdit(uid, 'Nastavení TIA: ' + e.message); }
   };
-  for (const b of m.querySelectorAll('button[data-stav]')) {
+  for (const b of m.querySelectorAll('button[data-state]')) {
     b.onclick = async () => {
-      try { await zmenStav(u.id, b.dataset.stav); await zobrazUpravu(uid); }
-      catch (e) { await zobrazUpravu(uid, e.message); }
+      try { await changeState(u.id, b.dataset.state); await showEdit(uid); }
+      catch (e) { await showEdit(uid, e.message); }
     };
   }
-  platno(m, d, d.rozdil);
-  try { postupPanel(await api(`/api/uprava/${enc(u.id)}/postup`)); } catch (e) { /* bez postupu */ }
+  canvas(m, d, d.diff);
+  try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* bez postupu */ }
 }
 // F2: postup skládání pro TIA (markdown -> seznam), kopírování pro Honzu
 function md(t) {
   return esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 }
-function postupPanel(p) {
-  const el_ = $('postup');
+function procedurePanel(p) {
+  const el_ = $('procedure');
   if (!el_) return;
-  el_.innerHTML = `<h3>Postup pro TIA <button id="postup-kopie" title="zkopíruje markdown">kopírovat</button></h3>` +
-    `<div class="hlavicka"><b>${esc(p.hlavicka)}</b></div><ol>${p.kroky.map(k => `<li>${md(k)}</li>`).join('')}</ol>`;
-  $('postup-kopie').onclick = async () => {
-    try { await navigator.clipboard.writeText(p.markdown); $('postup-kopie').textContent = 'zkopírováno'; }
-    catch (e) { $('postup-kopie').textContent = 'nelze kopírovat'; }
+  el_.innerHTML = `<h3>Procedure for TIA <button id="procedure-copy" title="zkopíruje markdown">kopírovat</button></h3>` +
+    `<div class="header"><b>${esc(p.header)}</b></div><ol>${p.steps.map(k => `<li>${md(k)}</li>`).join('')}</ol>`;
+  $('procedure-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(p.markdown); $('procedure-copy').textContent = 'zkopírováno'; }
+    catch (e) { $('procedure-copy').textContent = 'nelze kopírovat'; }
   };
 }
 
 // ---------- M3: editor ----------
-const ed = {u: null, pred: null, po: null, hist: [], redo: [], vyber: null, vklad: null, vetev: null, res: null,
-            kat: null, zmeneno: false, fbd: false, f: false, vstup: null};
-const nChyb = (n, j) => `${n} ${n === 1 ? 'chyba' : n < 5 ? 'chyby' : 'chyb'} ${j || 'LAD'}`;
-const DRUH = p => ed.fbd ? 'fbd' : /^civka|^ret$/.test(p.typ) ? 'civka' : p.typ === 'box' ? 'box' : 'kontakt';
-const JAZ = () => ed.fbd ? 'FBD' : 'LAD';
+const ed = {u: null, before: null, after: null, hist: [], redo: [], select: null, insert: null, branch: null, res: null,
+            cat: null, changed: false, fbd: false, f: false, input: null};
+const errorCount = (n, j) => `${n} ${n === 1 ? 'error' : n < 5 ? 'errors' : 'errors'} ${j || 'LAD'}`;
+const KIND = p => ed.fbd ? 'fbd' : /^coil|^ret$/.test(p.type) ? 'coil' : p.type === 'box' ? 'box' : 'contact';
+const LANG = () => ed.fbd ? 'FBD' : 'LAD';
 
 async function editor(uid) {
-  const d = await api(`/api/uprava/${enc(uid)}`);
-  const u = d.uprava;
-  if (u.stav !== 'Proposal') { await zobrazUpravu(uid, `Upravovat lze jen návrh ve stavu Proposal (teď ${u.stav}).`); return; }
-  const fbd = u.po.jazyk === 'FBD';
-  Object.assign(ed, {u, fbd, f: !!u.f, vstup: null,
-                     pred: fbd ? {jazyk: 'FBD', prvky: u.pred.prvky} : {prvky: u.pred.prvky, rungy: u.pred.rungy},
-                     po: fbd ? {jazyk: 'FBD', prvky: u.po.prvky} : {prvky: u.po.prvky, rungy: u.po.rungy},
-                     hist: [], redo: [], vyber: null, vklad: null, vetev: null, zmeneno: false});
-  ed.kat = await api(`/api/katalog?projekt=${enc(u.projekt)}`);
-  $('info').textContent = `${u.projekt} · editor úpravy ${u.id} · export před ${u.pred.export_ts}`;
-  document.title = `TIAC_Editor — upravit ${u.id}`;
-  let vlevo = await stromNacti(u.id);
+  const d = await api(`/api/edits/${enc(uid)}`);
+  const u = d.edit;
+  if (u.state !== 'Proposal') { await showEdit(uid, `Upravovat lze only návrh ve state Proposal (teď ${u.state}).`); return; }
+  const fbd = u.after.language === 'FBD';
+  Object.assign(ed, {u, fbd, f: !!u.f, input: null,
+                     before: fbd ? {language: 'FBD', elements: u.before.elements} : {elements: u.before.elements, rungs: u.before.rungs},
+                     after: fbd ? {language: 'FBD', elements: u.after.elements} : {elements: u.after.elements, rungs: u.after.rungs},
+                     hist: [], redo: [], select: null, insert: null, branch: null, changed: false});
+  ed.cat = await api(`/api/catalog?project=${enc(u.project)}`);
+  $('info').textContent = `${u.project} · editor úpravy ${u.id} · export před ${u.before.export_ts}`;
+  document.title = `TIAC_Editor — edit_mode ${u.id}`;
+  let left = await loadTree(u.id);
   try {
-    const b = await api(`/api/blok?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}`);
-    vlevo += networkyHtml(b, u.nw, n => `?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}&nw=${n}`);
+    const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
+    left += networksHtml(b, u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
   } catch (e) { /* blok v exportu není */ }
-  $('nw').innerHTML = vlevo;
-  document.querySelector('.hlavni').classList.add('edit');
-  paleta();
-  operandy();
-  $('obsah').innerHTML =
-    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
-    `<div class="hlavicka"><span class="stav s-Proposal">Proposal</span><span id="ed-znacka"></span> kolo <b>${esc(u.kolo)}</b> · úprava v editoru</div>` +
-    `<div class="nastroje">` +
-    `<button id="ed-zpet" title="Ctrl+Z">↶ Zpět</button><button id="ed-znovu" title="Ctrl+Y">↷ Znovu</button>` +
-    (fbd ? `<button id="ed-plus" title="Insert input (Ctrl+Shift+3 v TIA)">+ vstup</button><button id="ed-minus" title="odebere vybraný (jinak poslední) vstup">− vstup</button>` +
-           `<button id="ed-neg" title="Create a ones complement (Ctrl+Shift+4 v TIA)">Negovat vstup</button>`
-         : `<button id="ed-vetev" title="vyber dvě místa v jednom rungu; prvek = vybraný v paletě, jinak spínací kontakt">Větev</button>`) +
-    `<button id="ed-smaz" title="Delete">Smazat</button>` +
-    `<button id="ed-uloz" class="hl">Uložit návrh</button><button id="ed-zavri">Zavřít editor</button></div>` +
-    `<div class="rezim" id="ed-rezim"></div>` +
-    `<div class="platno" id="ed-platno"></div>` +
-    `<div class="legenda">Proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span>` +
-    ` · <span style="color:var(--varovani)">■ chyba pravidla</span></div>` +
-    `<div class="editor-spod"><div><h3>Pravidla ${JAZ()}${ed.f ? ' · F-blok' : ''}</h3><div class="chyby" id="ed-chyby"></div></div>` +
-    `<div><h3>Vlastnosti prvku</h3><div class="vlastnosti" id="ed-vlastnosti"></div></div></div>`;
-  $('ed-zpet').onclick = zpet;
-  $('ed-znovu').onclick = znovu;
-  if ($('ed-vetev')) $('ed-vetev').onclick = () => { ed.vetev = ed.vetev ? null : {od: null}; vykresli(); };
+  $('nw').innerHTML = left;
+  document.querySelector('.main').classList.add('edit');
+  palette();
+  operands();
+  $('content').innerHTML =
+    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
+    `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · úprava v editor</div>` +
+    `<div class="tools">` +
+    `<button id="ed-undo" title="Ctrl+Z">↶ Zpět</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button>` +
+    (fbd ? `<button id="ed-plus" title="Insert input (Ctrl+Shift+3 v TIA)">+ input</button><button id="ed-minus" title="odebere vybraný (jinak poslední) input">− input</button>` +
+           `<button id="ed-neg" title="Create a ones complement (Ctrl+Shift+4 v TIA)">Negate input</button>`
+         : `<button id="ed-branch" title="select dvě místa v one rung; element = vybraný v paletě, jinak spínací contact">Větev</button>`) +
+    `<button id="ed-delete" title="Delete">Smazat</button>` +
+    `<button id="ed-save" class="hl">Uložit návrh</button><button id="ed-close">Zavřít editor</button></div>` +
+    `<div class="mode" id="ed-mode"></div>` +
+    `<div class="canvas" id="ed-canvas"></div>` +
+    `<div class="legend">Against export: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span>` +
+    ` · <span style="color:var(--warnings)">■ error rules</span></div>` +
+    `<div class="editor-bottom"><div><h3>Rules ${LANG()}${ed.f ? ' · F-block' : ''}</h3><div class="errors" id="ed-errors"></div></div>` +
+    `<div><h3>Properties element</h3><div class="properties" id="ed-properties"></div></div></div>`;
+  $('ed-undo').onclick = undo;
+  $('ed-redo').onclick = redo;
+  if ($('ed-branch')) $('ed-branch').onclick = () => { ed.branch = ed.branch ? null : {from: null}; render(); };
   if (fbd) {
-    $('ed-plus').onclick = () => ed.vyber && provedOp({typ: 'pridej_vstup', id: ed.vyber});
+    $('ed-plus').onclick = () => ed.select && applyOp({type: 'add_input', id: ed.select});
     $('ed-minus').onclick = () => {
-      const p = ed.po.prvky.find(x => x.id === ed.vyber);
-      if (p) provedOp({typ: 'odeber_vstup', id: p.id, vstup: ed.vstup || p.vstupy.length});
+      const p = ed.after.elements.find(x => x.id === ed.select);
+      if (p) applyOp({type: 'remove_input', id: p.id, input: ed.input || p.inputs.length});
     };
-    $('ed-neg').onclick = () => ed.vyber && provedOp({typ: 'negace', id: ed.vyber, vstup: ed.vstup || 1});
+    $('ed-neg').onclick = () => ed.select && applyOp({type: 'negate', id: ed.select, input: ed.input || 1});
   }
-  $('ed-smaz').onclick = () => { if (ed.vyber) smazVyber(); };
-  $('ed-uloz').onclick = uloz;
-  $('ed-zavri').onclick = () => {
-    if (!ed.zmeneno || confirm('Neuložené změny se zahodí. Zavřít?')) location.href = `?uprava=${enc(u.id)}`;
+  $('ed-delete').onclick = () => { if (ed.select) deleteSelected(); };
+  $('ed-save').onclick = save;
+  $('ed-close').onclick = () => {
+    if (!ed.changed || confirm('Neuložené změny se zahodí. Zavřít?')) location.href = `?edit=${enc(u.id)}`;
   };
-  const pl = $('ed-platno');
-  pl.addEventListener('dragover', e => { if (ed.vklad) { e.preventDefault(); zvyrazniBlizke(nejblizsi(e)); } });
-  pl.addEventListener('dragleave', () => zvyrazniBlizke(null));
-  pl.addEventListener('drop', e => { e.preventDefault(); const m = nejblizsi(e); if (m) vlozNa(m); });
-  document.addEventListener('keydown', klavesy);
-  await prepocti([]);
+  const pl = $('ed-canvas');
+  pl.addEventListener('dragover', e => { if (ed.insert) { e.preventDefault(); highlightNear(nearest(e)); } });
+  pl.addEventListener('dragleave', () => highlightNear(null));
+  pl.addEventListener('drop', e => { e.preventDefault(); const m = nearest(e); if (m) insertAt(m); });
+  document.addEventListener('keydown', keys);
+  await recompute([]);
   // scénáře pro snímky / Clauda (headless nemá myš): &ops=<JSON operací>, &vyber=<id>, &paleta=<klíč>, &vetev=r,k
-  if (q.get('ops')) await prepocti(JSON.parse(q.get('ops')));
-  if (q.get('vyber')) { ed.vyber = q.get('vyber'); ed.vstup = q.get('vstup') ? +q.get('vstup') : null; vykresli(); }
-  if (q.get('paleta')) vyberPalety(q.get('paleta'));
-  if (q.get('vetev')) { const [r, k] = q.get('vetev').split(',').map(Number); ed.vetev = {od: {r, k}}; vykresli(); }
+  if (q.get('ops')) await recompute(JSON.parse(q.get('ops')));
+  if (q.get('select')) { ed.select = q.get('select'); ed.input = q.get('input') ? +q.get('input') : null; render(); }
+  if (q.get('palette')) selectPalette(q.get('palette'));
+  if (q.get('branch')) { const [r, k] = q.get('branch').split(',').map(Number); ed.branch = {from: {r, k}}; render(); }
 }
 
-async function prepocti(ops, bezHistorie) {
-  const res = await apiJson('POST', '/api/rozlozeni', {projekt: ed.u.projekt, pred: ed.pred, po: ed.po, ops, f: ed.f, sirka: sirkaPlatna()});
-  if (ops.length && !bezHistorie) { ed.hist.push(ed.po); ed.redo = []; ed.zmeneno = true; }
-  if (ops.length) rezim('');
-  ed.po = res.po;
+async function recompute(ops, noHistory) {
+  const res = await apiJson('POST', '/api/layout', {project: ed.u.project, before: ed.before, after: ed.after, ops, f: ed.f, width: canvasWidth()});
+  if (ops.length && !noHistory) { ed.hist.push(ed.after); ed.redo = []; ed.changed = true; }
+  if (ops.length) mode('');
+  ed.after = res.after;
   ed.res = res;
-  if (ed.vyber && !res.po.prvky.some(p => p.id === ed.vyber)) ed.vyber = null;
-  vykresli();
+  if (ed.select && !res.after.elements.some(p => p.id === ed.select)) ed.select = null;
+  render();
   return res;
 }
-async function provedOp(op) {
-  try { return await prepocti([op]); }
-  catch (e) { rezim('⚠ ' + e.message); }
+async function applyOp(op) {
+  try { return await recompute([op]); }
+  catch (e) { mode('⚠ ' + e.message); }
 }
-async function zpet() {
+async function undo() {
   if (!ed.hist.length) return;
-  ed.redo.push(ed.po); ed.po = ed.hist.pop(); ed.zmeneno = true;
-  await prepocti([]);
+  ed.redo.push(ed.after); ed.after = ed.hist.pop(); ed.changed = true;
+  await recompute([]);
 }
-async function znovu() {
+async function redo() {
   if (!ed.redo.length) return;
-  ed.hist.push(ed.po); ed.po = ed.redo.pop(); ed.zmeneno = true;
-  await prepocti([]);
+  ed.hist.push(ed.after); ed.after = ed.redo.pop(); ed.changed = true;
+  await recompute([]);
 }
-async function smazVyber() {
-  const id = ed.vyber;
-  ed.vyber = null;
-  await provedOp({typ: 'smaz', id});
+async function deleteSelected() {
+  const id = ed.select;
+  ed.select = null;
+  await applyOp({type: 'delete', id});
 }
-async function uloz() {
+async function save() {
   try {
-    const r = await apiJson('POST', `/api/uprava/${enc(ed.u.id)}/po`, {po: ed.po});
-    ed.zmeneno = false;
-    rezim(`Uloženo ${new Date().toLocaleTimeString('cs-CZ')}` + (r.chyby.length ? ` — ${nChyb(r.chyby.length, JAZ())} (hlavička úpravy je označí)` : ' — bez chyb'), true);
-  } catch (e) { rezim('⚠ Uložení selhalo: ' + e.message); }
+    const r = await apiJson('POST', `/api/edits/${enc(ed.u.id)}/after`, {after: ed.after});
+    ed.changed = false;
+    mode(`Uloženo ${new Date().toLocaleTimeString('cs-CZ')}` + (r.errors.length ? ` — ${errorCount(r.errors.length, LANG())} (hlavička úpravy is označí)` : ' — without errors'), true);
+  } catch (e) { mode('⚠ Uložení selhalo: ' + e.message); }
 }
-function rezim(text, zprava) {
-  const r = $('ed-rezim');
+function mode(text, message) {
+  const r = $('ed-mode');
   if (!r) return;
   r.textContent = text || '';
-  r.classList.toggle('zprava', !!zprava);
+  r.classList.toggle('message', !!message);
 }
-function klavesy(e) {
-  const vPoli = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName);
+function keys(e) {
+  const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName);
   if (e.key === 'Escape') {
-    if (vPoli) { document.activeElement.blur(); return; }
-    if (ed.vklad || ed.vetev) { ed.vklad = null; ed.vetev = null; paletaAkt(); vykresli(); }
-    else if (ed.vyber) { ed.vyber = null; vykresli(); }
+    if (inField) { document.activeElement.blur(); return; }
+    if (ed.insert || ed.branch) { ed.insert = null; ed.branch = null; markPalette(); render(); }
+    else if (ed.select) { ed.select = null; render(); }
     return;
   }
-  if (vPoli) return;
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? znovu() : zpet(); }
-  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); znovu(); }
-  else if ((e.key === 'Delete' || e.key === 'Backspace') && ed.vyber) { e.preventDefault(); smazVyber(); }
+  if (inField) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && ed.select) { e.preventDefault(); deleteSelected(); }
 }
 
 // paleta: instrukce + bloky projektu, hledání podle názvu
-function paleta() {
-  const p = $('paleta');
+function palette() {
+  const p = $('palette');
   p.hidden = false;
-  p.innerHTML = `<h2>Paleta</h2><input id="pal-hledat" placeholder="hledat (TON, FB_…, MOVE)" autocomplete="off"><div id="pal-seznam"></div>`;
-  $('pal-hledat').oninput = paletaSeznam;
-  paletaSeznam();
+  p.innerHTML = `<h2>Palette</h2><input id="pal-search" placeholder="search (TON, FB_…, MOVE)" autocomplete="off"><div id="pal-list"></div>`;
+  $('pal-search').oninput = paletteList;
+  paletteList();
 }
-function paletaSeznam() {
-  const h = ($('pal-hledat').value || '').trim().toLowerCase();
+function paletteList() {
+  const h = ($('pal-search').value || '').trim().toLowerCase();
   const sk = new Map();
-  const zdroj = ed.fbd ? ed.kat.fbd.concat(ed.kat.instrukce.filter(x => x.prvek.typ === 'box' && !/_TRIG$/.test(x.klic)))
-                       : ed.kat.instrukce;
-  for (const x of zdroj) { if (!sk.has(x.skupina)) sk.set(x.skupina, []); sk.get(x.skupina).push(x); }
-  sk.set('Bloky projektu', ed.kat.bloky.map(b => ({klic: b.klic, nazev: b.nazev, popis: `${b.f ? 'F-' : ''}${b.druh}${b.cislo ?? ''}` +
+  const source = ed.fbd ? ed.cat.fbd.concat(ed.cat.instruction.filter(x => x.element.type === 'box' && !/_TRIG$/.test(x.key)))
+                       : ed.cat.instruction;
+  for (const x of source) { if (!sk.has(x.group)) sk.set(x.group, []); sk.get(x.group).push(x); }
+  sk.set('Blocks project', ed.cat.blocks.map(b => ({key: b.key, name: b.name, description: `${b.f ? 'F-' : ''}${b.kind}${b.number ?? ''}` +
           (b.instance.length ? ' · ' + b.instance.join(', ') : '')})));
   let html = '';
-  for (const [skup, pol] of sk) {
-    const f = pol.filter(x => !h || (x.klic + ' ' + x.nazev + ' ' + (x.popis || '')).toLowerCase().includes(h));
+  for (const [group, item] of sk) {
+    const f = item.filter(x => !h || (x.key + ' ' + x.name + ' ' + (x.description || '')).toLowerCase().includes(h));
     if (!f.length) continue;
-    html += `<h2>${esc(skup)}</h2>` + f.map(x => `<div class="pol" draggable="true" data-klic="${esc(x.klic)}" title="${esc(x.popis || '')}">` +
-      `<b>${esc(x.nazev)}</b><span>${esc(x.popis || '')}</span></div>`).join('');
+    html += `<h2>${esc(group)}</h2>` + f.map(x => `<div class="item" draggable="true" data-key="${esc(x.key)}" title="${esc(x.description || '')}">` +
+      `<b>${esc(x.name)}</b><span>${esc(x.description || '')}</span></div>`).join('');
   }
-  $('pal-seznam').innerHTML = html || '<p class="prazdno">Nic nenalezeno.</p>';
-  for (const el of $('pal-seznam').querySelectorAll('.pol')) {
-    el.onclick = () => vyberPalety(ed.vklad && ed.vklad.klic === el.dataset.klic ? null : el.dataset.klic);
-    el.ondragstart = e => { e.dataTransfer.setData('text/plain', el.dataset.klic); vyberPalety(el.dataset.klic); };
+  $('pal-list').innerHTML = html || '<p class="empty">Nothing nenalezeno.</p>';
+  for (const el of $('pal-list').querySelectorAll('.item')) {
+    el.onclick = () => selectPalette(ed.insert && ed.insert.key === el.dataset.key ? null : el.dataset.key);
+    el.ondragstart = e => { e.dataTransfer.setData('text/plain', el.dataset.key); selectPalette(el.dataset.key); };
   }
-  paletaAkt();
+  markPalette();
 }
-function paletaAkt() {
-  for (const el of document.querySelectorAll('#paleta .pol')) {
-    const akt = !!ed.vklad && el.dataset.klic === ed.vklad.klic;
-    el.classList.toggle('akt', akt);
-    if (akt) el.scrollIntoView({block: 'nearest'});
+function markPalette() {
+  for (const el of document.querySelectorAll('#palette .item')) {
+    const active = !!ed.insert && el.dataset.key === ed.insert.key;
+    el.classList.toggle('active', active);
+    if (active) el.scrollIntoView({block: 'nearest'});
   }
 }
-function sablona(klic) {
-  const x = (ed.fbd ? ed.kat.fbd.find(i => i.klic === klic) : null) || ed.kat.instrukce.find(i => i.klic === klic) ||
-            ed.kat.bloky.find(b => b.klic === klic);
-  const pr = x ? JSON.parse(JSON.stringify(x.prvek)) : null;
-  if (pr && ed.fbd && !pr.nazev) pr.nazev = x.nazev;          // jen pro text režimu; FBD vkládá podle klíče
+function template(key) {
+  const x = (ed.fbd ? ed.cat.fbd.find(i => i.key === key) : null) || ed.cat.instruction.find(i => i.key === key) ||
+            ed.cat.blocks.find(b => b.key === key);
+  const pr = x ? JSON.parse(JSON.stringify(x.element)) : null;
+  if (pr && ed.fbd && !pr.name) pr.name = x.name;          // only for text režimu; FBD vkládá by klíče
   return pr;
 }
-function vyberPalety(klic) {
-  const prvek = klic ? sablona(klic) : null;
-  ed.vklad = prvek ? {klic, prvek, druh: DRUH(prvek)} : null;
-  paletaAkt();
-  vykresli();
+function selectPalette(key) {
+  const element = key ? template(key) : null;
+  ed.insert = element ? {key, element, kind: KIND(element)} : null;
+  markPalette();
+  render();
 }
 // našeptávání operandů: tagy, členy globálních DB, proměnné upravovaného bloku (#…), instanční DB
-function operandy() {
+function operands() {
   const o = [];
-  for (const t of ed.kat.tagy) o.push([`"${t.jmeno}"`, `${t.typ} ${t.adresa}`]);
-  for (const d of ed.kat.db) {
-    if (d.instance_typ) o.push([`"${d.nazev}"`, `instance ${d.instance_typ}`]);
-    for (const c of d.cleny) o.push([`"${d.nazev}".${c.jmeno}`, c.typ]);
+  for (const t of ed.cat.tags) o.push([`"${t.name}"`, `${t.type} ${t.address}`]);
+  for (const d of ed.cat.db) {
+    if (d.instance_type) o.push([`"${d.name}"`, `instance ${d.instance_type}`]);
+    for (const c of d.members) o.push([`"${d.name}".${c.name}`, c.type]);
   }
-  const blok = ed.kat.bloky.find(b => b.nazev === ed.u.blok);
-  if (blok) for (const [sek, pole] of Object.entries(blok.rozhrani)) for (const v of pole) o.push([`#${v.jmeno}`, `${v.typ} (${sek})`]);
-  $('operandy').innerHTML = o.map(([v, l]) => `<option value="${esc(v)}" label="${esc(l)}"></option>`).join('');
+  const block = ed.cat.blocks.find(b => b.name === ed.u.block);
+  if (block) for (const [sec, field] of Object.entries(block.interface)) for (const v of field) o.push([`#${v.name}`, `${v.type} (${sec})`]);
+  $('operands').innerHTML = o.map(([v, l]) => `<option value="${esc(v)}" label="${esc(l)}"></option>`).join('');
 }
 
 // místa vložení: platná pro vybraný prvek palety, ve větvi všechna (začátek) / za začátkem v témže rungu (konec)
-function mistaViditelna() {
-  const m = ed.res.mista || [];
-  if (ed.vetev) return ed.vetev.od ? m.filter(x => x.r === ed.vetev.od.r && x.k > ed.vetev.od.k) : m;
-  if (ed.vklad) return m.filter(x => x[ed.vklad.druh]);
+function visiblePlaces() {
+  const m = ed.res.places || [];
+  if (ed.branch) return ed.branch.from ? m.filter(x => x.r === ed.branch.from.r && x.k > ed.branch.from.k) : m;
+  if (ed.insert) return m.filter(x => x[ed.insert.kind]);
   return [];
 }
-function nejblizsi(e) {
-  const svg = $('ed-platno').querySelector('svg');
+function nearest(e) {
+  const svg = $('ed-canvas').querySelector('svg');
   if (!svg) return null;
   const b = svg.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
   let best = null, dist = 45;
-  for (const m of mistaViditelna()) {
+  for (const m of visiblePlaces()) {
     const d = Math.hypot(m.x - x, m.y - y);
     if (d < dist) { dist = d; best = m; }
   }
   return best;
 }
-function zvyrazniBlizke(m) {
-  const i = mistaViditelna().indexOf(m);
-  for (const c of document.querySelectorAll('#ed-platno .misto')) c.classList.toggle('blizko', +c.dataset.i === i);
+function highlightNear(m) {
+  const i = visiblePlaces().indexOf(m);
+  for (const c of document.querySelectorAll('#ed-canvas .place')) c.classList.toggle('near', +c.dataset.i === i);
 }
-async function vlozNa(m) {
-  if (ed.vetev) {
-    if (!ed.vetev.od) { ed.vetev.od = {r: m.r, k: m.k}; vykresli(); return; }
-    const prvek = ed.vklad ? ed.vklad.prvek : sablona('NO');
-    const od = ed.vetev.od;
-    ed.vetev = null; ed.vklad = null; paletaAkt();
-    const res = await provedOp({typ: 'vetev', od, do: {r: m.r, k: m.k}, prvek});
-    if (res && res.posledni) { ed.vyber = res.posledni; vykresli(); }
+async function insertAt(m) {
+  if (ed.branch) {
+    if (!ed.branch.from) { ed.branch.from = {r: m.r, k: m.k}; render(); return; }
+    const element = ed.insert ? ed.insert.element : template('NO');
+    const start = ed.branch.from;
+    ed.branch = null; ed.insert = null; markPalette();
+    const res = await applyOp({type: 'branch', from: start, to: {r: m.r, k: m.k}, element});
+    if (res && res.last) { ed.select = res.last; render(); }
     return;
   }
-  if (!ed.vklad) return;
-  const prvek = ed.vklad.prvek, klic = ed.vklad.klic;
-  ed.vklad = null; paletaAkt();
-  const res = await provedOp(ed.fbd ? {typ: 'vloz_box', prvek: klic, do: m.do}
-                                    : {typ: 'vloz', misto: {r: m.r, k: m.k}, prvek});
-  if (res && res.posledni) { ed.vyber = res.posledni; vykresli(); }
+  if (!ed.insert) return;
+  const element = ed.insert.element, key = ed.insert.key;
+  ed.insert = null; markPalette();
+  const res = await applyOp(ed.fbd ? {type: 'insert_box', element: key, to: m.to}
+                                    : {type: 'insert', place: {r: m.r, k: m.k}, element});
+  if (res && res.last) { ed.select = res.last; render(); }
 }
 
-function vykresli() {
-  const res = ed.res, pl = $('ed-platno');
+function render() {
+  const res = ed.res, pl = $('ed-canvas');
   if (!res || !pl) return;
   pl.innerHTML = '';
-  if (!res.kresba) { pl.appendChild(seznamRungu(res)); }
+  if (!res.drawing) { pl.appendChild(rungList(res)); }
   else {
-    const svg = kresli(res, res.rozdil);
+    const svg = draw(res, res.diff);
     pl.appendChild(svg);
-    const chybne = new Set(res.chyby.map(c => c.id).filter(Boolean));
+    const faulty = new Set(res.errors.map(c => c.id).filter(Boolean));
     for (const g of svg.querySelectorAll('g[data-id]')) {
       const id = g.dataset.id, bb = g.getBBox();
-      const ram = (tr, o) => { const r = el(g, 'rect', {class: tr, x: bb.x - o, y: bb.y - o, width: bb.width + 2 * o, height: bb.height + 2 * o, rx: 3});
+      const frame = (tr, o) => { const r = el(g, 'rect', {class: tr, x: bb.x - o, y: bb.y - o, width: bb.width + 2 * o, height: bb.height + 2 * o, rx: 3});
                                g.insertBefore(r, g.firstChild); };
       if (id.startsWith('x:')) continue;
-      ram('hit', 4);
-      if (chybne.has(id)) ram('ram-chyba', 5);
-      if (id === ed.vyber) ram('ram-vyber', 7);
+      frame('hit', 4);
+      if (faulty.has(id)) frame('frame-error', 5);
+      if (id === ed.select) frame('frame-select', 7);
       g.onclick = ev => {
-        ev.stopPropagation(); if (ed.vklad || ed.vetev) return;
-        ed.vstup = ev.target.dataset && ev.target.dataset.n ? +ev.target.dataset.n : null;
-        ed.vyber = id; vykresli(); vlastnostiFokus();
+        ev.stopPropagation(); if (ed.insert || ed.branch) return;
+        ed.input = ev.target.dataset && ev.target.dataset.n ? +ev.target.dataset.n : null;
+        ed.select = id; render(); focusProperties();
       };
     }
-    svg.onclick = () => { if (!ed.vklad && !ed.vetev && ed.vyber) { ed.vyber = null; vykresli(); } };
+    svg.onclick = () => { if (!ed.insert && !ed.branch && ed.select) { ed.select = null; render(); } };
     const gm = el(svg, 'g', {});
-    mistaViditelna().forEach((m, i) => {
-      const c = el(gm, 'circle', {class: 'misto', cx: m.x, cy: m.y, r: 7, 'data-i': i});
-      el(c, 'title', {}, m.fbd ? (m.do ? `box ${m.do.id}, ${m.novy_vstup ? 'nový ' : ''}vstup ${m.do.vstup}` : 'nová logická cesta')
-                               : `rung ${m.r + 1}, pozice ${m.k}`);
-      c.onclick = ev => { ev.stopPropagation(); vlozNa(m); };
+    visiblePlaces().forEach((m, i) => {
+      const c = el(gm, 'circle', {class: 'place', cx: m.x, cy: m.y, r: 7, 'data-i': i});
+      el(c, 'title', {}, m.fbd ? (m.to ? `box ${m.to.id}, ${m.new_input ? 'nový ' : ''}input ${m.to.input}` : 'nová logická path')
+                               : `rung ${m.r + 1}, position ${m.k}`);
+      c.onclick = ev => { ev.stopPropagation(); insertAt(m); };
     });
-    if (ed.vetev && ed.vetev.od) {
-      const a = (res.mista || []).find(x => x.r === ed.vetev.od.r && x.k === ed.vetev.od.k);
-      if (a) el(gm, 'circle', {class: 'misto zvolene', cx: a.x, cy: a.y, r: 7});
+    if (ed.branch && ed.branch.from) {
+      const a = (res.places || []).find(x => x.r === ed.branch.from.r && x.k === ed.branch.from.k);
+      if (a) el(gm, 'circle', {class: 'place chosen', cx: a.x, cy: a.y, r: 7});
     }
   }
   // režim, chyby, vlastnosti, tlačítka
-  if (ed.fbd && ed.vklad) rezim(`Vkládání: ${ed.vklad.prvek.nazev || ed.vklad.klic} — klikni na vstup boxu (box převezme jeho signál), pod poslední vstup (nový vstup) nebo vlevo dole (nová logická cesta). Esc zruší.`);
-  else if (ed.vetev) rezim(ed.vetev.od ? 'Větev: klikni na konec úseku ve stejném rungu (Esc zruší).'
-                                  : `Větev${ed.vklad ? ' s ' + ed.vklad.prvek.nazev : ''}: klikni na začátek úseku (Esc zruší).`);
-  else if (ed.vklad) rezim(`Vkládání: ${ed.vklad.prvek.nazev || ed.vklad.klic} — klikni na zvýrazněné místo nebo přetáhni na vodič (Esc zruší).`);
-  else if (!$('ed-rezim').classList.contains('zprava')) rezim('');
-  if ($('ed-vetev')) $('ed-vetev').classList.toggle('akt', !!ed.vetev);
+  if (ed.fbd && ed.insert) mode(`Vkládání: ${ed.insert.element.name || ed.insert.key} — klikni on input box (box převezme jeho signál), below poslední input (nový input) nebo left bottom (nová logická path). Esc zruší.`);
+  else if (ed.branch) mode(ed.branch.from ? 'Větev: klikni on end úseku ve stejném rung (Esc zruší).'
+                                  : `Větev${ed.insert ? ' s ' + ed.insert.element.name : ''}: klikni on začátek úseku (Esc zruší).`);
+  else if (ed.insert) mode(`Vkládání: ${ed.insert.element.name || ed.insert.key} — klikni on zvýrazněné místo nebo přetáhni on vodič (Esc zruší).`);
+  else if (!$('ed-mode').classList.contains('message')) mode('');
+  if ($('ed-branch')) $('ed-branch').classList.toggle('active', !!ed.branch);
   if (ed.fbd) {
-    const p = ed.vyber && ed.po.prvky.find(x => x.id === ed.vyber);
-    const log = p && ['and', 'or', 'xor'].includes(p.typ);
-    $('ed-plus').disabled = !log; $('ed-minus').disabled = !log || p.vstupy.length <= 2;
-    $('ed-neg').disabled = !p || !p.vstupy.length;
+    const p = ed.select && ed.after.elements.find(x => x.id === ed.select);
+    const log = p && ['and', 'or', 'xor'].includes(p.type);
+    $('ed-plus').disabled = !log; $('ed-minus').disabled = !log || p.inputs.length <= 2;
+    $('ed-neg').disabled = !p || !p.inputs.length;
   }
-  $('ed-zpet').disabled = !ed.hist.length;
-  $('ed-znovu').disabled = !ed.redo.length;
-  $('ed-smaz').disabled = !ed.vyber;
-  const nch = res.chyby.filter(c => !c.varovani).length;
-  $('ed-znacka').innerHTML = nch ? `<span class="znacka-chyb">⚠ ${nChyb(nch, JAZ())}</span> ·` : '';
-  $('ed-chyby').innerHTML = res.chyby.length
-    ? res.chyby.map(c => `<div data-id="${esc(c.id || '')}" class="${c.varovani ? 'var' : ''}">⚠ ${esc(c.chyba)}</div>`).join('')
-    : '<div class="ok">✓ Bez chyb.</div>';
-  for (const d of $('ed-chyby').querySelectorAll('div[data-id]'))
-    if (d.dataset.id) d.onclick = () => { ed.vyber = d.dataset.id; vykresli(); };
-  vlastnosti();
+  $('ed-undo').disabled = !ed.hist.length;
+  $('ed-redo').disabled = !ed.redo.length;
+  $('ed-delete').disabled = !ed.select;
+  const nch = res.errors.filter(c => !c.warnings).length;
+  $('ed-mark').innerHTML = nch ? `<span class="mark-errors">⚠ ${errorCount(nch, LANG())}</span> ·` : '';
+  $('ed-errors').innerHTML = res.errors.length
+    ? res.errors.map(c => `<div data-id="${esc(c.id || '')}" class="${c.warnings ? 'var' : ''}">⚠ ${esc(c.error)}</div>`).join('')
+    : '<div class="ok">✓ Without errors.</div>';
+  for (const d of $('ed-errors').querySelectorAll('div[data-id]'))
+    if (d.dataset.id) d.onclick = () => { ed.select = d.dataset.id; render(); };
+  properties();
 }
 
-function vlastnostiFBD(v, p) {
+function propertiesFBD(v, p) {
   const T = {and: '&', or: '>=1', xor: 'x', assign: '=', s: 'S', r: 'R', sr: 'SR', rs: 'RS', ptrig: 'P_TRIG', ntrig: 'N_TRIG'};
-  const P = Object.fromEntries(ed.po.prvky.map(x => [x.id, x]));
-  const inp = (attrs, hodnota) => `<input ${attrs} value="${esc(hodnota ?? '')}" list="operandy" autocomplete="off">`;
-  const neg = (attrs, on) => `<label title="negace (Ctrl+Shift+4 v TIA)" style="white-space:nowrap"><input type="checkbox" ${attrs} ${on ? 'checked' : ''} style="width:auto"> NOT</label>`;
+  const P = Object.fromEntries(ed.after.elements.map(x => [x.id, x]));
+  const inp = (attrs, value) => `<input ${attrs} value="${esc(value ?? '')}" list="operands" autocomplete="off">`;
+  const neg = (attrs, on) => `<label title="negate (Ctrl+Shift+4 v TIA)" style="white-space:nowrap"><input type="checkbox" ${attrs} ${on ? 'checked' : ''} style="width:auto"> NOT</label>`;
   let h = `<table><colgroup><col style="width:96px"><col><col style="width:62px"></colgroup>` +
-          `<tr class="sekce"><td colspan="3">${esc(p.id)} · ${esc(T[p.typ] || p.nazev || p.typ)}${p.instance ? ' ' + esc(p.instance) : ''}</td></tr>`;
-  if (T[p.typ] && 'operand' in p && !['and', 'or', 'xor'].includes(p.typ))
-    h += `<tr><td>${['ptrig', 'ntrig'].includes(p.typ) ? 'bit paměti' : 'operand'}</td><td colspan="2">${inp('data-op="nad"', p.operand)}</td></tr>`;
-  if (p.typ === 'volani' && p.instance != null) h += `<tr><td>instance</td><td colspan="2">${inp('data-op="nad"', p.instance)}</td></tr>`;
-  if (p.vstupy.length) h += `<tr class="sekce"><td colspan="3">Vstupy</td></tr>`;
-  for (const x of p.vstupy) {
-    const zdroj = x.signal ? `<span style="color:var(--tlum)">← výstup ${esc(T[(P[x.signal] || {}).typ] || (P[x.signal] || {}).nazev || x.signal)} (${esc(x.signal)})</span>`
-                           : inp(`data-vstup="${x.n}"`, x.operand);
-    h += `<tr${ed.vstup === x.n ? ' style="background:var(--vyber)"' : ''}><td>${esc(x.pin)}${['and', 'or', 'xor'].includes(p.typ) ? '' : ''}</td><td>${zdroj}</td><td>${neg(`data-neg="${x.n}"`, x.neg)}</td></tr>`;
+          `<tr class="section"><td colspan="3">${esc(p.id)} · ${esc(T[p.type] || p.name || p.type)}${p.instance ? ' ' + esc(p.instance) : ''}</td></tr>`;
+  if (T[p.type] && 'operand' in p && !['and', 'or', 'xor'].includes(p.type))
+    h += `<tr><td>${['ptrig', 'ntrig'].includes(p.type) ? 'bit paměti' : 'operand'}</td><td colspan="2">${inp('data-op="above"', p.operand)}</td></tr>`;
+  if (p.type === 'call' && p.instance != null) h += `<tr><td>instance</td><td colspan="2">${inp('data-op="above"', p.instance)}</td></tr>`;
+  if (p.inputs.length) h += `<tr class="section"><td colspan="3">Inputs</td></tr>`;
+  for (const x of p.inputs) {
+    const source = x.signal ? `<span style="color:var(--muted)">← výstup ${esc(T[(P[x.signal] || {}).type] || (P[x.signal] || {}).name || x.signal)} (${esc(x.signal)})</span>`
+                           : inp(`data-input="${x.n}"`, x.operand);
+    h += `<tr${ed.input === x.n ? ' style="background:var(--select)"' : ''}><td>${esc(x.pin)}${['and', 'or', 'xor'].includes(p.type) ? '' : ''}</td><td>${source}</td><td>${neg(`data-neg="${x.n}"`, x.neg)}</td></tr>`;
   }
-  if (p.vystupy.length) h += `<tr class="sekce"><td colspan="3">Výstupy</td></tr>`;
-  for (const x of p.vystupy) h += `<tr><td>${esc(x.pin)}</td><td>${inp(`data-vystup="${esc(x.pin)}"`, x.operand)}</td><td>${neg(`data-negv="${esc(x.pin)}"`, x.neg)}</td></tr>`;
-  h += `<tr><td>výstup boxu</td><td></td><td>${neg('data-negh="1"', p.neg_vystup)}</td></tr>`;
+  if (p.outputs.length) h += `<tr class="section"><td colspan="3">Výstupy</td></tr>`;
+  for (const x of p.outputs) h += `<tr><td>${esc(x.pin)}</td><td>${inp(`data-output="${esc(x.pin)}"`, x.operand)}</td><td>${neg(`data-negv="${esc(x.pin)}"`, x.neg)}</td></tr>`;
+  h += `<tr><td>výstup box</td><td></td><td>${neg('data-negh="1"', p.neg_output)}</td></tr>`;
   v.innerHTML = h + '</table>';
-  for (const i of v.querySelectorAll('[data-op]')) i.onchange = () => provedOp({typ: 'zmen_operand', id: p.id, operand: i.value});
-  for (const i of v.querySelectorAll('[data-vstup]')) i.onchange = () => provedOp({typ: 'zmen_operand', id: p.id, vstup: +i.dataset.vstup, operand: i.value});
-  for (const i of v.querySelectorAll('[data-vystup]')) i.onchange = () => provedOp({typ: 'zmen_pin', id: p.id, pin: i.dataset.vystup, operand: i.value});
-  for (const i of v.querySelectorAll('[data-neg]')) i.onchange = () => { ed.vstup = +i.dataset.neg; provedOp({typ: 'negace', id: p.id, vstup: +i.dataset.neg}); };
-  for (const i of v.querySelectorAll('[data-negv]')) i.onchange = () => provedOp({typ: 'negace', id: p.id, vystup: i.dataset.negv});
-  for (const i of v.querySelectorAll('[data-negh]')) i.onchange = () => provedOp({typ: 'negace', id: p.id, vystup: 'hlavni'});
+  for (const i of v.querySelectorAll('[data-op]')) i.onchange = () => applyOp({type: 'change_operand', id: p.id, operand: i.value});
+  for (const i of v.querySelectorAll('[data-input]')) i.onchange = () => applyOp({type: 'change_operand', id: p.id, input: +i.dataset.input, operand: i.value});
+  for (const i of v.querySelectorAll('[data-output]')) i.onchange = () => applyOp({type: 'change_pin', id: p.id, pin: i.dataset.output, operand: i.value});
+  for (const i of v.querySelectorAll('[data-neg]')) i.onchange = () => { ed.input = +i.dataset.neg; applyOp({type: 'negate', id: p.id, input: +i.dataset.neg}); };
+  for (const i of v.querySelectorAll('[data-negv]')) i.onchange = () => applyOp({type: 'negate', id: p.id, output: i.dataset.negv});
+  for (const i of v.querySelectorAll('[data-negh]')) i.onchange = () => applyOp({type: 'negate', id: p.id, output: 'main'});
 }
-function vlastnosti() {
-  const v = $('ed-vlastnosti');
-  const p = ed.vyber && ed.po.prvky.find(x => x.id === ed.vyber);
-  if (!p) { v.innerHTML = `<p class="komentar">Klikni na ${ed.fbd ? 'box nebo jeho vstup' : 'prvek'} v plátně. Delete smaže, Ctrl+Z vrátí.</p>`; return; }
-  if (ed.fbd) { vlastnostiFBD(v, p); return; }
-  const pole = (klic, hodnota, popis, list) => `<tr><td>${esc(popis)}</td><td><input data-pole="${klic}" value="${esc(hodnota ?? '')}" list="${list || 'operandy'}" autocomplete="off"></td></tr>`;
-  let h = `<table><colgroup><col style="width:96px"><col></colgroup><tr class="sekce"><td colspan="2" title="${esc(popisPrvku(p))}">${esc(p.id)} · ${esc(popisPrvku(p))}</td></tr>`;
-  if (p.typ === 'box') {
+function properties() {
+  const v = $('ed-properties');
+  const p = ed.select && ed.after.elements.find(x => x.id === ed.select);
+  if (!p) { v.innerHTML = `<p class="comment">Klikni on ${ed.fbd ? 'box nebo jeho input' : 'element'} v plátně. Delete smaže, Ctrl+Z vrátí.</p>`; return; }
+  if (ed.fbd) { propertiesFBD(v, p); return; }
+  const field = (key, value, description, list) => `<tr><td>${esc(description)}</td><td><input data-field="${key}" value="${esc(value ?? '')}" list="${list || 'operands'}" autocomplete="off"></td></tr>`;
+  let h = `<table><colgroup><col style="width:96px"><col></colgroup><tr class="section"><td colspan="2" title="${esc(elementDescription(p))}">${esc(p.id)} · ${esc(elementDescription(p))}</td></tr>`;
+  if (p.type === 'box') {
     if (p.instance != null) {
-      const b = ed.kat.bloky.find(x => x.nazev === p.nazev);
-      h += pole('instance', p.instance, 'instance', 'operandy');
-      if (b && b.instance.length) h += `<tr><td></td><td style="color:var(--tlum);font-size:12px">instance ${esc(p.nazev)}: ${b.instance.map(esc).join(', ')}</td></tr>`;
+      const b = ed.cat.blocks.find(x => x.name === p.name);
+      h += field('instance', p.instance, 'instance', 'operands');
+      if (b && b.instance.length) h += `<tr><td></td><td style="color:var(--muted);font-size:12px">instance ${esc(p.name)}: ${b.instance.map(esc).join(', ')}</td></tr>`;
     }
-    if (p.sablona != null) h += pole('sablona', p.sablona, 'typ', '');
-    if (p.pod != null) h += pole('pod', p.pod, 'bit hrany');
-    if (p.vstupy.length) h += `<tr class="sekce"><td colspan="2">Vstupy</td></tr>`;
-    p.vstupy.forEach((x, i) => {
-      h += x.operand.startsWith('wire#') ? `<tr><td>${esc(x.pin)}</td><td style="color:var(--tlum)">← napájeno větví ${esc(x.operand.slice(5))}</td></tr>`
-                                         : `<tr><td>${esc(x.pin)}</td><td><input data-pin="vstupy:${i}" value="${esc(x.operand)}" list="operandy" autocomplete="off"></td></tr>`;
+    if (p.template != null) h += field('template', p.template, 'type', '');
+    if (p.below != null) h += field('below', p.below, 'bit edges');
+    if (p.inputs.length) h += `<tr class="section"><td colspan="2">Inputs</td></tr>`;
+    p.inputs.forEach((x, i) => {
+      h += x.operand.startsWith('wire#') ? `<tr><td>${esc(x.pin)}</td><td style="color:var(--muted)">← napájeno větví ${esc(x.operand.slice(5))}</td></tr>`
+                                         : `<tr><td>${esc(x.pin)}</td><td><input data-pin="inputs:${i}" value="${esc(x.operand)}" list="operands" autocomplete="off"></td></tr>`;
     });
-    if (p.vystupy.length) h += `<tr class="sekce"><td colspan="2">Výstupy</td></tr>`;
-    p.vystupy.forEach((x, i) => { h += `<tr><td>${esc(x.pin)}</td><td><input data-pin="vystupy:${i}" value="${esc(x.operand)}" list="operandy" autocomplete="off"></td></tr>`; });
-  } else if (p.typ === 'porovnani') {
-    h += pole('in1', p.in1, 'IN1');
-    h += `<tr><td>op</td><td><select data-pole="op">${['==', '<>', '>', '>=', '<', '<='].map(o => `<option ${o === p.op ? 'selected' : ''}>${o}</option>`).join('')}</select></td></tr>`;
-    h += pole('in2', p.in2, 'IN2') + pole('sablona', p.sablona, 'typ', '');
-  } else if (p.typ !== 'not') {
-    h += pole('operand', p.operand, 'operand');
-    if (p.typ === 'kontakt_p' || p.typ === 'kontakt_n') h += pole('bit', p.bit, 'bit hrany');
+    if (p.outputs.length) h += `<tr class="section"><td colspan="2">Výstupy</td></tr>`;
+    p.outputs.forEach((x, i) => { h += `<tr><td>${esc(x.pin)}</td><td><input data-pin="outputs:${i}" value="${esc(x.operand)}" list="operands" autocomplete="off"></td></tr>`; });
+  } else if (p.type === 'comparison') {
+    h += field('in1', p.in1, 'IN1');
+    h += `<tr><td>op</td><td><select data-field="op">${['==', '<>', '>', '>=', '<', '<='].map(o => `<option ${o === p.op ? 'selected' : ''}>${o}</option>`).join('')}</select></td></tr>`;
+    h += field('in2', p.in2, 'IN2') + field('template', p.template, 'type', '');
+  } else if (p.type !== 'not') {
+    h += field('operand', p.operand, 'operand');
+    if (p.type === 'contact_p' || p.type === 'contact_n') h += field('bit', p.bit, 'bit edges');
   }
   v.innerHTML = h + '</table>';
-  for (const i of v.querySelectorAll('[data-pole]')) i.onchange = () => provedOp({typ: 'zmen', id: p.id, hodnoty: {[i.dataset.pole]: i.value}});
+  for (const i of v.querySelectorAll('[data-field]')) i.onchange = () => applyOp({type: 'change', id: p.id, values: {[i.dataset.field]: i.value}});
   for (const i of v.querySelectorAll('[data-pin]')) i.onchange = () => {
     const [str, idx] = i.dataset.pin.split(':');
-    const piny = p[str].map(x => ({pin: x.pin, operand: x.operand}));
-    piny[+idx].operand = i.value.trim();
-    provedOp({typ: 'zmen', id: p.id, hodnoty: {[str]: piny}});
+    const pins = p[str].map(x => ({pin: x.pin, operand: x.operand}));
+    pins[+idx].operand = i.value.trim();
+    applyOp({type: 'change', id: p.id, values: {[str]: pins}});
   };
 }
-function vlastnostiFokus() {
-  const i = (ed.vstup && $('ed-vlastnosti').querySelector(`input[data-vstup="${ed.vstup}"]`)) || $('ed-vlastnosti').querySelector('input');
+function focusProperties() {
+  const i = (ed.input && $('ed-properties').querySelector(`input[data-input="${ed.input}"]`)) || $('ed-properties').querySelector('input');
   if (i) { i.focus(); i.select(); }
 }
 
 async function start() {
-  if (q.get('snimek') === '1') document.body.classList.add('snimek');
-  const projekt = q.get('projekt'), blok = q.get('blok');
-  if (q.get('uprava') && q.get('upravit') === '1') await editor(q.get('uprava'));
-  else if (q.get('uprava')) await zobrazUpravu(q.get('uprava'));
-  else if (projekt && blok) await zobrazNetwork(projekt, blok);
-  else { $('nw').innerHTML = await stromNacti(null); await vyberExportu(); }
-  document.body.dataset.hotovo = '1';
+  if (q.get('screenshot') === '1') document.body.classList.add('screenshot');
+  const project = q.get('project'), block = q.get('block');
+  if (q.get('edit') && q.get('edit_mode') === '1') await editor(q.get('edit'));
+  else if (q.get('edit')) await showEdit(q.get('edit'));
+  else if (project && block) await showNetwork(project, block);
+  else { $('nw').innerHTML = await loadTree(null); await showExports(); }
+  document.body.dataset.done = '1';
 }
 start().catch(e => {
-  $('obsah').innerHTML = `<div class="varovani">⚠ ${esc(e.message)}</div>`;
-  document.body.dataset.hotovo = '1';
+  $('content').innerHTML = `<div class="warnings">⚠ ${esc(e.message)}</div>`;
+  document.body.dataset.done = '1';
 });
 </script>
 </body>

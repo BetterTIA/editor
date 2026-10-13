@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 
-from tests.common import VZORKY, PROJEKT, TS0
+from tests.common import SAMPLES, PROJECT, TS0
 import catalog
 import layout
 import model
@@ -14,142 +14,142 @@ import server
 
 
 def nw(n):
-    _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik', TS0)
-    x = b['networky'][n - 1]
-    return {'prvky': x['prvky'], 'rungy': x['rungy']}
+    _, b = server._load(SAMPLES, PROJECT, 'FB_Dopravnik', TS0)
+    x = b['networks'][n - 1]
+    return {'elements': x['elements'], 'rungs': x['rungs']}
 
 
-KAT = catalog.catalog(VZORKY, PROJEKT)
+CAT = catalog.catalog(SAMPLES, PROJECT)
 
 
-class TestKatalog(unittest.TestCase):
-    def test_fb_pas_piny_a_instance(self):
-        b = next(x for x in KAT['bloky'] if x['klic'] == 'fb:FB_Pas')
-        self.assertEqual((b['druh'], b['cislo'], b['instance']), ('FB', 11, ['"DB_Pas1"']))
-        p = b['prvek']
-        self.assertEqual([x['pin'] for x in p['vstupy']], ['Povoleni', 'Smer', 'Rychlost', 'Reset'])
-        self.assertEqual([x['pin'] for x in p['vystupy']], ['Bezi', 'Porucha', 'Stav'])
-        self.assertEqual((p['volani'], p['nazev'], p['instance'], p['napajeni']), ('fb', 'FB_Pas', '"DB_Pas1"', ['EN', 'ENO']))
+class TestCatalog(unittest.TestCase):
+    def test_fb_belt_pins_and_instance(self):
+        b = next(x for x in CAT['blocks'] if x['key'] == 'fb:FB_Pas')
+        self.assertEqual((b['kind'], b['number'], b['instance']), ('FB', 11, ['"DB_Pas1"']))
+        p = b['element']
+        self.assertEqual([x['pin'] for x in p['inputs']], ['Povoleni', 'Smer', 'Rychlost', 'Reset'])
+        self.assertEqual([x['pin'] for x in p['outputs']], ['Bezi', 'Porucha', 'Stav'])
+        self.assertEqual((p['call'], p['name'], p['instance'], p['power']), ('fb', 'FB_Pas', '"DB_Pas1"', ['EN', 'ENO']))
 
-    def test_fc_a_rozhrani(self):
-        fc = next(x for x in KAT['bloky'] if x['klic'] == 'fc:FC_Vetve')
-        self.assertIsNone(fc['prvek']['instance'])
-        dop = next(x for x in KAT['bloky'] if x['nazev'] == 'FB_Dopravnik')
-        self.assertIn({'jmeno': 'T_Rozbeh', 'typ': 'TON_TIME'}, dop['rozhrani']['staticke'])   # atribut {…} přeskočen
+    def test_fc_and_interface(self):
+        fc = next(x for x in CAT['blocks'] if x['key'] == 'fc:FC_Vetve')
+        self.assertIsNone(fc['element']['instance'])
+        dop = next(x for x in CAT['blocks'] if x['name'] == 'FB_Dopravnik')
+        self.assertIn({'name': 'T_Rozbeh', 'type': 'TON_TIME'}, dop['interface']['static'])   # atribut {…} přeskočen
 
-    def test_db_a_tagy(self):
-        db = {d['nazev']: d for d in KAT['db']}
-        self.assertEqual(db['DB_Pas1']['instance_typ'], 'FB_Pas')
-        cleny = {c['jmeno']: c['typ'] for c in db['DB_Stroj']['cleny']}
-        self.assertEqual((cleny['Rychlost'], cleny['Pocitadlo']), ('Real', 'Struct'))
-        self.assertNotIn('Kusy', cleny)                                    # vnořené členy STRUCT ne
-        self.assertIn({'jmeno': 'Nouzovy_Stop', 'typ': 'Bool', 'adresa': '%I0.1', 'tabulka': 'Default tag table'}, KAT['tagy'])
+    def test_db_and_tags(self):
+        db = {d['name']: d for d in CAT['db']}
+        self.assertEqual(db['DB_Pas1']['instance_type'], 'FB_Pas')
+        members = {c['name']: c['type'] for c in db['DB_Stroj']['members']}
+        self.assertEqual((members['Rychlost'], members['Pocitadlo']), ('Real', 'Struct'))
+        self.assertNotIn('Kusy', members)                                    # vnořené členy STRUCT ne
+        self.assertIn({'name': 'Nouzovy_Stop', 'type': 'Bool', 'address': '%I0.1', 'table': 'Default tag table'}, CAT['tags'])
 
-    def test_instrukce(self):
-        klice = {x['klic'] for x in KAT['instrukce']}
+    def test_instruction(self):
+        keys = {x['key'] for x in CAT['instruction']}
         for k in ('NO', 'NC', 'P', 'N', 'C', 'S', 'R', 'NEG', 'EQ', 'LE', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'MOVE',
                   'ADD', 'SUB', 'MUL', 'DIV', 'IN_RANGE', 'CONV', 'SWAP', 'P_TRIG', 'N_TRIG', 'RET'):
-            self.assertIn(k, klice)
-        ton = catalog.prvek(KAT, 'TON')
-        self.assertEqual((ton['napajeni'], ton['vstupy'][0]['pin'], ton['sablona']), (['IN', 'Q'], 'PT', 'Time'))
+            self.assertIn(k, keys)
+        ton = catalog.element(CAT, 'TON')
+        self.assertEqual((ton['power'], ton['inputs'][0]['pin'], ton['template']), (['IN', 'Q'], 'PT', 'Time'))
         with self.assertRaises(KeyError):
-            catalog.prvek(KAT, 'fb:Neni')
+            catalog.element(CAT, 'fb:Neni')
 
 
-class TestOperace(unittest.TestCase):
-    def test_vlozeni_do_serie(self):
-        m, i = model.vloz(nw(1), {'r': 0, 'k': 3}, catalog.prvek(KAT, 'NO'))
+class TestOperations(unittest.TestCase):
+    def test_insertion_into_series(self):
+        m, i = model.insert(nw(1), {'r': 0, 'k': 3}, catalog.element(CAT, 'NO'))
         self.assertEqual(i, 'n1')
-        self.assertEqual(m['rungy'][0]['cesta'], ['p1', 'p2', 'p3', 'n1', 'p4'])
-        self.assertEqual(model.vloz(m, {'r': 0, 'k': 0}, catalog.prvek(KAT, 'NC'))[1], 'n2')
-        layout.rozloz(m['rungy'], m['prvky'])
-        with self.assertRaises(model.ChybaOperace):
-            model.vloz(nw(1), {'r': 0, 'k': 9}, catalog.prvek(KAT, 'NO'))
+        self.assertEqual(m['rungs'][0]['path'], ['p1', 'p2', 'p3', 'n1', 'p4'])
+        self.assertEqual(model.insert(m, {'r': 0, 'k': 0}, catalog.element(CAT, 'NC'))[1], 'n2')
+        layout.layout(m['rungs'], m['elements'])
+        with self.assertRaises(model.OperationError):
+            model.insert(nw(1), {'r': 0, 'k': 9}, catalog.element(CAT, 'NO'))
 
-    def test_vystupni_vetev_s_fb(self):
-        m, i = model.vetev(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, catalog.prvek(KAT, 'fb:FB_Pas'))
-        self.assertEqual(m['rungy'][0]['cesta'], ['p1', 'p2', 'p3', 'wire#w1', 'p4'])
-        self.assertEqual(m['rungy'][1], {'z': 'w1', 'cesta': [i], 'do': None})
-        self.assertEqual(model.validuj(m), [])                             # box ve výstupní větvi smí
-        r, _ = layout.rozloz(m['rungy'], m['prvky'])
+    def test_output_branch_with_fb(self):
+        m, i = model.branch(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, catalog.element(CAT, 'fb:FB_Pas'))
+        self.assertEqual(m['rungs'][0]['path'], ['p1', 'p2', 'p3', 'wire#w1', 'p4'])
+        self.assertEqual(m['rungs'][1], {'from': 'w1', 'path': [i], 'to': None})
+        self.assertEqual(model.validate(m), [])                             # box ve výstupní větvi smí
+        r, _ = layout.layout(m['rungs'], m['elements'])
         self.assertGreater(r[i]['r'], r['p4']['r'])
 
-    def test_zavrena_vetev_a_smazani(self):
-        m, i = model.vetev(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.prvek(KAT, 'NO'))
-        self.assertEqual(m['rungy'][0]['cesta'], ['p1', 'wire#w2', 'p2', 'wire#w1', 'p3', 'p4'])
-        self.assertEqual(m['rungy'][1], {'z': 'w2', 'cesta': [i], 'do': 'w1'})
-        r, _ = layout.rozloz(m['rungy'], m['prvky'])
+    def test_closed_branch_and_deletion(self):
+        m, i = model.branch(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.element(CAT, 'NO'))
+        self.assertEqual(m['rungs'][0]['path'], ['p1', 'wire#w2', 'p2', 'wire#w1', 'p3', 'p4'])
+        self.assertEqual(m['rungs'][1], {'from': 'w2', 'path': [i], 'to': 'w1'})
+        r, _ = layout.layout(m['rungs'], m['elements'])
         self.assertEqual(r[i]['c'], r['p2']['c'])                          # paralelně ke kontaktu p2
-        z = model.smaz(m, i)                                               # prázdná větev i uzly pryč
-        self.assertEqual(z['rungy'], nw(1)['rungy'])
-        self.assertEqual(len(z['prvky']), 4)
+        z = model.delete(m, i)                                               # prázdná větev i uzly pryč
+        self.assertEqual(z['rungs'], nw(1)['rungs'])
+        self.assertEqual(len(z['elements']), 4)
 
-    def test_smazani_boxu_s_privodem(self):
-        m = model.smaz(nw(4), 'p2')                                        # FB s pinem napájeným větví
-        self.assertEqual(m['rungy'], [{'z': 'powerrail', 'cesta': ['p1'], 'do': None}])
-        self.assertEqual([p['id'] for p in m['prvky']], ['p1'])
+    def test_delete_box_with_feed(self):
+        m = model.delete(nw(4), 'p2')                                        # FB s pinem napájeným větví
+        self.assertEqual(m['rungs'], [{'from': 'powerrail', 'path': ['p1'], 'to': None}])
+        self.assertEqual([p['id'] for p in m['elements']], ['p1'])
 
-    def test_zmena_operandu(self):
-        m = model.zmen(nw(1), 'p1', {'operand': ' "Pojistka_OK" '})
-        self.assertEqual(m['prvky'][0]['operand'], '"Pojistka_OK"')
-        with self.assertRaises(model.ChybaOperace):
-            model.zmen(nw(1), 'p1', {'typ': 'civka'})
-        with self.assertRaises(model.ChybaOperace):
-            model.zmen(nw(1), 'p1', {'vstupy': 'x'})
+    def test_change_operand(self):
+        m = model.change(nw(1), 'p1', {'operand': ' "Pojistka_OK" '})
+        self.assertEqual(m['elements'][0]['operand'], '"Pojistka_OK"')
+        with self.assertRaises(model.OperationError):
+            model.change(nw(1), 'p1', {'type': 'coil'})
+        with self.assertRaises(model.OperationError):
+            model.change(nw(1), 'p1', {'inputs': 'x'})
 
-    def test_mista(self):
+    def test_places(self):
         n = nw(1)
-        _, k = layout.rozloz(n['rungy'], n['prvky'], 1000)
-        mi = {(x['r'], x['k']): x for x in model.mista(n, k)}
+        _, k = layout.layout(n['rungs'], n['elements'], 1000)
+        mi = {(x['r'], x['k']): x for x in model.places(n, k)}
         self.assertEqual(sorted(mi), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)])
-        self.assertTrue(mi[(0, 0)]['box'] and not mi[(0, 0)]['civka'])
-        self.assertEqual((mi[(0, 4)]['kontakt'], mi[(0, 4)]['civka']), (False, False))   # za cívkou nic
+        self.assertTrue(mi[(0, 0)]['box'] and not mi[(0, 0)]['coil'])
+        self.assertEqual((mi[(0, 4)]['contact'], mi[(0, 4)]['coil']), (False, False))   # za cívkou nic
         n2 = nw(2)
-        _, k = layout.rozloz(n2['rungy'], n2['prvky'], 1000)
-        mi = {(x['r'], x['k']): x for x in model.mista(n2, k)}
+        _, k = layout.layout(n2['rungs'], n2['elements'], 1000)
+        mi = {(x['r'], x['k']): x for x in model.places(n2, k)}
         self.assertFalse(mi[(0, 0)]['box'])                                # před uzlem w1 = uvnitř paralely
         self.assertFalse(mi[(1, 0)]['box'])                                # ve větvi
         self.assertTrue(mi[(0, 2)]['box'])                                 # za uzlem w1
 
 
-class TestValidace(unittest.TestCase):
-    def chyby(self, m):
-        return [c['chyba'] for c in model.validuj(m)]
+class TestValidation(unittest.TestCase):
+    def errors(self, m):
+        return [c['error'] for c in model.validate(m)]
 
-    def test_vzorky_bez_chyb(self):
+    def test_samples_without_errors(self):
         for n in range(1, 9):
-            self.assertEqual(model.validuj(nw(n)), [], 'NW%d' % n)
+            self.assertEqual(model.validate(nw(n)), [], 'NW%d' % n)
 
-    def test_box_ve_vetvi(self):
-        m, i = model.vetev(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.prvek(KAT, 'fb:FB_Pas'))
-        ch = model.validuj(m)
+    def test_box_in_branch(self):
+        m, i = model.branch(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.element(CAT, 'fb:FB_Pas'))
+        ch = model.validate(m)
         self.assertEqual([c['id'] for c in ch], [i])
-        self.assertIn('paralelní větve', ch[0]['chyba'])
-        m, i = model.vloz(nw(2), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'MOVE'))   # hlavní větev uvnitř paralely
-        self.assertTrue(any('paralelní větve' in c for c in self.chyby(m)))
+        self.assertIn('parallel branch', ch[0]['error'])
+        m, i = model.insert(nw(2), {'r': 0, 'k': 0}, catalog.element(CAT, 'MOVE'))   # hlavní větev uvnitř paralely
+        self.assertTrue(any('parallel branch' in c for c in self.errors(m)))
 
-    def test_civka_uprostred(self):
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 4}, {'typ': 'kontakt', 'operand': '"Kvitace"'})
-        self.assertEqual([c['id'] for c in model.validuj(m)], ['p4'])
-        self.assertIn('není na konci', self.chyby(m)[0])
+    def test_coil_middle(self):
+        m, _ = model.insert(nw(1), {'r': 0, 'k': 4}, {'type': 'contact', 'operand': '"Kvitace"'})
+        self.assertEqual([c['id'] for c in model.validate(m)], ['p4'])
+        self.assertIn('is not at the end', self.errors(m)[0])
 
-    def test_operandy_a_napajeni(self):
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'GT'))
-        self.assertTrue(any('oba operandy' in c for c in self.chyby(m)))
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'TON'))
-        ch = self.chyby(m)
-        self.assertTrue(any('Chybí instance' in c for c in ch) and any('Chybí PT' in c for c in ch))
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'NO'))
-        self.assertTrue(any('Chybí operand' in c for c in self.chyby(m)))
+    def test_operands_and_power(self):
+        m, _ = model.insert(nw(1), {'r': 0, 'k': 0}, catalog.element(CAT, 'GT'))
+        self.assertTrue(any('both operands' in c for c in self.errors(m)))
+        m, _ = model.insert(nw(1), {'r': 0, 'k': 0}, catalog.element(CAT, 'TON'))
+        ch = self.errors(m)
+        self.assertTrue(any('Missing instance' in c for c in ch) and any('Missing PT' in c for c in ch))
+        m, _ = model.insert(nw(1), {'r': 0, 'k': 0}, catalog.element(CAT, 'NO'))
+        self.assertTrue(any('Missing operand' in c for c in self.errors(m)))
         m = nw(1)
-        m['rungy'].append({'z': 'w9', 'cesta': ['p1'], 'do': None})
-        self.assertTrue(any('Nenapájený' in c for c in self.chyby(m)))
+        m['rungs'].append({'from': 'w9', 'path': ['p1'], 'to': None})
+        self.assertTrue(any('Unpowered' in c for c in self.errors(m)))
 
 
 class TestApiEditor(unittest.TestCase):
     def setUp(self):
         self.data = tempfile.mkdtemp()
-        self.srv = server.vytvor_server(0, VZORKY, self.data)
+        self.srv = server.create_server(0, SAMPLES, self.data)
         self.port = self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
@@ -158,73 +158,73 @@ class TestApiEditor(unittest.TestCase):
         self.srv.server_close()
         shutil.rmtree(self.data, ignore_errors=True)
 
-    def req(self, metoda, cesta, telo=None):
+    def req(self, method, fpath, body=None):
         c = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
-        c.request(metoda, cesta, body=json.dumps(telo).encode() if telo is not None else None,
+        c.request(method, fpath, body=json.dumps(body).encode() if body is not None else None,
                   headers={'Content-Type': 'application/json'})
         r = c.getresponse()
         t = json.loads(r.read())
         c.close()
         return r.status, t
 
-    def test_katalog_api(self):
-        s, k = self.req('GET', '/api/katalog?projekt=%s' % PROJEKT)
+    def test_catalog_api(self):
+        s, k = self.req('GET', '/api/catalog?project=%s' % PROJECT)
         self.assertEqual(s, 200)
-        self.assertIn('fb:FB_Pas', [b['klic'] for b in k['bloky']])
-        self.assertEqual(self.req('GET', '/api/katalog?projekt=Neni')[0], 404)
+        self.assertIn('fb:FB_Pas', [b['key'] for b in k['blocks']])
+        self.assertEqual(self.req('GET', '/api/catalog?project=Neni')[0], 404)
 
-    def test_rozlozeni_s_operacemi(self):
-        pred = nw(1)
-        s, r = self.req('POST', '/api/rozlozeni', {
-            'projekt': PROJEKT, 'pred': pred, 'po': pred, 'sirka': 900,
-            'ops': [{'typ': 'vetev', 'od': {'r': 0, 'k': 3}, 'do': {'r': 0, 'k': 4}, 'prvek': 'fb:FB_Pas'},
-                    {'typ': 'zmen', 'id': 'n1', 'hodnoty': {'instance': '"DB_Pas1"'}}]})
+    def test_layout_with_operations(self):
+        before = nw(1)
+        s, r = self.req('POST', '/api/layout', {
+            'project': PROJECT, 'before': before, 'after': before, 'width': 900,
+            'ops': [{'type': 'branch', 'from': {'r': 0, 'k': 3}, 'to': {'r': 0, 'k': 4}, 'element': 'fb:FB_Pas'},
+                    {'type': 'change', 'id': 'n1', 'values': {'instance': '"DB_Pas1"'}}]})
         self.assertEqual(s, 200)
-        self.assertEqual((r['posledni'], r['rozdil']), ('n1', {'n1': 'pridany'}))
-        self.assertIsNotNone(r['kresba'])
-        self.assertEqual(r['chyby'], [])
-        self.assertTrue(r['mista'])
-        s, r = self.req('POST', '/api/rozlozeni', {'projekt': PROJEKT, 'po': pred,
-                                                   'ops': [{'typ': 'vloz', 'misto': {'r': 0, 'k': 0}, 'prvek': 'fb:Neni'}]})
+        self.assertEqual((r['last'], r['diff']), ('n1', {'n1': 'added'}))
+        self.assertIsNotNone(r['drawing'])
+        self.assertEqual(r['errors'], [])
+        self.assertTrue(r['places'])
+        s, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': before,
+                                                   'ops': [{'type': 'insert', 'place': {'r': 0, 'k': 0}, 'element': 'fb:Neni'}]})
         self.assertEqual(s, 400)
-        self.assertEqual(self.req('POST', '/api/rozlozeni', {'po': pred, 'ops': [{'typ': 'smaz', 'id': 'p9'}]})[0], 400)
+        self.assertEqual(self.req('POST', '/api/layout', {'after': before, 'ops': [{'type': 'delete', 'id': 'p9'}]})[0], 400)
 
-    def test_ulozeni_po(self):
-        _, net = self.req('GET', '/api/network?projekt=%s&blok=FB_Dopravnik&nw=1' % PROJEKT)
-        s, u = self.req('POST', '/api/uprava', {'projekt': PROJEKT, 'kolo': 'Kolo 1', 'blok': 'FB_Dopravnik', 'nw': 1,
-                                                 'po': {'prvky': net['prvky'], 'rungy': net['rungy']}})
+    def test_save_after(self):
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=1' % PROJECT)
+        s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Dopravnik', 'nw': 1,
+                                                 'after': {'elements': net['elements'], 'rungs': net['rungs']}})
         self.assertEqual(s, 201)
-        _, r = self.req('POST', '/api/rozlozeni', {'projekt': PROJEKT, 'po': u['po'], 'ops': [
-            {'typ': 'vetev', 'od': {'r': 0, 'k': 1}, 'do': {'r': 0, 'k': 2}, 'prvek': 'fb:FB_Pas'}]})
-        s, v = self.req('POST', '/api/uprava/%s/po' % u['id'], {'po': r['po']})
+        _, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': u['after'], 'ops': [
+            {'type': 'branch', 'from': {'r': 0, 'k': 1}, 'to': {'r': 0, 'k': 2}, 'element': 'fb:FB_Pas'}]})
+        s, v = self.req('POST', '/api/edits/%s/after' % u['id'], {'after': r['after']})
         self.assertEqual(s, 200)                                           # uložit lze i s chybou
-        self.assertEqual(len(v['chyby']), 1)
-        _, d = self.req('GET', '/api/uprava/%s' % u['id'])
-        self.assertEqual(d['rozdil'], {'n1': 'pridany'})
-        self.assertEqual(len(d['chyby']), 1)                               # hlavička úpravy je označí
-        self.assertIn('upraveno', d['uprava'])
-        self.assertEqual(self.req('POST', '/api/uprava/%s/po' % u['id'], {'po': {'prvky': 1}})[0], 400)
-        self.req('POST', '/api/uprava/%s/stav' % u['id'], {'stav': 'Approved'})
-        s, e = self.req('POST', '/api/uprava/%s/po' % u['id'], {'po': r['po']})
+        self.assertEqual(len(v['errors']), 1)
+        _, d = self.req('GET', '/api/edits/%s' % u['id'])
+        self.assertEqual(d['diff'], {'n1': 'added'})
+        self.assertEqual(len(d['errors']), 1)                               # hlavička úpravy je označí
+        self.assertIn('edited', d['edit'])
+        self.assertEqual(self.req('POST', '/api/edits/%s/after' % u['id'], {'after': {'elements': 1}})[0], 400)
+        self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
+        s, e = self.req('POST', '/api/edits/%s/after' % u['id'], {'after': r['after']})
         self.assertEqual(s, 409)
-        self.assertIn('Proposal', e['chyba'])
+        self.assertIn('Proposal', e['error'])
 
-    def test_checked_rozhoduje_posledni_kontrola(self):
-        _, net = self.req('GET', '/api/network?projekt=%s&blok=FB_Dopravnik&nw=1' % PROJEKT)
-        _, u = self.req('POST', '/api/uprava', {'projekt': PROJEKT, 'kolo': 'k', 'blok': 'FB_Dopravnik', 'nw': 1,
-                                                 'po': {'prvky': net['prvky'], 'rungy': net['rungy']}})
+    def test_checked_decides_last_check(self):
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=1' % PROJECT)
+        _, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'k', 'block': 'FB_Dopravnik', 'nw': 1,
+                                                 'after': {'elements': net['elements'], 'rungs': net['rungs']}})
         uid = u['id']
-        self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Approved'})
-        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})[0], 200)   # volný
-        self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': True})
-        self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': False})
-        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked'})[0], 409)
-        self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': True})
-        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked'})[0], 200)
-        self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': False})
-        _, d = self.req('GET', '/api/uprava/%s' % uid)
-        self.assertEqual((d['uprava']['stav'], d['checked_povolen']), ('Checked', False))   # stav se sám nevrací
-        self.assertIn('NESHODA', d['varovani'][0])
+        self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
+        self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Signed'})[0], 200)   # volný
+        self.req('POST', '/api/check', {'edit_id': uid, 'match': True})
+        self.req('POST', '/api/check', {'edit_id': uid, 'match': False})
+        self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 409)
+        self.req('POST', '/api/check', {'edit_id': uid, 'match': True})
+        self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 200)
+        self.req('POST', '/api/check', {'edit_id': uid, 'match': False})
+        _, d = self.req('GET', '/api/edits/%s' % uid)
+        self.assertEqual((d['edit']['state'], d['checked_allowed']), ('Checked', False))   # stav se sám nevrací
+        self.assertIn('MISMATCH', d['warnings'][0])
 
 
 if __name__ == '__main__':

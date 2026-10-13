@@ -9,249 +9,249 @@ import re
 
 import s7dcl
 
-ODS = ' ' * 8                                   # RUNG v těle networku
-ODS_P = ' ' * 12                                # prvek v rungu
-ODS_A = ' ' * 16                                # argument prvku
+IND = ' ' * 8                                   # RUNG v těle networku
+IND_P = ' ' * 12                                # prvek v rungu
+IND_A = ' ' * 16                                # argument prvku
 
 # zobrazovaný název instrukce -> jméno v exportu (inverze s7dcl.NAZVY)
-EXPORT_NAZEV = {v: k for k, v in s7dcl.NAZVY.items()}
-CIVKY = {v: k for k, v in s7dcl.CIVKY.items()}
-POROVNANI = {v: k for k, v in s7dcl.POROVNANI.items()}
+EXPORT_NAME = {v: k for k, v in s7dcl.NAMES.items()}
+COILS = {v: k for k, v in s7dcl.COILS.items()}
+COMPARISONS = {v: k for k, v in s7dcl.COMPARISONS.items()}
 # systémové instrukce: piny v exportu malými písmeny (parser je zvětšuje); F-instrukce / FB piny ponechá
-SYSTEMOVE = set(s7dcl.NAZVY.values()) | set(s7dcl.NAPAJENI) | {'MOVE'}
+SYSTEM = set(s7dcl.NAMES.values()) | set(s7dcl.POWER_PINS) | {'MOVE'}
 
 
-class ChybaZapisu(ValueError):
+class WriteError(ValueError):
     pass
 
 
 # ---------- společné ----------
 
-def _sablona(nazev, sabl):
+def _template(name, tmpl):
     """'Int' / 'Int to DInt' -> text atributu `{ S7_Templates := "…" }`.
     shortcut: klíče šablon odhadnuté (SrcType, time_type, DestType), ověřené jen porovnání a TON — doplnit z exportu"""
-    if not sabl:
+    if not tmpl:
         return None
-    casti = [x.strip() for x in str(sabl).split(' to ')]
-    if nazev in ('TON', 'TOF', 'TP', 'TONR'):
-        klice = ['time_type']
-    elif len(casti) == 2:
-        klice = ['SrcType', 'DestType']
+    parts = [x.strip() for x in str(tmpl).split(' to ')]
+    if name in ('TON', 'TOF', 'TP', 'TONR'):
+        keys = ['time_type']
+    elif len(parts) == 2:
+        keys = ['SrcType', 'DestType']
     else:
-        klice = ['SrcType']
-    return '{ S7_Templates := "%s" }' % '; '.join('%s := %s' % kv for kv in zip(klice, casti))
+        keys = ['SrcType']
+    return '{ S7_Templates := "%s" }' % '; '.join('%s := %s' % kv for kv in zip(keys, parts))
 
 
-def _atributy(a):
+def _attributes(a):
     if not a:
         return []
-    polozky = ['%s := "%s"' % (k, v) for k, v in a.items()]
-    return [ODS_P + '{'] + [ODS_A + x + (';' if i < len(polozky) - 1 else '') for i, x in enumerate(polozky)] \
-        + [ODS_P + '}']
+    items = ['%s := "%s"' % (k, v) for k, v in a.items()]
+    return [IND_P + '{'] + [IND_A + x + (';' if i < len(items) - 1 else '') for i, x in enumerate(items)] \
+        + [IND_P + '}']
 
 
-def _volani(cil, args):
+def _call(target, args):
     """cil( a, b ) — jeden argument na řádku, jeden argument na jednom řádku (jako export)."""
     if not args:
-        return [ODS_P + cil + '(  )']
+        return [IND_P + target + '(  )']
     if len(args) == 1 and '\n' not in args[0]:
-        return [ODS_P + '%s( %s )' % (cil, args[0])]
-    return [ODS_P + cil + '('] + [ODS_A + a + (',' if i < len(args) - 1 else '') for i, a in enumerate(args)] \
-        + [ODS_P + ')']
+        return [IND_P + '%s( %s )' % (target, args[0])]
+    return [IND_P + target + '('] + [IND_A + a + (',' if i < len(args) - 1 else '') for i, a in enumerate(args)] \
+        + [IND_P + ')']
 
 
-def _pin(pin, smer, hodnota, neg=False, male=False):
-    h = (('NOT ' if neg else '') + (hodnota or '').strip()).strip()
-    return '%s %s %s' % (pin.lower() if male else pin, smer, h) if h else '%s %s  ' % (pin.lower() if male else pin, smer)   # prázdný pin jako export: `pin :=  ,`
+def _pin(pin, direction, value, neg=False, lower=False):
+    h = (('NOT ' if neg else '') + (value or '').strip()).strip()
+    return '%s %s %s' % (pin.lower() if lower else pin, direction, h) if h else '%s %s  ' % (pin.lower() if lower else pin, direction)   # prázdný pin jako export: `pin :=  ,`
 
 
-def _cil_boxu(p):
+def _target_box(p):
     """-> (text cíle volání, piny malými?)"""
-    nazev, inst = p.get('nazev'), p.get('instance')
-    if p.get('volani') == 'fc' or (p.get('volani') == 'fb' and not inst):
-        return '"%s"' % (nazev or '').strip('"'), False
-    if p.get('volani') == 'fb':
+    name, inst = p.get('name'), p.get('instance')
+    if p.get('call') == 'fc' or (p.get('call') == 'fb' and not inst):
+        return '"%s"' % (name or '').strip('"'), False
+    if p.get('call') == 'fb':
         return inst, False
     if inst:                                           # #T.TON(…), "DB".TP(…), #NouzStop.ESTOP1(…)
-        return '%s.%s' % (inst, nazev), nazev in SYSTEMOVE
-    return EXPORT_NAZEV.get(nazev, nazev), True
+        return '%s.%s' % (inst, name), name in SYSTEM
+    return EXPORT_NAME.get(name, name), True
 
 
 # ---------- LAD ----------
 
-def _lad_prvek(p):
-    t = p['typ']
-    if t in ('kontakt', 'kontakt_nc'):
-        return [ODS_P + '%s( %s )' % ('Contact' if t == 'kontakt' else 'I_Contact', p.get('operand', ''))]
-    if t in ('kontakt_p', 'kontakt_n'):
+def _lad_element(p):
+    t = p['type']
+    if t in ('contact', 'contact_nc'):
+        return [IND_P + '%s( %s )' % ('Contact' if t == 'contact' else 'I_Contact', p.get('operand', ''))]
+    if t in ('contact_p', 'contact_n'):
         # shortcut: tvar P_Contact v exportu V21 neověřen (ve vzorcích není) — parser čte pojmenované i poziční
-        return _volani('P_Contact' if t == 'kontakt_p' else 'N_Contact',
+        return _call('P_Contact' if t == 'contact_p' else 'N_Contact',
                        ['operand := %s' % p.get('operand', ''), 'bit := %s' % p.get('bit', '')])
-    if t == 'porovnani':
-        s = _sablona(None, p.get('sablona'))
-        return ([ODS_P + s] if s else []) + _volani('%s_Contact' % POROVNANI[p['op']],
+    if t == 'comparison':
+        s = _template(None, p.get('template'))
+        return ([IND_P + s] if s else []) + _call('%s_Contact' % COMPARISONS[p['op']],
                                                      ['in1 := %s' % p.get('in1', ''), 'in2 := %s' % p.get('in2', '')])
-    if t == 'civka_neg':
-        return [ODS_P + 'NOT Coil( %s )' % p.get('operand', '')]
-    if t in CIVKY:
-        return [ODS_P + '%s( %s )' % (CIVKY[t], p.get('operand', ''))]
+    if t == 'coil_neg':
+        return [IND_P + 'NOT Coil( %s )' % p.get('operand', '')]
+    if t in COILS:
+        return [IND_P + '%s( %s )' % (COILS[t], p.get('operand', ''))]
     if t == 'ret':
-        return [ODS_P + {'TRUE': 'ReturnTrue', 'FALSE': 'ReturnFalse'}.get(p.get('operand'), 'Return') + '(  )']
+        return [IND_P + {'TRUE': 'ReturnTrue', 'FALSE': 'ReturnFalse'}.get(p.get('operand'), 'Return') + '(  )']
     if t == 'not':
-        return [ODS_P + 'NOT']
+        return [IND_P + 'NOT']
     if t != 'box':
-        raise ChybaZapisu('neznámý typ prvku %r (%s)' % (t, p.get('id')))
-    cil, male = _cil_boxu(p)
-    if p.get('nazev') in ('P_TRIG', 'N_TRIG') and not p.get('instance'):
-        radky = [ODS_P + '%s( %s )' % (cil, p.get('pod', ''))]
+        raise WriteError('neznámý type element %r (%s)' % (t, p.get('id')))
+    target, lower = _target_box(p)
+    if p.get('name') in ('P_TRIG', 'N_TRIG') and not p.get('instance'):
+        rows = [IND_P + '%s( %s )' % (target, p.get('below', ''))]
     else:
-        args = [_pin(x['pin'], ':=', x['operand'], male=male) for x in p.get('vstupy', [])]
-        if p.get('nazev') in ('SR', 'RS') and p.get('volani') == 'instrukce':
+        args = [_pin(x['pin'], ':=', x['operand'], lower=lower) for x in p.get('inputs', [])]
+        if p.get('name') in ('SR', 'RS') and p.get('call') == 'instruction':
             args.append('operand := %s' % (p.get('instance') or ''))
-            cil = EXPORT_NAZEV[p['nazev']]
-        args += [_pin(x['pin'], '=>', x['operand'], male=male) for x in p.get('vystupy', [])]
-        radky = _volani(cil, args)
+            target = EXPORT_NAME[p['name']]
+        args += [_pin(x['pin'], '=>', x['operand'], lower=lower) for x in p.get('outputs', [])]
+        rows = _call(target, args)
     if p.get('neg'):
-        radky[0] = ODS_P + 'NOT ' + radky[0].lstrip()
-    s = _sablona(p.get('nazev'), p.get('sablona'))
-    return ([ODS_P + s] if s else []) + radky
+        rows[0] = IND_P + 'NOT ' + rows[0].lstrip()
+    s = _template(p.get('name'), p.get('template'))
+    return ([IND_P + s] if s else []) + rows
 
 
-def _uzel(u):
+def _node(u):
     return u[3:] if u.startswith('op:') else 'wire#' + u
 
 
 def lad_text(m):
     """LAD model {prvky, rungy} -> text těla networku (řádky mezi NETWORK a END_NETWORK)."""
-    P = {p['id']: p for p in m['prvky']}
-    radky = []
-    for r in m.get('rungy') or [{'z': 'powerrail', 'cesta': [], 'do': None}]:
-        radky.append(ODS + 'RUNG ' + _uzel(r['z']))
-        for it in r['cesta']:
+    P = {p['id']: p for p in m['elements']}
+    rows = []
+    for r in m.get('rungs') or [{'from': 'powerrail', 'path': [], 'to': None}]:
+        rows.append(IND + 'RUNG ' + _node(r['from']))
+        for it in r['path']:
             if it.startswith('wire#'):
-                radky.append(ODS_P + it)
+                rows.append(IND_P + it)
             elif it in P:
-                radky += _lad_prvek(P[it])
+                rows += _lad_element(P[it])
             else:
-                raise ChybaZapisu('rung odkazuje na neexistující prvek %r' % it)
-        radky.append(ODS + 'END_RUNG' + (' wire#' + r['do'] if r.get('do') else ''))
-    return '\n'.join(radky) + '\n'
+                raise WriteError('rung odkazuje on neexistující element %r' % it)
+        rows.append(IND + 'END_RUNG' + (' wire#' + r['to'] if r.get('to') else ''))
+    return '\n'.join(rows) + '\n'
 
 
 # ---------- FBD ----------
 
-def _ma_retez(p):
+def _has_chain(p):
     """Má box vstup řetězu (1. vstup = výstup předchozího / operand RUNG)? Volání v F-bloku EN nemá."""
-    return bool(p['vstupy']) and (p['typ'] not in ('volani', 'instrukce') or p['vstupy'][0]['pin'] == 'EN')
+    return bool(p['inputs']) and (p['type'] not in ('call', 'instruction') or p['inputs'][0]['pin'] == 'EN')
 
 
 def _fbd_box(p, wire_of):
-    t, pred = p['typ'], []                             # pred = atributy / šablona nad prvkem
-    vst = p['vstupy'][1:] if _ma_retez(p) else p['vstupy']
+    t, before = p['type'], []                             # pred = atributy / šablona nad prvkem
+    inp = p['inputs'][1:] if _has_chain(p) else p['inputs']
 
-    def hodnota(v):
+    def value(v):
         return 'wire#' + wire_of[v['signal']] if v.get('signal') else v.get('operand', '')
     if t in ('and', 'or', 'xor'):
-        radky = _volani({'and': 'A', 'or': 'O', 'xor': 'X'}[t], [_pin(v['pin'], ':=', hodnota(v), v.get('neg')) for v in vst])
+        rows = _call({'and': 'A', 'or': 'O', 'xor': 'X'}[t], [_pin(v['pin'], ':=', value(v), v.get('neg')) for v in inp])
     elif t in ('assign', 's', 'r'):
-        radky = [ODS_P + '%s( %s )' % ({'assign': 'Coil', 's': 'S_Coil', 'r': 'R_Coil'}[t], p.get('operand', ''))]
+        rows = [IND_P + '%s( %s )' % ({'assign': 'Coil', 's': 'S_Coil', 'r': 'R_Coil'}[t], p.get('operand', ''))]
     elif t in ('ptrig', 'ntrig'):
-        radky = [ODS_P + '%s( %s )' % ('P_Trig' if t == 'ptrig' else 'N_Trig', p.get('operand', ''))]
+        rows = [IND_P + '%s( %s )' % ('P_Trig' if t == 'ptrig' else 'N_Trig', p.get('operand', ''))]
     elif t in ('sr', 'rs'):
-        radky = _volani('S_SR' if t == 'sr' else 'S_RS', [_pin(v['pin'], ':=', hodnota(v), v.get('neg'), male=True)
-                                                          for v in vst] + ['operand := %s' % p.get('operand', '')])
+        rows = _call('S_SR' if t == 'sr' else 'S_RS', [_pin(v['pin'], ':=', value(v), v.get('neg'), lower=True)
+                                                          for v in inp] + ['operand := %s' % p.get('operand', '')])
     else:
-        cil, male = _cil_boxu(p)
-        args = [_pin(v['pin'], ':=', hodnota(v), v.get('neg'), male) for v in vst]
-        args += [_pin(v['pin'], '=>', v.get('operand', ''), v.get('neg'), male) for v in p.get('vystupy', [])]
-        s = _sablona(p.get('nazev'), p.get('sablona'))
-        pred = ([ODS_P + s] if s else []) + _atributy(p.get('atributy'))
-        radky = _volani(cil, args)
-    if _ma_retez(p) and p['vstupy'][0].get('neg'):
-        radky[0] = ODS_P + 'NOT ' + radky[0].lstrip()
-    return pred + radky
+        target, lower = _target_box(p)
+        args = [_pin(v['pin'], ':=', value(v), v.get('neg'), lower) for v in inp]
+        args += [_pin(v['pin'], '=>', v.get('operand', ''), v.get('neg'), lower) for v in p.get('outputs', [])]
+        s = _template(p.get('name'), p.get('template'))
+        before = ([IND_P + s] if s else []) + _attributes(p.get('attributes'))
+        rows = _call(target, args)
+    if _has_chain(p) and p['inputs'][0].get('neg'):
+        rows[0] = IND_P + 'NOT ' + rows[0].lstrip()
+    return before + rows
 
 
 def fbd_text(m):
     """FBD model {prvky} -> text těla networku. Řetěz = box, jehož 1. vstup je hlavní výstup předchozího;
     další spotřebiče výstupu dostanou `wire#wN` (odbočka v rungu / END_RUNG wire#wN). Negace hlavního výstupu
     (`neg_vystup`, jen z editoru) se zapíše jako negace vstupů spotřebičů."""
-    prvky = [dict(p, vstupy=[dict(v) for v in p['vstupy']]) for p in m['prvky']]
-    P = {p['id']: p for p in prvky}
-    spotr = {p['id']: [] for p in prvky}
-    for c in prvky:
-        for v in c['vstupy']:
+    elements = [dict(p, inputs=[dict(v) for v in p['inputs']]) for p in m['elements']]
+    P = {p['id']: p for p in elements}
+    consumers = {p['id']: [] for p in elements}
+    for c in elements:
+        for v in c['inputs']:
             if v.get('signal'):
                 if v['signal'] not in P:
-                    raise ChybaZapisu('signál z neexistujícího boxu %s' % v['signal'])
-                spotr[v['signal']].append((c, v))
-    for p in prvky:
-        if p.get('neg_vystup'):
-            for _, v in spotr[p['id']]:
+                    raise WriteError('signál z neexistujícího box %s' % v['signal'])
+                consumers[v['signal']].append((c, v))
+    for p in elements:
+        if p.get('neg_output'):
+            for _, v in consumers[p['id']]:
                 v['neg'] = not v.get('neg')
     nxt = {}
-    for p in prvky:
-        k = next((c for c, v in spotr[p['id']] if _ma_retez(c) and v is c['vstupy'][0]), None)
+    for p in elements:
+        k = next((c for c, v in consumers[p['id']] if _has_chain(c) and v is c['inputs'][0]), None)
         if k is not None:
             nxt[p['id']] = k
-    pokracovani = {c['id'] for c in nxt.values()}
+    continuation = {c['id'] for c in nxt.values()}
     wire_of = {}
-    for p in prvky:
-        if any(c is not nxt.get(p['id']) or v is not c['vstupy'][0] for c, v in spotr[p['id']]):
+    for p in elements:
+        if any(c is not nxt.get(p['id']) or v is not c['inputs'][0] for c, v in consumers[p['id']]):
             wire_of[p['id']] = 'w%d' % (len(wire_of) + 1)
-    radky, hotovo = [], set()
-    for start in prvky:
-        if start['id'] in pokracovani:
+    rows, done = [], set()
+    for start in elements:
+        if start['id'] in continuation:
             continue
-        v0 = start['vstupy'][0] if _ma_retez(start) else None
+        v0 = start['inputs'][0] if _has_chain(start) else None
         if v0 is None:
             z = ''
         elif v0.get('signal'):
             z = ' wire#' + wire_of[v0['signal']]
         else:
             z = (' ' + v0['operand'].strip()) if v0.get('operand', '').strip() else ''
-        radky.append(ODS + 'RUNG' + z)
+        rows.append(IND + 'RUNG' + z)
         p = start
         while True:
-            hotovo.add(p['id'])
-            radky += _fbd_box(p, wire_of)
-            dalsi = nxt.get(p['id'])
-            if dalsi is None or dalsi['id'] in hotovo:
+            done.add(p['id'])
+            rows += _fbd_box(p, wire_of)
+            following = nxt.get(p['id'])
+            if following is None or following['id'] in done:
                 break
             if p['id'] in wire_of:
-                radky.append(ODS_P + 'wire#' + wire_of[p['id']])
-            p = dalsi
-        radky.append(ODS + 'END_RUNG' + (' wire#' + wire_of[p['id']] if p['id'] in wire_of else ''))
-    if len(hotovo) != len(prvky):
-        raise ChybaZapisu('FBD zapojení má cyklus (%s)' % ', '.join(sorted(set(P) - hotovo)))
-    if not prvky:
-        radky = [ODS + 'RUNG', ODS + 'END_RUNG']
-    return '\n'.join(radky) + '\n'
+                rows.append(IND_P + 'wire#' + wire_of[p['id']])
+            p = following
+        rows.append(IND + 'END_RUNG' + (' wire#' + wire_of[p['id']] if p['id'] in wire_of else ''))
+    if len(done) != len(elements):
+        raise WriteError('FBD zapojení má cycle (%s)' % ', '.join(sorted(set(P) - done)))
+    if not elements:
+        rows = [IND + 'RUNG', IND + 'END_RUNG']
+    return '\n'.join(rows) + '\n'
 
 
-def text_networku(m):
+def network_text(m):
     """Model „po" (LAD nebo FBD) -> text těla networku pro `.s7dcl`."""
-    if m.get('jazyk') == 'FBD':
+    if m.get('language') == 'FBD':
         return fbd_text(m)
     return lad_text(m)
 
 
 # ---------- náhrada networku v souboru bloku ----------
 
-def nahrad_network(text_s7dcl, cislo_nw, novy_text):
+def replace_network(text_s7dcl, nw_number, new_text):
     """Nahradí tělo N-tého NETWORK … END_NETWORK (1 = první) textem `novy_text`; hlavička bloku, atributy networku
     (titulek, komentář, jazyk) a ostatní networky zůstanou beze změny. Konce řádků CRLF se zachovají."""
     crlf = '\r\n' in text_s7dcl
     t = text_s7dcl.replace('\r\n', '\n')
-    zacatky = list(re.finditer(r'^[ \t]*NETWORK[ \t]*\n', t, re.M))
-    if not 1 <= cislo_nw <= len(zacatky):
-        raise ChybaZapisu('network %d v bloku není (bloků networků %d)' % (cislo_nw, len(zacatky)))
-    z = zacatky[cislo_nw - 1].end()
+    starts = list(re.finditer(r'^[ \t]*NETWORK[ \t]*\n', t, re.M))
+    if not 1 <= nw_number <= len(starts):
+        raise WriteError('network %d v block není (bloků networků %d)' % (nw_number, len(starts)))
+    z = starts[nw_number - 1].end()
     k = re.compile(r'^[ \t]*END_NETWORK[ \t]*$', re.M).search(t, z)
     if not k:
-        raise ChybaZapisu('NETWORK bez END_NETWORK')
-    novy = novy_text.replace('\r\n', '\n')
-    if not novy.endswith('\n'):
-        novy += '\n'
-    t = t[:z] + novy + t[k.start():]
+        raise WriteError('NETWORK without END_NETWORK')
+    new_value = new_text.replace('\r\n', '\n')
+    if not new_value.endswith('\n'):
+        new_value += '\n'
+    t = t[:z] + new_value + t[k.start():]
     return t.replace('\n', '\r\n') if crlf else t

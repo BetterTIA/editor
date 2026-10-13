@@ -5,7 +5,7 @@ import glob
 import os
 import unittest
 
-from tests.common import VZORKY, PROJEKT, TS0
+from tests.common import SAMPLES, PROJECT, TS0
 import fbd
 import model
 import diff
@@ -14,117 +14,117 @@ import s7dcl_write as z
 import server
 
 
-def shoda(a, b):
-    return fbd.shoda_obsahu(a, b) if a['jazyk'] == 'FBD' else diff.shoda_obsahu(a, b)
+def match(a, b):
+    return fbd.content_match(a, b) if a['language'] == 'FBD' else diff.content_match(a, b)
 
 
 def reparse(nw):
     """model networku -> text -> model (stejný jazyk)"""
-    obsah = z.text_networku(nw)
-    if nw.get('jazyk') == 'FBD':
-        return {'jazyk': 'FBD', 'prvky': fbd.parse(obsah)}
-    r, p = s7dcl.parse_lad(obsah)
-    return {'jazyk': 'LAD', 'prvky': p, 'rungy': r}
+    content = z.network_text(nw)
+    if nw.get('language') == 'FBD':
+        return {'language': 'FBD', 'elements': fbd.parse(content)}
+    r, p = s7dcl.parse_lad(content)
+    return {'language': 'LAD', 'elements': p, 'rungs': r}
 
 
 class TestRoundtrip(unittest.TestCase):
-    def test_vsechny_networky_vzorku(self):
+    def test_all_sample_networks(self):
         n = 0
-        for f in glob.glob(os.path.join(VZORKY, '**', '*.s7dcl'), recursive=True):
-            text = s7dcl.cti(f)
-            b = s7dcl.parse_blok(text)
-            for nw in b['networky']:
-                if 'prvky' not in nw:
+        for f in glob.glob(os.path.join(SAMPLES, '**', '*.s7dcl'), recursive=True):
+            text = s7dcl.read(f)
+            b = s7dcl.parse_block(text)
+            for nw in b['networks']:
+                if 'elements' not in nw:
                     continue
-                with self.subTest(blok=os.path.basename(f), nw=nw['nw']):
-                    self.assertEqual(shoda(nw, reparse(nw)), (True, []))
+                with self.subTest(block=os.path.basename(f), nw=nw['nw']):
+                    self.assertEqual(match(nw, reparse(nw)), (True, []))
                     # nahrazení networku sám sebou: celý blok se čte stejně (ostatní networky i atributy beze změny)
-                    b2 = s7dcl.parse_blok(z.nahrad_network(text, nw['nw'], z.text_networku(nw)))
-                    self.assertEqual(len(b2['networky']), len(b['networky']))
-                    for x, y in zip(b['networky'], b2['networky']):
-                        self.assertEqual(x['atributy'], y['atributy'])
+                    b2 = s7dcl.parse_block(z.replace_network(text, nw['nw'], z.network_text(nw)))
+                    self.assertEqual(len(b2['networks']), len(b['networks']))
+                    for x, y in zip(b['networks'], b2['networks']):
+                        self.assertEqual(x['attributes'], y['attributes'])
                         if x['nw'] != nw['nw']:
                             self.assertEqual(x['text'], y['text'])
-                        elif 'prvky' in x:
-                            self.assertEqual(shoda(x, y), (True, []))
+                        elif 'elements' in x:
+                            self.assertEqual(match(x, y), (True, []))
                     n += 1
         self.assertGreaterEqual(n, 30)
 
-    def test_text_jako_export(self):
-        f = os.path.join(VZORKY, PROJEKT, TS0, 'PLC_1', 'Blocks', 'Dopravnik', 'FB_Dopravnik.s7dcl')
-        text = s7dcl.cti(f)
-        nw4 = s7dcl.parse_blok(text)['networky'][3]
-        self.assertEqual(z.nahrad_network(text, 4, z.text_networku(nw4)), text)    # NW4 znak po znaku jako export
+    def test_text_as_export(self):
+        f = os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Dopravnik', 'FB_Dopravnik.s7dcl')
+        text = s7dcl.read(f)
+        nw4 = s7dcl.parse_block(text)['networks'][3]
+        self.assertEqual(z.replace_network(text, 4, z.network_text(nw4)), text)    # NW4 znak po znaku jako export
 
-    def test_crlf_a_chyby(self):
-        text = s7dcl.cti(os.path.join(VZORKY, PROJEKT, TS0, 'PLC_1', 'Blocks', 'Dopravnik', 'FC_Vetve.s7dcl'))
+    def test_crlf_and_errors(self):
+        text = s7dcl.read(os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Dopravnik', 'FC_Vetve.s7dcl'))
         crlf = text.replace('\n', '\r\n')
-        vys = z.nahrad_network(crlf, 1, '        RUNG wire#powerrail\n        END_RUNG\n')
-        self.assertNotIn('\n', vys.replace('\r\n', ''))
-        self.assertEqual(s7dcl.parse_blok(vys.replace('\r\n', '\n'))['networky'][0]['prvky'], [])
-        with self.assertRaises(z.ChybaZapisu):
-            z.nahrad_network(text, 99, '')
+        res = z.replace_network(crlf, 1, '        RUNG wire#powerrail\n        END_RUNG\n')
+        self.assertNotIn('\n', res.replace('\r\n', ''))
+        self.assertEqual(s7dcl.parse_block(res.replace('\r\n', '\n'))['networks'][0]['elements'], [])
+        with self.assertRaises(z.WriteError):
+            z.replace_network(text, 99, '')
 
 
-class TestModelyZEditoru(unittest.TestCase):
-    def nw(self, blok, n):
-        _, b = server._nacti(VZORKY, PROJEKT, blok, TS0)
-        return b['networky'][n - 1]
+class TestModelsFromEditor(unittest.TestCase):
+    def nw(self, block, n):
+        _, b = server._load(SAMPLES, PROJECT, block, TS0)
+        return b['networks'][n - 1]
 
-    def test_lad_operace(self):
+    def test_lad_operation(self):
         n = self.nw('FB_Dopravnik', 2)
-        m = {'prvky': n['prvky'], 'rungy': n['rungy']}
-        m = model.vloz(m, {'r': 0, 'k': 3}, {'typ': 'kontakt', 'operand': '"Pojistka_OK"'})[0]
-        m = model.vetev(m, {'r': 0, 'k': 4}, {'r': 0, 'k': 5}, {'typ': 'kontakt_nc', 'operand': '#X'})[0]
-        m = model.proved(m, {'typ': 'vloz', 'misto': {'r': 0, 'k': 0},
-                             'prvek': {'typ': 'porovnani', 'op': '>=', 'in1': '#A', 'in2': '5', 'sablona': 'Int'}})[0]
-        self.assertEqual(shoda(dict(m, jazyk='LAD'), reparse(m)), (True, []))
+        m = {'elements': n['elements'], 'rungs': n['rungs']}
+        m = model.insert(m, {'r': 0, 'k': 3}, {'type': 'contact', 'operand': '"Pojistka_OK"'})[0]
+        m = model.branch(m, {'r': 0, 'k': 4}, {'r': 0, 'k': 5}, {'type': 'contact_nc', 'operand': '#X'})[0]
+        m = model.apply(m, {'type': 'insert', 'place': {'r': 0, 'k': 0},
+                             'element': {'type': 'comparison', 'op': '>=', 'in1': '#A', 'in2': '5', 'template': 'Int'}})[0]
+        self.assertEqual(match(dict(m, language='LAD'), reparse(m)), (True, []))
         self.assertIn('{ S7_Templates := "SrcType := Int" }\n            GE_Contact(', z.lad_text(m))
 
-    def test_lad_volani_fc_a_instrukce(self):
-        m = {'prvky': [{'id': 'p1', 'typ': 'box', 'volani': 'fc', 'nazev': 'FC_Vetve', 'instance': None, 'sablona': None,
-                        'napajeni': ['EN', 'ENO'], 'vstupy': [], 'vystupy': []},
-                       {'id': 'p2', 'typ': 'box', 'volani': 'instrukce', 'nazev': 'CONV', 'instance': None,
-                        'sablona': 'Int to DInt', 'napajeni': ['EN', 'ENO'],
-                        'vstupy': [{'pin': 'IN', 'operand': '#A'}], 'vystupy': [{'pin': 'OUT', 'operand': '#B'}]}],
-             'rungy': [{'z': 'powerrail', 'cesta': ['p1', 'p2'], 'do': None}]}
+    def test_lad_call_fc_and_instruction(self):
+        m = {'elements': [{'id': 'p1', 'type': 'box', 'call': 'fc', 'name': 'FC_Vetve', 'instance': None, 'template': None,
+                        'power': ['EN', 'ENO'], 'inputs': [], 'outputs': []},
+                       {'id': 'p2', 'type': 'box', 'call': 'instruction', 'name': 'CONV', 'instance': None,
+                        'template': 'Int to DInt', 'power': ['EN', 'ENO'],
+                        'inputs': [{'pin': 'IN', 'operand': '#A'}], 'outputs': [{'pin': 'OUT', 'operand': '#B'}]}],
+             'rungs': [{'from': 'powerrail', 'path': ['p1', 'p2'], 'to': None}]}
         t = z.lad_text(m)
         self.assertIn('"FC_Vetve"(  )', t)
         self.assertIn('Convert(\n                in := #A,\n                out => #B', t)
         r = reparse(m)
-        self.assertEqual(r['prvky'][0]['instance'], '"FC_Vetve"')          # parser: volání; server ho dohledá jako FC
-        self.assertEqual(diff.shoda_obsahu({'prvky': m['prvky'][1:], 'rungy': []},
-                                             {'prvky': r['prvky'][1:], 'rungy': []}), (True, []))
+        self.assertEqual(r['elements'][0]['instance'], '"FC_Vetve"')          # parser: volání; server ho dohledá jako FC
+        self.assertEqual(diff.content_match({'elements': m['elements'][1:], 'rungs': []},
+                                             {'elements': r['elements'][1:], 'rungs': []}), (True, []))
 
-    def test_fbd_operace(self):
+    def test_fbd_operation(self):
         n = self.nw('FB_Bezpecnost', 3)
-        m = {'jazyk': 'FBD', 'prvky': n['prvky']}
-        for op in ({'typ': 'pridej_vstup', 'id': 'b1', 'operand': '#Novy'},
-                   {'typ': 'negace', 'id': 'b1', 'vstup': 3},
-                   {'typ': 'vloz_box', 'prvek': 'OR', 'do': {'id': 'b1', 'vstup': 2}},
-                   {'typ': 'zmen_operand', 'id': 'n1', 'vstup': 2, 'operand': '#Servis'},
-                   {'typ': 'vloz_box', 'prvek': 'SR'},
-                   {'typ': 'zmen_operand', 'id': 'n2', 'operand': '#Pamet'},
-                   {'typ': 'zmen_operand', 'id': 'n2', 'vstup': 1, 'operand': '#Set'},
-                   {'typ': 'zmen_operand', 'id': 'n2', 'vstup': 2, 'operand': '#Reset'}):
-            m = fbd.proved(m, op)[0]
-        self.assertEqual(shoda(m, reparse(m)), (True, []))
+        m = {'language': 'FBD', 'elements': n['elements']}
+        for op in ({'type': 'add_input', 'id': 'b1', 'operand': '#Novy'},
+                   {'type': 'negate', 'id': 'b1', 'input': 3},
+                   {'type': 'insert_box', 'element': 'OR', 'to': {'id': 'b1', 'input': 2}},
+                   {'type': 'change_operand', 'id': 'n1', 'input': 2, 'operand': '#Servis'},
+                   {'type': 'insert_box', 'element': 'SR'},
+                   {'type': 'change_operand', 'id': 'n2', 'operand': '#Pamet'},
+                   {'type': 'change_operand', 'id': 'n2', 'input': 1, 'operand': '#Set'},
+                   {'type': 'change_operand', 'id': 'n2', 'input': 2, 'operand': '#Reset'}):
+            m = fbd.apply(m, op)[0]
+        self.assertEqual(match(m, reparse(m)), (True, []))
 
-    def test_fbd_negace_hlavniho_vystupu(self):
+    def test_fbd_negate_main_output(self):
         n = self.nw('FB_Bezpecnost', 2)                     # O -> wire#w1 -> A in2
-        m = fbd.proved({'jazyk': 'FBD', 'prvky': n['prvky']}, {'typ': 'negace', 'id': 'b3', 'vystup': 'hlavni'})[0]
+        m = fbd.apply({'language': 'FBD', 'elements': n['elements']}, {'type': 'negate', 'id': 'b3', 'output': 'main'})[0]
         r = reparse(m)
         self.assertIn('in2 := NOT wire#w1', z.fbd_text(m))   # zapíše se jako negace vstupu spotřebiče
-        a = next(p for p in r['prvky'] if p['typ'] == 'and')
-        self.assertTrue(a['vstupy'][1]['neg'])
+        a = next(p for p in r['elements'] if p['type'] == 'and')
+        self.assertTrue(a['inputs'][1]['neg'])
 
-    def test_fbd_cyklus(self):
-        m = {'jazyk': 'FBD', 'prvky': [
-            {'id': 'b1', 'typ': 'and', 'vstupy': [{'n': 1, 'pin': 'in1', 'operand': '', 'signal': 'b2', 'neg': False}],
-             'vystupy': []},
-            {'id': 'b2', 'typ': 'and', 'vstupy': [{'n': 1, 'pin': 'in1', 'operand': '', 'signal': 'b1', 'neg': False}],
-             'vystupy': []}]}
-        with self.assertRaises(z.ChybaZapisu):
+    def test_fbd_cycle(self):
+        m = {'language': 'FBD', 'elements': [
+            {'id': 'b1', 'type': 'and', 'inputs': [{'n': 1, 'pin': 'in1', 'operand': '', 'signal': 'b2', 'neg': False}],
+             'outputs': []},
+            {'id': 'b2', 'type': 'and', 'inputs': [{'n': 1, 'pin': 'in1', 'operand': '', 'signal': 'b1', 'neg': False}],
+             'outputs': []}]}
+        with self.assertRaises(z.WriteError):
             z.fbd_text(copy.deepcopy(m))
 
 

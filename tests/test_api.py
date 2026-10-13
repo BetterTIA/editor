@@ -7,7 +7,7 @@ import threading
 import unittest
 from urllib.parse import quote
 
-from tests.common import VZORKY, PROJEKT
+from tests.common import SAMPLES, PROJECT
 import server
 import screenshot
 
@@ -15,7 +15,7 @@ import screenshot
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.srv = server.vytvor_server(0, VZORKY, '')          # volný port
+        cls.srv = server.create_server(0, SAMPLES, '')          # volný port
         cls.port = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -24,65 +24,65 @@ class TestApi(unittest.TestCase):
         cls.srv.shutdown()
         cls.srv.server_close()
 
-    def get(self, cesta):
+    def get(self, fpath):
         c = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
-        c.request('GET', cesta)
+        c.request('GET', fpath)
         r = c.getresponse()
-        telo = r.read()
+        body = r.read()
         c.close()
-        return r.status, r.getheader('Content-Type'), telo
+        return r.status, r.getheader('Content-Type'), body
 
-    def test_exporty(self):
-        s, _, b = self.get('/api/exporty')
+    def test_exports(self):
+        s, _, b = self.get('/api/exports')
         self.assertEqual(s, 200)
-        p = json.loads(b)['projekty'][0]
-        self.assertEqual(p['projekt'], PROJEKT)
-        self.assertIn({'blok': 'FB_Dopravnik', 'ts': '20261012-140000'}, p['bloky'])
-        self.assertIn({'blok': 'FB_Pas', 'ts': '20261012-120000'}, p['bloky'])     # dílčí export
+        p = json.loads(b)['projects'][0]
+        self.assertEqual(p['project'], PROJECT)
+        self.assertIn({'block': 'FB_Dopravnik', 'ts': '20261012-140000'}, p['blocks'])
+        self.assertIn({'block': 'FB_Pas', 'ts': '20261012-120000'}, p['blocks'])     # dílčí export
 
-    def test_blok(self):
-        s, _, b = self.get('/api/blok?projekt=%s&blok=FB_Dopravnik' % PROJEKT)
+    def test_block(self):
+        s, _, b = self.get('/api/block?project=%s&block=FB_Dopravnik' % PROJECT)
         j = json.loads(b)
-        self.assertEqual((s, j['druh'], j['cislo'], len(j['networky'])), (200, 'FB', 10, 8))
-        self.assertEqual(j['networky'][1], {'nw': 2, 'jazyk': 'LAD', 'titulek': 'Samodrž motoru'})
+        self.assertEqual((s, j['kind'], j['number'], len(j['networks'])), (200, 'FB', 10, 8))
+        self.assertEqual(j['networks'][1], {'nw': 2, 'language': 'LAD', 'title': 'Samodrž motoru'})
 
     def test_network(self):
-        s, _, b = self.get('/api/network?projekt=%s&blok=FB_Dopravnik&nw=4' % PROJEKT)
+        s, _, b = self.get('/api/network?project=%s&block=FB_Dopravnik&nw=4' % PROJECT)
         j = json.loads(b)
         self.assertEqual(s, 200)
-        for k in ('blok', 'cislo', 'nw', 'titulek', 'prvky', 'vodice', 'rozlozeni', 'kresba'):
+        for k in ('block', 'number', 'nw', 'title', 'elements', 'wires', 'layout', 'drawing'):
             self.assertIn(k, j)
-        self.assertEqual(j['rozlozeni']['p2'], {'r': 2, 'c': 2})
-        self.assertEqual(j['varovani'], [])
+        self.assertEqual(j['layout']['p2'], {'r': 2, 'c': 2})
+        self.assertEqual(j['warnings'], [])
 
-    def test_network_fallbacky(self):
-        _, _, b = self.get('/api/network?projekt=%s&blok=FC_Vetve&nw=4' % PROJEKT)
+    def test_network_fallbacks(self):
+        _, _, b = self.get('/api/network?project=%s&block=FC_Vetve&nw=4' % PROJECT)
         j = json.loads(b)
-        self.assertIsNone(j['kresba'])
-        self.assertIn('seznam rungů', j['varovani'][0])
-        _, _, b = self.get('/api/network?projekt=%s&blok=FC_Vetve&nw=3' % PROJEKT)
+        self.assertIsNone(j['drawing'])
+        self.assertIn('list of rungs', j['warnings'][0])
+        _, _, b = self.get('/api/network?project=%s&block=FC_Vetve&nw=3' % PROJECT)
         j = json.loads(b)                                   # od F1 se FBD kreslí (vlastní model)
-        self.assertEqual((j['jazyk'], j['kresba']['fbd'], j['varovani']), ('FBD', True, []))
+        self.assertEqual((j['language'], j['drawing']['fbd'], j['warnings']), ('FBD', True, []))
 
-    def test_chyby(self):
-        self.assertEqual(self.get('/api/blok?projekt=%s&blok=Neni' % PROJEKT)[0], 404)
-        self.assertEqual(self.get('/api/blok?projekt=%s&blok=%s' % (PROJEKT, quote('../../server')))[0], 404)
-        self.assertEqual(self.get('/api/blok?projekt=%s&blok=x' % quote('..'))[0], 404)
-        self.assertEqual(self.get('/api/network?projekt=%s&blok=FB_Dopravnik&nw=99' % PROJEKT)[0], 404)
-        self.assertEqual(self.get('/api/network?projekt=%s&blok=FB_Dopravnik&nw=x' % PROJEKT)[0], 400)
-        self.assertEqual(self.get('/nic')[0], 404)
+    def test_errors(self):
+        self.assertEqual(self.get('/api/block?project=%s&block=Neni' % PROJECT)[0], 404)
+        self.assertEqual(self.get('/api/block?project=%s&block=%s' % (PROJECT, quote('../../server')))[0], 404)
+        self.assertEqual(self.get('/api/block?project=%s&block=x' % quote('..'))[0], 404)
+        self.assertEqual(self.get('/api/network?project=%s&block=FB_Dopravnik&nw=99' % PROJECT)[0], 404)
+        self.assertEqual(self.get('/api/network?project=%s&block=FB_Dopravnik&nw=x' % PROJECT)[0], 400)
+        self.assertEqual(self.get('/nothing')[0], 404)
 
-    def test_stranka(self):
-        s, t, b = self.get('/?projekt=%s&blok=FB_Dopravnik&nw=2&snimek=1' % PROJEKT)
+    def test_page(self):
+        s, t, b = self.get('/?project=%s&block=FB_Dopravnik&nw=2&screenshot=1' % PROJECT)
         self.assertEqual(s, 200)
         self.assertIn('text/html', t)
         self.assertIn(b'TIAC_Editor', b)
 
-    @unittest.skipUnless(any(os.path.exists(p) for p in screenshot.PROHLIZECE), 'chybí Chrome/Edge')
-    def test_snimek(self):
+    @unittest.skipUnless(any(os.path.exists(p) for p in screenshot.BROWSERS), 'chybí Chrome/Edge')
+    def test_screenshot(self):
         d = tempfile.mkdtemp()
         try:
-            out = screenshot.screenshot('http://127.0.0.1:%d/?projekt=%s&blok=FB_Dopravnik&nw=2&snimek=1' % (self.port, PROJEKT),
+            out = screenshot.screenshot('http://127.0.0.1:%d/?project=%s&block=FB_Dopravnik&nw=2&screenshot=1' % (self.port, PROJECT),
                                 os.path.join(d, 's.png'), 900, 400)
             with open(out, 'rb') as f:
                 self.assertEqual(f.read(8), b'\x89PNG\r\n\x1a\n')

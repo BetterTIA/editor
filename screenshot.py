@@ -8,15 +8,15 @@ import subprocess
 import sys
 import tempfile
 
-PROHLIZECE = [
+BROWSERS = [
     r'C:\Program Files\Google\Chrome\Application\chrome.exe',
     r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
     r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',   # záloha, stejné přepínače
 ]
 
 
-def screenshot(url, out, width=1400, height=900, svetly=False, cekani_ms=4000):
-    exe = next((p for p in PROHLIZECE if os.path.exists(p)), None)
+def screenshot(url, out, width=1400, height=900, light=False, wait_ms=4000):
+    exe = next((p for p in BROWSERS if os.path.exists(p)), None)
     if not exe:
         raise RuntimeError('Chrome ani Edge nenalezen')
     out = os.path.abspath(out)
@@ -27,8 +27,8 @@ def screenshot(url, out, width=1400, height=900, svetly=False, cekani_ms=4000):
         cmd = [exe, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--user-data-dir=' + prof,
                '--window-size=%d,%d' % (width, height), '--screenshot=' + out,
                # počká na fetch + vykreslení (stránka kreslí až po načtení API)
-               '--virtual-time-budget=%d' % cekani_ms]
-        if not svetly:
+               '--virtual-time-budget=%d' % wait_ms]
+        if not light:
             cmd.append('--force-dark-mode')
         cmd.append(url)
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
@@ -43,9 +43,9 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--width', type=int, default=1400)
     ap.add_argument('--height', type=int, default=900)
-    ap.add_argument('--svetly', action='store_true', help='světlý motiv (výchozí tmavý)')
+    ap.add_argument('--light', action='store_true', help='světlý theme (výchozí tmavý)')
     a = ap.parse_args()
-    print(screenshot(a.url, a.out, a.width, a.height, a.svetly))
+    print(screenshot(a.url, a.out, a.width, a.height, a.light))
 
 
 if __name__ == '__main__':

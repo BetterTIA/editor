@@ -13,189 +13,189 @@ import xml.etree.ElementTree as ET
 import s7dcl
 
 
-def _box(nazev, napajeni=('EN', 'ENO'), vstupy=(), vystupy=(), sablona=None, instance=None, **navic):
-    p = {'typ': 'box', 'volani': 'instrukce', 'nazev': nazev, 'instance': instance, 'sablona': sablona,
-         'napajeni': list(napajeni), 'vstupy': [{'pin': x, 'operand': ''} for x in vstupy],
-         'vystupy': [{'pin': x, 'operand': ''} for x in vystupy]}
-    p.update(navic)
+def _box(name, power=('EN', 'ENO'), inputs=(), outputs=(), template=None, instance=None, **extra):
+    p = {'type': 'box', 'call': 'instruction', 'name': name, 'instance': instance, 'template': template,
+         'power': list(power), 'inputs': [{'pin': x, 'operand': ''} for x in inputs],
+         'outputs': [{'pin': x, 'operand': ''} for x in outputs]}
+    p.update(extra)
     return p
 
 
-def _instrukce():
+def _instruction():
     I = []
 
-    def add(klic, nazev, skupina, prvek, popis=''):
-        I.append({'klic': klic, 'nazev': nazev, 'skupina': skupina, 'prvek': prvek, 'popis': popis})
-    add('NO', '-| |-', 'Kontakty', {'typ': 'kontakt', 'operand': ''}, 'spínací kontakt')
-    add('NC', '-|/|-', 'Kontakty', {'typ': 'kontakt_nc', 'operand': ''}, 'rozpínací kontakt')
-    add('P', '-|P|-', 'Kontakty', {'typ': 'kontakt_p', 'operand': '', 'bit': ''}, 'náběžná hrana')
-    add('N', '-|N|-', 'Kontakty', {'typ': 'kontakt_n', 'operand': '', 'bit': ''}, 'sestupná hrana')
-    add('C', '-( )-', 'Cívky', {'typ': 'civka', 'operand': ''}, 'cívka')
-    add('S', '-(S)-', 'Cívky', {'typ': 'civka_s', 'operand': ''}, 'nastavit')
-    add('R', '-(R)-', 'Cívky', {'typ': 'civka_r', 'operand': ''}, 'nulovat')
-    add('NEG', '-(/)-', 'Cívky', {'typ': 'civka_neg', 'operand': ''}, 'negovaná cívka')
-    add('RET', 'RET', 'Cívky', {'typ': 'ret', 'operand': ''}, 'návrat z bloku')
-    for k, op in s7dcl.POROVNANI.items():
-        add(k, 'CMP ' + op, 'Porovnání', {'typ': 'porovnani', 'op': op, 'in1': '', 'in2': '', 'sablona': 'Int'},
+    def add(key, name, group, element, description=''):
+        I.append({'key': key, 'name': name, 'group': group, 'element': element, 'description': description})
+    add('NO', '-| |-', 'Contacts', {'type': 'contact', 'operand': ''}, 'spínací contact')
+    add('NC', '-|/|-', 'Contacts', {'type': 'contact_nc', 'operand': ''}, 'rozpínací contact')
+    add('P', '-|P|-', 'Contacts', {'type': 'contact_p', 'operand': '', 'bit': ''}, 'náběžná edge')
+    add('N', '-|N|-', 'Contacts', {'type': 'contact_n', 'operand': '', 'bit': ''}, 'sestupná edge')
+    add('C', '-( )-', 'Cívky', {'type': 'coil', 'operand': ''}, 'cívka')
+    add('S', '-(S)-', 'Cívky', {'type': 'coil_s', 'operand': ''}, 'nastavit')
+    add('R', '-(R)-', 'Cívky', {'type': 'coil_r', 'operand': ''}, 'nulovat')
+    add('NEG', '-(/)-', 'Cívky', {'type': 'coil_neg', 'operand': ''}, 'negovaná cívka')
+    add('RET', 'RET', 'Cívky', {'type': 'ret', 'operand': ''}, 'návrat z block')
+    for k, op in s7dcl.COMPARISONS.items():
+        add(k, 'CMP ' + op, 'Porovnání', {'type': 'comparison', 'op': op, 'in1': '', 'in2': '', 'template': 'Int'},
             k + '_Contact, S7_Templates SrcType')
     for k in ('TON', 'TOF', 'TP'):
         add(k, k, 'Časovače', _box(k, ('IN', 'Q'), ['PT'], ['ET'], 'Time', ''), 'instance: #multi nebo "DB"')
     add('CTU', 'CTU', 'Čítače', _box('CTU', ('CU', 'Q'), ['R', 'PV'], ['CV'], 'Int', ''))
     add('CTD', 'CTD', 'Čítače', _box('CTD', ('CD', 'QD'), ['LD', 'PV'], ['CV'], 'Int', ''))
-    add('MOVE', 'MOVE', 'Přesun', _box('MOVE', vstupy=['IN'], vystupy=['OUT1']))
-    add('SWAP', 'SWAP', 'Přesun', _box('SWAP', vstupy=['IN'], vystupy=['OUT'], sablona='Word'))
-    add('CONV', 'CONV', 'Přesun', _box('CONV', vstupy=['IN'], vystupy=['OUT'], sablona='Int to DInt'))
+    add('MOVE', 'MOVE', 'Přesun', _box('MOVE', inputs=['IN'], outputs=['OUT1']))
+    add('SWAP', 'SWAP', 'Přesun', _box('SWAP', inputs=['IN'], outputs=['OUT'], template='Word'))
+    add('CONV', 'CONV', 'Přesun', _box('CONV', inputs=['IN'], outputs=['OUT'], template='Int to DInt'))
     for k in ('ADD', 'SUB', 'MUL', 'DIV'):
-        add(k, k, 'Matematika', _box(k, vstupy=['IN1', 'IN2'], vystupy=['OUT'], sablona='Int'))
+        add(k, k, 'Math', _box(k, inputs=['IN1', 'IN2'], outputs=['OUT'], template='Int'))
     add('IN_RANGE', 'IN_RANGE', 'Porovnání', _box('IN_RANGE', ('', ''), ['MIN', 'VAL', 'MAX'], [], 'Int'))
-    add('P_TRIG', 'P_TRIG', 'Hrany', _box('P_TRIG', ('CLK', 'Q'), pod=''), 'bit paměti hrany pod boxem')
-    add('N_TRIG', 'N_TRIG', 'Hrany', _box('N_TRIG', ('CLK', 'Q'), pod=''))
+    add('P_TRIG', 'P_TRIG', 'Edges', _box('P_TRIG', ('CLK', 'Q'), below=''), 'bit paměti edges below box')
+    add('N_TRIG', 'N_TRIG', 'Edges', _box('N_TRIG', ('CLK', 'Q'), below=''))
     return I
 
 
-INSTRUKCE = _instrukce()
+INSTRUCTIONS = _instruction()
 
-_SEKCE = {'VAR_INPUT': 'vstupy', 'VAR_OUTPUT': 'vystupy', 'VAR_IN_OUT': 'inout', 'VAR_TEMP': 'temp'}
+_SECTIONS = {'VAR_INPUT': 'inputs', 'VAR_OUTPUT': 'outputs', 'VAR_IN_OUT': 'inout', 'VAR_TEMP': 'temp'}
 _cache = {}   # cesta -> (mtime, výsledek)
 
 
-def rozhrani(text):
+def interface(text):
     """Hlavička + rozhraní bloku (.s7dcl) bez networků -> {druh, nazev, cislo, instance_typ, sekce: {..: [{jmeno, typ}]}}.
     Členy jen nejvyšší úrovně (STRUCT = 'Struct', jeho obsah se přeskočí)."""
     m = re.search(r'^\s*(?:NETWORK|BEGIN)\s*$', text, re.M)
-    hlava = text[:m.start()] if m else text
+    head = text[:m.start()] if m else text
     # shortcut: atributy `{…}` se mažou regexem bez ohledu na uvozovky — `}` uvnitř hodnoty atributu by to rozbilo
-    hlava_bez = re.sub(r'\{[^{}]*\}', '', hlava)
-    if not re.search(r'^(FUNCTION_BLOCK|FUNCTION|DATA_BLOCK)\b', hlava_bez, re.M):
+    head_rest = re.sub(r'\{[^{}]*\}', '', head)
+    if not re.search(r'^(FUNCTION_BLOCK|FUNCTION|DATA_BLOCK)\b', head_rest, re.M):
         return None
-    b = s7dcl.parse_blok(hlava_bez + '\n')
-    hm = re.search(r'S7_BlockNumber\s*:=\s*"(\d+)"', hlava)
-    vys = {'druh': b['druh'], 'nazev': b['nazev'], 'cislo': int(hm.group(1)) if hm else None,
-           'instance_typ': b['instance_typ'], 'sekce': {}, 'f': bool(re.search(r'S7_Safety\s*:=\s*"TRUE"', hlava))}
-    sekce, hloubka = None, 0
-    for r in hlava_bez.splitlines():
+    b = s7dcl.parse_block(head_rest + '\n')
+    hm = re.search(r'S7_BlockNumber\s*:=\s*"(\d+)"', head)
+    res = {'kind': b['kind'], 'name': b['name'], 'number': int(hm.group(1)) if hm else None,
+           'instance_type': b['instance_type'], 'section': {}, 'f': bool(re.search(r'S7_Safety\s*:=\s*"TRUE"', head))}
+    section, depth = None, 0
+    for r in head_rest.splitlines():
         s = r.strip()
         if not s:
             continue
         sm = re.match(r'^(VAR_INPUT|VAR_OUTPUT|VAR_IN_OUT|VAR_TEMP|VAR)\b(?!\s*:)', s)
-        if sm and hloubka == 0:
-            sekce = 'konstanty' if 'CONSTANT' in s else _SEKCE.get(sm.group(1), 'staticke')
+        if sm and depth == 0:
+            section = 'constants' if 'CONSTANT' in s else _SECTIONS.get(sm.group(1), 'static')
             continue
         if s.startswith('END_VAR'):
-            sekce = None
+            section = None
             continue
-        if sekce is None:
+        if section is None:
             continue
         if s.startswith('END_STRUCT'):
-            hloubka -= 1
+            depth -= 1
             continue
         dm = re.match(r'^("[^"]+"|[A-Za-z_]\w*)\s*:\s*([^;:=]+?)\s*(:=.*)?;?\s*$', s)
         if not dm:
             continue
-        typ = dm.group(2).strip()
-        struct = bool(re.search(r'\bSTRUCT$', typ))
+        etype = dm.group(2).strip()
+        struct = bool(re.search(r'\bSTRUCT$', etype))
         if struct:
-            typ = typ[:-6] + 'Struct'
-        if hloubka == 0:
-            typ = typ[2:] if typ.startswith('_.') else typ
-            vys['sekce'].setdefault(sekce, []).append({'jmeno': dm.group(1).strip('"'), 'typ': typ.strip('"')})
+            etype = etype[:-6] + 'Struct'
+        if depth == 0:
+            etype = etype[2:] if etype.startswith('_.') else etype
+            res['section'].setdefault(section, []).append({'name': dm.group(1).strip('"'), 'type': etype.strip('"')})
         if struct:
-            hloubka += 1
-    return vys
+            depth += 1
+    return res
 
 
-def _cti_cache(cesta, fce):
+def _read_cache(fpath, fn):
     try:
-        mt = os.path.getmtime(cesta)
+        mt = os.path.getmtime(fpath)
     except OSError:
         return None
-    c = _cache.get(cesta)
+    c = _cache.get(fpath)
     if c and c[0] == mt:
         return c[1]
     try:
-        v = fce(cesta)
-    except (s7dcl.ChybaParseru, ET.ParseError, OSError, UnicodeDecodeError, ValueError):
+        v = fn(fpath)
+    except (s7dcl.SourceParseError, ET.ParseError, OSError, UnicodeDecodeError, ValueError):
         v = None
-    _cache[cesta] = (mt, v)
+    _cache[fpath] = (mt, v)
     return v
 
 
-def tag_tabulka(cesta):
+def tag_table(fpath):
     """SimaticML tag tabulka -> [{jmeno, typ, adresa, tabulka}]."""
-    koren = ET.parse(cesta).getroot()
-    vys = []
-    for tab in koren.iter('SW.Tags.PlcTagTable'):
-        jm_tab = tab.findtext('AttributeList/Name') or ''
+    tree_root = ET.parse(fpath).getroot()
+    res = []
+    for tab in tree_root.iter('SW.Tags.PlcTagTable'):
+        tab_name = tab.findtext('AttributeList/Name') or ''
         for t in tab.iter('SW.Tags.PlcTag'):
-            jm = t.findtext('AttributeList/Name')
-            if jm:
-                vys.append({'jmeno': jm, 'typ': t.findtext('AttributeList/DataTypeName') or '',
-                            'adresa': t.findtext('AttributeList/LogicalAddress') or '', 'tabulka': jm_tab})
-    return vys
+            nm = t.findtext('AttributeList/Name')
+            if nm:
+                res.append({'name': nm, 'type': t.findtext('AttributeList/DataTypeName') or '',
+                            'address': t.findtext('AttributeList/LogicalAddress') or '', 'table': tab_name})
+    return res
 
 
-def _nejnovejsi(root, projekt, pripona, podslozka=None):
+def _latest(root, project, suffix, subfolder=None):
     """{klíč: plná cesta} z nejnovějšího exportu, který soubor obsahuje (klíč = jméno souboru,
     s podsložkou relativní cesta pod ní)."""
-    pd = os.path.join(root, projekt)
-    vys = {}
+    pd = os.path.join(root, project)
+    res = {}
     if not os.path.isdir(pd):
-        return vys
+        return res
     for ts in sorted(os.listdir(pd)):
         if not re.match(r'^\d{8}-\d{6}$', ts):
             continue
-        for dp, _, soubory in os.walk(os.path.join(pd, ts)):
-            casti = os.path.relpath(dp, os.path.join(pd, ts)).split(os.sep)
-            if podslozka and podslozka not in casti:
+        for dp, _, files in os.walk(os.path.join(pd, ts)):
+            parts = os.path.relpath(dp, os.path.join(pd, ts)).split(os.sep)
+            if subfolder and subfolder not in parts:
                 continue
-            for f in soubory:
-                if f.endswith(pripona):
-                    k = os.path.join(*casti[casti.index(podslozka):], f) if podslozka else f
-                    vys[k] = os.path.join(dp, f)            # novější export přepíše starší
-    return vys
+            for f in files:
+                if f.endswith(suffix):
+                    k = os.path.join(*parts[parts.index(subfolder):], f) if subfolder else f
+                    res[k] = os.path.join(dp, f)            # novější export přepíše starší
+    return res
 
 
-def sablona_bloku(b, instance=''):
+def block_template(b, instance=''):
     """Šablona prvku palety pro volání FB/FC z rozhraní (IN_OUT jako vstupy vlevo)."""
-    s = b['sekce']
-    return {'typ': 'box', 'volani': 'fb' if b['druh'] == 'FB' else 'fc', 'nazev': b['nazev'],
-            'instance': instance if b['druh'] == 'FB' else None, 'sablona': None,
-            'napajeni': ['EN', 'ENO'],
-            'vstupy': [{'pin': x['jmeno'], 'operand': ''} for x in s.get('vstupy', []) + s.get('inout', [])],
-            'vystupy': [{'pin': x['jmeno'], 'operand': ''} for x in s.get('vystupy', [])]}
+    s = b['section']
+    return {'type': 'box', 'call': 'fb' if b['kind'] == 'FB' else 'fc', 'name': b['name'],
+            'instance': instance if b['kind'] == 'FB' else None, 'template': None,
+            'power': ['EN', 'ENO'],
+            'inputs': [{'pin': x['name'], 'operand': ''} for x in s.get('inputs', []) + s.get('inout', [])],
+            'outputs': [{'pin': x['name'], 'operand': ''} for x in s.get('outputs', [])]}
 
 
-def catalog(root, projekt):
-    bloky, dbs = [], []
-    for _, cesta in sorted(_nejnovejsi(root, projekt, '.s7dcl').items()):
-        r = _cti_cache(cesta, lambda c: rozhrani(s7dcl.cti(c)))
+def catalog(root, project):
+    blocks, dbs = [], []
+    for _, fpath in sorted(_latest(root, project, '.s7dcl').items()):
+        r = _read_cache(fpath, lambda c: interface(s7dcl.read(c)))
         if r:
-            (dbs if r['druh'] == 'DB' else bloky).append(r)
+            (dbs if r['kind'] == 'DB' else blocks).append(r)
     inst = {}
     for d in dbs:
-        if d['instance_typ']:
-            inst.setdefault(d['instance_typ'], []).append('"%s"' % d['nazev'])
-    vys_bloky = []
-    for b in bloky:
-        if b['druh'] in ('FB', 'FC'):
-            instance = inst.get(b['nazev'], [])
-            vys_bloky.append({'klic': '%s:%s' % (b['druh'].lower(), b['nazev']), 'nazev': b['nazev'],
-                              'druh': b['druh'], 'cislo': b['cislo'], 'rozhrani': b['sekce'], 'instance': instance,
+        if d['instance_type']:
+            inst.setdefault(d['instance_type'], []).append('"%s"' % d['name'])
+    res_blocks = []
+    for b in blocks:
+        if b['kind'] in ('FB', 'FC'):
+            instance = inst.get(b['name'], [])
+            res_blocks.append({'key': '%s:%s' % (b['kind'].lower(), b['name']), 'name': b['name'],
+                              'kind': b['kind'], 'number': b['number'], 'interface': b['section'], 'instance': instance,
                               'f': b.get('f', False),
-                              'prvek': sablona_bloku(b, instance[0] if instance else '')})
-    tagy = []
-    for cesta in _nejnovejsi(root, projekt, '.xml', 'Tags').values():
-        tagy += _cti_cache(cesta, tag_tabulka) or []
+                              'element': block_template(b, instance[0] if instance else '')})
+    tags = []
+    for fpath in _latest(root, project, '.xml', 'Tags').values():
+        tags += _read_cache(fpath, tag_table) or []
     import fbd                                       # líně: fbd importuje s7dcl
-    return {'projekt': projekt, 'instrukce': INSTRUKCE, 'bloky': vys_bloky, 'fbd': fbd.PALETA,
-            'db': [{'nazev': d['nazev'], 'cislo': d['cislo'], 'instance_typ': d['instance_typ'],
-                    'cleny': [] if d['instance_typ'] else [c for v in d['sekce'].values() for c in v]} for d in dbs],
-            'tagy': sorted(tagy, key=lambda t: t['jmeno'].casefold())}
+    return {'project': project, 'instruction': INSTRUCTIONS, 'blocks': res_blocks, 'fbd': fbd.PALETTE,
+            'db': [{'name': d['name'], 'number': d['number'], 'instance_type': d['instance_type'],
+                    'members': [] if d['instance_type'] else [c for v in d['section'].values() for c in v]} for d in dbs],
+            'tags': sorted(tags, key=lambda t: t['name'].casefold())}
 
 
-def prvek(kat, klic):
+def element(cat, key):
     """Šablona prvku podle klíče palety ('NO', 'TON', 'fb:FB_Pas', …) -> kopie ; KeyError když není."""
-    for x in kat['instrukce'] + kat['bloky']:
-        if x['klic'] == klic:
-            return copy.deepcopy(x['prvek'])
-    raise KeyError('prvek palety %s neexistuje' % klic)
+    for x in cat['instruction'] + cat['blocks']:
+        if x['key'] == key:
+            return copy.deepcopy(x['element'])
+    raise KeyError('element palette %s neexistuje' % key)
