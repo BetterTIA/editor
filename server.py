@@ -1135,6 +1135,10 @@ class Handler(BaseHTTPRequestHandler):
         def body_project():
             b = self._body()
             return b.get('project') if isinstance(b, dict) else ''
+        origin = self.headers.get('Origin')
+        if method != 'GET' and origin and urlparse(origin).hostname not in ('localhost', '127.0.0.1'):
+            self._json({'error': 'cross-origin request refused'}, 403)   # another web page must not drive TIA
+            return
         try:
             if method == 'GET' and c in ('/', '/index.html'):
                 with open(os.path.join(WEB, 'index.html'), 'rb') as f:

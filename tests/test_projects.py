@@ -87,6 +87,23 @@ class TestProjects(unittest.TestCase):
         self.assertEqual(self.req('DELETE', '/api/projects/Line_B')[0], 404)
         self.assertEqual([p['name'] for p in self.req('GET', '/api/projects')[1]['projects']], [PROJECT])
 
+    def test_cross_origin_post_refused(self):
+        self.start()
+        c = http.client.HTTPConnection('127.0.0.1', self.srv.server_address[1], timeout=10)
+        c.request('POST', '/api/projects', body=b'{"source": "tia"}', headers={'Origin': 'http://example.com'})
+        self.assertEqual(c.getresponse().status, 403)
+        c.close()
+        self.assertEqual(self.calls(), [])
+
+    def test_home_page_has_status_bar(self):
+        self.start()
+        c = http.client.HTTPConnection('127.0.0.1', self.srv.server_address[1], timeout=10)
+        c.request('GET', '/')
+        html = c.getresponse().read()
+        c.close()
+        self.assertIn(b'id="status"', html)
+        self.assertIn(b'showHome', html)
+
     def test_edit_counts(self):
         self.start()
         _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=1' % PROJECT)

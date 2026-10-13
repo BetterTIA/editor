@@ -162,10 +162,57 @@ svg .frame-error { fill: none; stroke: var(--warning); stroke-width: 2; }
 .properties input:focus { border-color: var(--accent); outline: none; }
 .properties .section td { color: var(--accent); font-family: inherit; padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
 .mark-errors { color: var(--warning); font-weight: 600; margin-left: 8px; }
+/* D1: status bar, home page */
+header a { color: var(--muted); text-decoration: none; }
+header a:hover { color: var(--accent); }
+.status { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+.chip { border: 1px solid var(--edge); border-radius: 10px; padding: 1px 9px; color: var(--muted); white-space: nowrap;
+        max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.chip b { color: var(--text); font-weight: 600; }
+.chip.ok { border-color: var(--added); } .chip.ok b { color: var(--added); }
+.chip.warn { border-color: var(--warning); } .chip.warn b { color: var(--warning); }
+.chip.bad { border-color: var(--deleted); } .chip.bad b { color: var(--deleted); }
+.status button, .status select, .home button, .home input[type=text] {
+  font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 4px; border: 1px solid var(--edge);
+  background: var(--panel); color: var(--text); }
+.status button, .home button { cursor: pointer; }
+.status button:hover, .home button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.home button:disabled { color: var(--muted); cursor: not-allowed; }
+.main.home { grid-template-columns: 1fr; }
+.main.home #nw { display: none; }
+.home { max-width: 1100px; }
+.home h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.card { border: 1px solid var(--edge); border-radius: 6px; background: var(--panel); padding: 10px 12px; min-width: 0; }
+.card h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: baseline; }
+.card h3 a { color: var(--text); text-decoration: none; } .card h3 a:hover { color: var(--accent); }
+.card .src { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 9px; padding: 0 7px; font-weight: 600; }
+.card .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.card .meta b { color: var(--text); font-weight: 600; }
+.card .edits { margin: 6px 0; font-size: 12px; color: var(--muted); }
+.card .edits .state { margin: 0 4px 0 0; }
+.card .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.home button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.home button.primary:hover:not(:disabled) { color: var(--bg); }
+.job { font-size: 12px; margin-top: 8px; border-top: 1px dashed var(--edge); padding-top: 6px; }
+.job .head { color: var(--accent); font-weight: 600; } .job.error .head { color: var(--deleted); } .job.done .head { color: var(--added); }
+.job ol { margin: 4px 0 0 18px; padding: 0; color: var(--muted); }
+.job ol li { overflow-wrap: anywhere; } .job ol li.bad { color: var(--deleted); }
+.job .err { color: var(--deleted); overflow-wrap: anywhere; }
+.add { border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; display: grid; gap: 12px; }
+.add .opt { display: grid; grid-template-columns: 230px 1fr; gap: 10px; align-items: start; }
+.add .opt > div:first-child b { display: block; } .add .opt > div:first-child span { color: var(--muted); font-size: 12px; }
+.add .line { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.add input[type=text] { flex: 1; min-width: 220px; font-family: Consolas, monospace; padding: 4px 8px; }
+.add .note { color: var(--warning); font-size: 12px; margin-top: 4px; }
+.add .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.empty-state { border: 1px dashed var(--edge); border-radius: 6px; padding: 18px; color: var(--muted); }
+.empty-state b { color: var(--text); }
+@media (max-width: 700px) { .add .opt { grid-template-columns: 1fr; } .status { margin-left: 0; } header { flex-wrap: wrap; } }
 </style>
 </head>
 <body>
-<header><b>TIAC_Editor</b><span class="info" id="info">viewer and editor</span></header>
+<header><a href="/"><b>TIAC_Editor</b></a><a href="/" id="home-link">Home</a><span class="info" id="info">viewer and editor</span><span class="status" id="status"></span></header>
 <div class="main">
   <aside id="nw"></aside>
   <main id="content"></main>
@@ -365,10 +412,11 @@ function rungList(net) {
 }
 
 // ---------- page ----------
-async function showExports() {
+async function showExports(project) {
   const ex = await api('/api/exports');
   let h = '<h1>Exports</h1>';
-  for (const p of ex.projects) {
+  if (project) $('info').textContent = project;
+  for (const p of ex.projects.filter(x => !project || x.project === project)) {
     h += `<h2>${esc(p.project)}</h2><ul class="select">` +
       p.blocks.map(b => `<li><a href="${link({project: p.project, block: b.block, nw: null})}">${esc(b.block)}</a></li>`).join('') + '</ul>';
   }
@@ -949,13 +997,139 @@ function focusProperties() {
   if (i) { i.focus(); i.select(); }
 }
 
+// ---------- status bar (all pages) ----------
+let tiaStatus = {};
+function statusHtml(st) {
+  const chip = (cls, label, value, title) => `<span class="chip ${cls}" title="${esc(title || value)}">${label}: <b>${esc(value)}</b></span>`;
+  const tool = v => (v || 'missing').startsWith('error') ? 'bad' : v === 'configured' ? 'ok' : 'warn';
+  let tia;
+  if (st.tia === 'attached') tia = chip('ok', 'TIA', `attached · ${st.project || '?'}`, st.project_path);
+  else if (st.tia === 'running') tia = chip('warn', 'TIA', `running: ${st.project || '?'}`, st.project_path);
+  else if (st.tia === 'not running') tia = chip('warn', 'TIA', 'not running', 'no TIA Portal instance — open your project in TIA Portal');
+  else if (st.tia === 'choose') tia = chip('warn', 'TIA', `${st.instances.length} instances`) +
+    `<select id="portal"><option value="">choose instance…</option>${st.instances.map(i =>
+      `<option value="${esc(i.portalId)}">${esc(i.project || '?')} (${esc(i.portalId)})</option>`).join('')}</select>`;
+  else tia = chip('', 'TIA', st.checked === false ? 'not checked' : 'unknown');
+  return tia + chip(tool(st.writer), 'Writer', st.writer || '—') +
+    chip(tool(st.reader), 'Reader', st.reader || '—', st.reader_export_root ? `${st.reader} · Reader export root: ${st.reader_export_root}` : st.reader) +
+    chip('', 'AI', st.ai || 'no client', 'filled in by the editor MCP server (later)') +
+    `<button id="status-refresh" title="check TIA Portal, Writer and Reader again">${st.busy ? 'Busy…' : 'Refresh'}</button>`;
+}
+async function loadStatus(refresh, portalId) {
+  if (refresh) $('status').innerHTML = statusHtml(Object.assign({}, tiaStatus, {busy: true}));
+  try {
+    tiaStatus = await api('/api/tia/status' + (portalId ? `?portalId=${enc(portalId)}` : refresh ? '?refresh=1' : ''));
+  } catch (e) { tiaStatus = {tia: 'unknown', writer: 'error: ' + e.message}; }
+  $('status').innerHTML = statusHtml(tiaStatus);
+  $('status-refresh').onclick = () => loadStatus(true).then(statusChanged);
+  if ($('portal')) $('portal').onchange = e => e.target.value && loadStatus(true, e.target.value).then(statusChanged);
+  return tiaStatus;
+}
+let statusChanged = () => {};
+
+// ---------- home page ----------
+const JOB_TEXT = {running: 'snapshot running', done: 'snapshot done', error: 'snapshot failed'};
+function jobHtml(j, retry) {
+  if (!j) return '';
+  let h = `<div class="job ${esc(j.state)}" data-job="${esc(j.id)}"><span class="head">${JOB_TEXT[j.state] || esc(j.state)}</span>` +
+    ` · ${j.chunks} chunk(s), ${j.exported} item(s) exported` + (j.plc ? ` · ${esc(j.plc.softwarePath)}` : '') +
+    (j.result ? ` · export <b>${esc(j.result.export_ts)}</b>` : '') + `<ol>` +
+    j.steps.map(s => `<li class="${s.ok ? '' : 'bad'}">${esc(s.step)}${s.ok ? '' : ': ' + esc(s.message)}</li>`).join('') +
+    (j.state === 'running' ? '<li>…</li>' : '') + '</ol>';
+  if (j.error) h += `<div class="err">⚠ ${esc(j.error)}</div>`;
+  if (j.state === 'error' && j.plc_choices && j.plc_choices.length)
+    h += `<div class="row">PLC: ${j.plc_choices.map(p => `<button data-retry="${esc(retry)}" data-sp="${esc(p.softwarePath)}">${esc(p.softwarePath)}</button>`).join('')}</div>`;
+  return h + '</div>';
+}
+function cardHtml(p) {
+  const edits = Object.entries(p.edits || {});
+  const running = p.job && p.job.state === 'running';
+  return `<div class="card"><h3><a href="?project=${enc(p.name)}">${esc(p.name)}</a><span class="src">${esc(p.source)}</span></h3>` +
+    `<div class="meta">last snapshot <b>${esc(p.last_snapshot || p.latest_export || '—')}</b> · ${p.exports} export(s)` +
+    (p.tia ? ` · PLC <b>${esc(p.tia.softwarePath)}</b>` : '') + `</div>` +
+    `<div class="meta" title="export root">${esc(p.export_root || '')}</div>` +
+    (p.project_path ? `<div class="meta" title="TIA project">${esc(p.project_path)}</div>` : '') +
+    `<div class="edits">${edits.length ? edits.map(([s, n]) => `<span class="state s-${esc(s)}">${esc(s)} ${n}</span>`).join('') : 'no edits'}</div>` +
+    `<div class="row"><a href="?project=${enc(p.name)}"><button class="primary">Open</button></a>` +
+    `<button data-snap="${esc(p.name)}" ${running ? 'disabled' : ''} title="export the whole PLC from TIA Portal through the Reader">New snapshot</button>` +
+    `<button data-remove="${esc(p.name)}" ${running ? 'disabled' : ''} title="remove from the list (exports and edits stay on disk)">Remove</button></div>` +
+    jobHtml(p.job, p.name) + '</div>';
+}
+function addHtml() {
+  const t = tiaStatus.tia === 'attached' ? `TIA Portal has <b>${esc(tiaStatus.project || '?')}</b> open.` :
+    tiaStatus.tia === 'not running' ? 'TIA Portal is not running — open the project in TIA Portal first.' :
+    tiaStatus.tia === 'choose' ? 'More TIA Portal instances are running — choose one in the status bar.' : 'TIA status not checked yet — press Refresh.';
+  return `<div class="add">
+  <div class="opt"><div><b>Export folder</b><span>a Reader export already on disk</span></div>
+    <div><div class="line"><input type="text" id="add-path" placeholder="folder: &lt;project&gt; with &lt;YYYYMMDD-HHMMSS&gt; subfolders, or an export root">` +
+    `<button id="add-exports">Add</button></div></div></div>
+  <div class="opt"><div><b>Connect to open TIA project</b><span>snapshot of the project open in TIA Portal</span></div>
+    <div><div class="line"><button id="add-tia" class="primary">Connect and take snapshot</button></div><div class="hint">${t}</div></div></div>
+  <div class="opt"><div><b>Open .ap21 file</b><span>TIA Portal opens it, then a snapshot</span></div>
+    <div><div class="line"><input type="text" id="add-ap21" placeholder="full path of the .ap21 project (or .als21 session)">` +
+    `<label><input type="checkbox" id="add-close"> close the project afterwards</label><button id="add-open">Open and take snapshot</button></div>` +
+    `<div class="note">⚠ This may start TIA Portal and take several minutes.</div></div></div>
+  <div id="add-job"></div><div id="add-error"></div>
+</div>`;
+}
+let homeJob = null;
+async function showHome() {
+  document.querySelector('.main').classList.add('home');
+  $('info').textContent = 'projects';
+  const r = await api('/api/projects');
+  let h = '<div class="home"><h1>Projects</h1>';
+  h += r.projects.length ? `<div class="cards">${r.projects.map(cardHtml).join('')}</div>` :
+    `<div class="empty-state"><b>No projects yet.</b> Add a Reader export folder that is already on disk, connect to the project ` +
+    `open in TIA Portal, or open an .ap21 file. Each project keeps a snapshot (a Reader export) the edits are drawn from.</div>`;
+  h += `<h2>Add project</h2>${addHtml()}</div>`;
+  $('content').innerHTML = h;
+  const job = homeJob || (r.running_job && !r.running_job.project ? r.running_job : null);
+  if (job) $('add-job').innerHTML = jobHtml(job, '');
+  const fail = e => { $('add-error').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`; };
+  $('add-exports').onclick = () => apiJson('POST', '/api/projects', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
+  $('add-tia').onclick = () => startJob('/api/projects', {source: 'tia'}).catch(fail);
+  $('add-open').onclick = () => startJob('/api/projects', {source: 'ap21', path: $('add-ap21').value, close: $('add-close').checked}).catch(fail);
+  for (const b of document.querySelectorAll('[data-snap]')) b.onclick = () => startJob(`/api/projects/${enc(b.dataset.snap)}/snapshot`, {}).catch(fail);
+  for (const b of document.querySelectorAll('[data-remove]')) b.onclick = () => {
+    if (confirm(`Remove ${b.dataset.remove} from the list? Its exports and edits stay on disk.`))
+      apiJson('DELETE', `/api/projects/${enc(b.dataset.remove)}`).then(showHome, fail);
+  };
+  for (const b of document.querySelectorAll('[data-sp]')) b.onclick = () => (b.dataset.retry
+    ? startJob(`/api/projects/${enc(b.dataset.retry)}/snapshot`, {softwarePath: b.dataset.sp})
+    : startJob('/api/projects', Object.assign({source: 'tia'}, homeJob && homeJob.request, {softwarePath: b.dataset.sp}))).catch(fail);
+  const running = [...r.projects.map(p => p.job), job].find(j => j && j.state === 'running');
+  if (running) setTimeout(() => pollJob(running.id), 700);
+}
+async function startJob(path, body) {
+  const r = await apiJson('POST', path, body);
+  if (path === '/api/projects') homeJob = Object.assign(r.job, {request: body});
+  await showHome();
+}
+async function pollJob(id) {
+  const j = await api(`/api/jobs/${enc(id)}`);
+  if (homeJob && homeJob.id === id) homeJob = Object.assign(j, {request: homeJob.request});
+  if (j.state === 'running') {
+    const box = document.querySelector(`[data-job="${CSS.escape(id)}"]`);
+    if (box) box.outerHTML = jobHtml(j, j.project || '');
+    setTimeout(() => pollJob(id), 700);
+  } else await showHome();
+}
+
 async function start() {
   if (q.get('screenshot') === '1') document.body.classList.add('screenshot');
   const project = q.get('project'), block = q.get('block');
+  const status = loadStatus(false);
   if (q.get('edit') && q.get('edit_mode') === '1') await editor(q.get('edit'));
   else if (q.get('edit')) await showEdit(q.get('edit'));
   else if (project && block) await showNetwork(project, block);
-  else { $('nw').innerHTML = await loadTree(null); await showExports(); }
+  else if (project) { $('nw').innerHTML = await loadTree(null); await showExports(project); }
+  else {                                     // home: shown at once, the TIA check (autoconnect) re-renders it
+    statusChanged = showHome;
+    await status;
+    await showHome();
+    if (tiaStatus.autoconnect && q.get('screenshot') !== '1') { await loadStatus(true); await showHome(); }
+  }
+  await status;
   document.body.dataset.done = '1';
 }
 start().catch(e => {
