@@ -8,20 +8,89 @@ for screenshots.
 ```
 python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
 ```
-- `--export-root` = a folder laid out as `<project>\<timestamp YYYYMMDD-HHMMSS>\<PLC>\Blocks\…\<block>.s7dcl`.
-  A block is looked up by file name in the **newest** export that contains it (partial exports are fine).
-- `--data` (required) = folder with the change data, `<data>\<project>\state.json` (see [Changes and states](#changes-and-states)).
+- `--export-root` = the **default** export root, a folder laid out as
+  `<project>\<timestamp YYYYMMDD-HHMMSS>\<PLC>\Blocks\…\<block>.s7dcl`. A block is looked up by file name in the
+  **newest** export that contains it (partial exports are fine). Projects found here are added to the project
+  registry at start; other projects can have their own export root (see [Home, projects and TIA](#home-projects-and-tia)).
+- `--data` (required) = folder with the change data, `<data>\<project>\state.json` (see [Changes and states](#changes-and-states))
+  and the project registry `<data>\projects.json`.
 - On the bundled samples: `--export-root tests\samples`.
-- `--mcp-json`, `--writer-cmd`, `--reader-cmd`, `--mcp-timeout` configure the optional Upload and Check (see [Upload and Check](#upload-and-check)).
-- The server listens on `127.0.0.1` only.
+- `--mcp-json`, `--writer-cmd`, `--reader-cmd`, `--mcp-timeout` configure the Writer and the Reader (TIA status,
+  snapshots, Upload and Check; see [Upload and Check](#upload-and-check)).
+- `--no-autoconnect` = do not check TIA Portal at start and when the home page opens (only the Refresh button does).
+- The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403.
 
 ## Page
 `http://localhost:8765/?project=<project>&block=<block>&nw=<n>[&screenshot=1][&theme=light|dark]`
-- without `project`/`block` = block picker over all exports,
+- without parameters = the home page (projects, Add project, see [Home, projects and TIA](#home-projects-and-tia)),
+- `?project=<project>` without `block` = block picker over that project's exports,
+- every page has the status bar (TIA, Writer, Reader, AI, Refresh) and a Home link in the header,
 - left: the block's networks (number + title, language when not LAD); right: the network drawn as in TIA Portal,
 - `?edit=<id>` opens a change, `?edit=<id>&edit_mode=1` opens it in the editor; `screenshot=1` marks the page for
   a screenshot; `theme` forces the theme (otherwise the system theme, default dark); `lad=1` shows an FBD network
   as LAD (see [Show as LAD](#show-as-lad)).
+
+## Home, projects and TIA
+The editor sits between an AI assistant and TIA Portal: with TIA Portal open, it attaches to the open project by
+itself, shows the connection state and keeps a copy of the project (a **snapshot** = a Reader export) that edits are
+drawn from. Without TIA Portal it is a viewer of exports already on disk.
+
+![Home page](../tests/screenshots/home_tia_attached.png)
+
+**Home page** (`/`): one card per project (name, source, last snapshot, number of exports, PLC, edits by state,
+Open / New snapshot / Remove, the progress of the last snapshot job) and **Add project**:
+- *Export folder* — a folder on disk: a project folder (`<project>\<YYYYMMDD-HHMMSS>\…`) or an export root with
+  project folders (each one is added);
+- *Connect to open TIA project* — snapshot of the project open in TIA Portal (does not start TIA);
+- *Open .ap21 file* — the Writer's `OpenTiaProject` opens the project (it **may start TIA Portal and take minutes**),
+  then a snapshot; optionally the project is closed afterwards (`CloseProject`, without saving).
+
+Without projects the page shows a short hint. Screenshots: `tests\screenshots\home_empty.png`, `home_projects.png`,
+`home_tia_attached.png`, `snapshot_progress.png`.
+
+**Project registry** `<data>\projects.json`:
+`[{name, source: "exports"|"tia"|"ap21", export_root, project_path?, tia: {softwarePath, plcName}?, last_snapshot?, added}]`.
+The project name is the key (it is also the folder name under the export root and in `<data>`). Projects in the
+default `--export-root` are added at start with `source: "exports"`; a removed one comes back at the next start if it
+is still there. `tia` from the registry is used by Upload/Check when `state.json` has no `tia` (state.json is not changed).
+
+| Method | Path | Body → answer |
+|---|---|---|
+| GET | `/api/projects` | `{projects: [registry entry + {exports, latest_export, edits: {state: count}, job}], default_export_root, running_job}` |
+| POST | `/api/projects` | `{source: "exports", path}` → 201 `{projects: [entry]}`; `{source: "tia", portalId?, softwarePath?}` or `{source: "ap21", path, close?, softwarePath?}` → 202 `{job}` |
+| DELETE | `/api/projects/<name>` | removes the entry only (exports and edits stay on disk) |
+| POST | `/api/projects/<name>/snapshot` | `{portalId?, softwarePath?, close?}` → 202 `{job}` |
+| GET | `/api/jobs`, `/api/jobs/<id>` | jobs of this server run: `{id, kind, project, state: running|done|error, steps: [{step, ok, message}], chunks, exported, plc, plc_choices?, portal_choices?, error, result: {project, export_ts, export_folder}}` |
+| GET | `/api/tia/status[?refresh=1][&portalId=]` | cached status; `refresh=1` checks again, `portalId` chooses an instance |
+
+**TIA status** (`GET /api/tia/status`): `{tia: "unknown"|"not running"|"running"|"attached"|"choose", project,
+project_path, portalId, instances: [{portalId, project, path, attached}], writer, reader: "configured"|"missing"|"error: …",
+reader_export_root, ai: "no client", checked, autoconnect, chosen, time, busy?}`.
+1. Writer `GetPortals {}` — no instance → `not running`, **no `Connect`** (without `portalId` it would start TIA);
+2. one instance (or the one chosen with `portalId`) → `Connect {portalId}` + `GetProject {portalId}` → `attached`;
+3. more instances → `choose` (the status bar shows a picker);
+4. when attached, Reader `get_project_status {}` checks the Reader.
+
+Every tool call of the check has a 30 s timeout; a Writer that cannot start or fails gives `writer: "error: …"`, never
+a crash. The check runs once in the background at start and when the home page opens, unless `--no-autoconnect`;
+while a job holds TIA the cached status is returned with `busy: true`. `ai` is a placeholder for the editor's own MCP server.
+
+**Snapshot** (a background job; one job at a time, the same lock as Upload/Check → 409 when busy):
+1. Writer: `OpenTiaProject {path, portalId?}` for an `.ap21` project, otherwise `Connect {portalId}` (the attached
+   instance from the status, or the only one from `GetPortals`; not running / several instances = an error);
+2. `GetProject` (project name and path), PLC software from `OpenTiaProject` / `GetProjectTree` / `GetDevices`
+   (the first dict entries with `softwarePath`; one PLC is taken, more = the job ends with `plc_choices` and the UI
+   offers a button per PLC; `softwarePath` in the body chooses);
+3. Reader: `export_to_folder {include: [blocks, types, tagTables], formats: [documents], plcName, timeBudgetSeconds: 120,
+   projectPath?}` for the **whole PLC**, repeated with `runId` + `offset` = `nextOffset` while `complete` is false;
+4. the export folder is taken from the answer (a path with a `<project>\<YYYYMMDD-HHMMSS>` part), the project is
+   registered or updated (`export_root`, `last_snapshot`, `tia`); `.ap21` + `close` → `CloseProject`.
+
+⚠ **The Reader exports into its own export root** — the `--export-root` in its command (or `TIA_MCP_EXPORT_ROOT`),
+not into a folder given per call — and names the project folder after the TIA project. A new project from TIA is
+therefore registered with the Reader's export root. A *New snapshot* of a project whose export root (or name) differs
+from where the Reader writes ends with an error that names both folders: point the editor's `--export-root` (or the
+project) to the Reader's export root. The status bar shows the Reader's export root in the Reader tooltip.
 
 ## API — browsing the export
 | GET | Returns |
@@ -308,8 +377,11 @@ with the current one highlighted.
 The "TIA project" = the `--state` folder (default `%TEMP%\tiac_fake_tia`): the Writer exports the block from there
 (before the first import from `--sample`, default the `20261012-120000` sample blocks), an import writes the documents
 into `--state` and a line into `<state>\imports.jsonl`; the Reader `--export-root <root> --project <p>` creates a new
-folder `<root>\<p>\<YYYYMMDD-HHMMSS>\<PLC>\Blocks\…` with the block from `--state`. `--multi-instances` = Connect
-returns an error, `--slow S` = delayed responses.
+folder `<root>\<p>\<YYYYMMDD-HHMMSS>\<PLC>\Blocks\…` with the block from `--state`. `--multi-instances` = two TIA
+instances (Connect without `portalId` returns an error), `--no-portal` = TIA Portal is not running, `--slow S` =
+delayed responses. The TIA side (`GetPortals`, `Connect`, `GetProject`, `GetDevices`, `GetProjectTree`,
+`GetSoftwareTree`, `GetState`, `OpenTiaProject`, `CloseProject`, Reader `get_project_status` and `export_to_folder`
+of the whole PLC in 2 chunks) answers with made-up JSON shapes; every call is logged to `<state>\calls.jsonl`.
 ```
 rem demo: export root = a COPY of the samples (the fake Reader adds export folders to it)
 robocopy tests\samples data\export-demo /E
@@ -340,6 +412,10 @@ and replacing a network with itself gives a block the parser reads the same (FB_
   `Q => NOT x`, an empty FBD rung without an operand;
 - F-blocks have no Upload (409 + the `S7_Safety` safeguard in the export) — nothing here changes the F-signature;
 - `Connect` without `portalId` may **start** TIA Portal when no instance is running (per the Writer's tool description).
+- home page / snapshots: the answer shapes of `GetPortals`, `GetProject`, `GetProjectTree`, `GetDevices`,
+  `OpenTiaProject`, `get_project_status` and of a whole-PLC `export_to_folder` are only guessed (parsed tolerantly:
+  `portalId`, `projectPath`/`path`/`name`, `softwarePath` anywhere in the JSON); how long `OpenTiaProject` takes when it
+  has to start TIA (timeout 30 min); that the Reader's folder name equals the TIA project name.
 
 ## Reading state and taking a screenshot (scripts, AI assistants)
 ```

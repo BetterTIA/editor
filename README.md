@@ -46,7 +46,25 @@ Then open `http://localhost:8765/`. The server listens on `127.0.0.1` only.
 - `--export-root` is a folder laid out as `<project>\<timestamp>\<PLC>\Blocks\…\<block>.s7dcl`, which is
   what the reader's `export_to_folder` produces. `tests\samples` holds a made-up sample project.
 - `--data` is where the changes are stored (`<data>\<project>\state.json`).
-- `--mcp-json`, `--writer-cmd`, `--reader-cmd` configure the optional Upload and Check.
+- `--mcp-json`, `--writer-cmd`, `--reader-cmd` configure the writer and the reader (TIA status, snapshots, Upload, Check).
+- `--no-autoconnect` stops the automatic TIA check at start and on the home page.
+
+## How it connects to TIA
+
+The home page (`/`) lists the projects and lets you add one from an export folder on disk, from the project open in
+TIA Portal, or from an `.ap21` file. The status bar on every page shows TIA (`not running` / `running: <project>` /
+`attached`), the writer, the reader and the AI client. At start (and when the home page opens) the editor asks the
+writer for the running TIA Portal instances (`GetPortals`); with exactly one it attaches to it (`Connect` with its
+`portalId`) and reads the open project. It never starts TIA Portal for that check; only *Open .ap21 file* may start it.
+
+*New snapshot* exports the whole PLC through the reader (`export_to_folder`, in chunks) as a background job and
+registers it as the project's newest export, which the networks are drawn from.
+
+> The reader writes exports into **its own** export root (its `--export-root` option), not into a folder chosen per
+> call. Run the editor with the same export root, or add the reader's folder as a project; the editor reports a
+> mismatch instead of guessing.
+
+![Home page](tests/screenshots/home_tia_attached.png)
 
 ## Tests
 
