@@ -424,9 +424,26 @@ def _new_change(root, project, block, body):
         raise state.StateError('changes only for LAD or FBD networks (this one is %s)' % (net['language'] or '?'), 400)
     else:
         language = 'LAD'
-    return {'block': net['file'], 'nw': net['nw'], 'title': net['title'], 'language': net['language'],
-            'after': _after_model(body.get('after'), language), 'f_net': net.get('f'),
-            'before': dict(_model(net), export_ts=net['ts'])}
+    u = {'block': net['file'], 'nw': net['nw'], 'title': net['title'], 'comment_before': net['comment'] or '',
+         'language': net['language'], 'f_net': net.get('f'), 'before': dict(_model(net), export_ts=net['ts'])}
+    _texts_after(u, body)
+    if body.get('after') is None and ('title_after' in u or 'comment_after' in u):    # only the title / comment
+        u['after'] = _after_model(dict(_model(net), language=language), language)
+    else:
+        u['after'] = _after_model(body.get('after'), language)
+    return u
+
+
+def _texts_after(u, body):
+    """title_after / comment_after of a network edit (E4): a new title / comment; '' or equal to the export = unchanged."""
+    for k, old, what, n in (('title_after', 'title', 'title', 300), ('comment_after', 'comment_before', 'comment', 2000)):
+        if k not in body or body[k] is None:
+            continue
+        v = _one_line(body[k], what, n=n)
+        if v and v != (u.get(old) or ''):
+            u[k] = v
+        else:
+            u.pop(k, None)
 
 
 def api_edit_create(root, data, body):
@@ -541,6 +558,9 @@ def api_edit_detail(data, uid, width=0, root=None):
         res = _diff_drawing(_before(u), u['after'], width)
         if root:
             res['warnings'] += _operand_warnings(root, data, u)
+        if 'title_after' in u or 'comment_after' in u:
+            res['texts'] = {k: [u.get(old) or '', u.get(k, u.get(old) or '')]
+                            for k, old in (('title_after', 'title'), ('comment_after', 'comment_before')) if k in u}
     res['tia'] = s.get('tia')
     k = u.get('checks') or []
     if state.STATES.index(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
@@ -671,6 +691,8 @@ def api_check_export(root, data, uid, body):
     t, b = _load(root, u['project'], u['block'], str(body['export_ts']) if body.get('export_ts') else None)
     notes = []
     cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
+    if u.get('title_after'):                          # after writing the network carries the new title
+        cand = [n for n in b['networks'] if n['title'] == u['title_after']] or cand
     if u.get('kind') == 'new_network':                # found only by its title (and language); its number is a note
         cand = [n for n in cand if n['language'] == u['language']] or cand
         n = next((x for x in cand if x['nw'] == u['nw']), cand[0] if cand else None)
@@ -682,7 +704,7 @@ def api_check_export(root, data, uid, body):
     elif cand:
         n = next((x for x in cand if x['nw'] == u['nw']), cand[0])
         if n['nw'] != u['nw']:
-            notes.append('the network moved: NW %d → NW %d (by title "%s")' % (u['nw'], n['nw'], u['title']))
+            notes.append('the network moved: NW %d → NW %d (by title "%s")' % (u['nw'], n['nw'], n['title']))
         if len(cand) > 1:
             notes.append('the title occurs %d× in the block, compared NW %d' % (len(cand), n['nw']))
     else:
@@ -702,6 +724,11 @@ def api_check_export(root, data, uid, body):
         match, diffs = False, ['NW %d in the export is in %s' % (n['nw'], n['language'] or '?')]
     else:
         match, diffs = diff.content_match(u['after'], n)
+    if n is not None:
+        for k, have, what in (('title_after', n['title'], 'title'), ('comment_after', n.get('comment') or '', 'comment')):
+            if k in u and have != u[k]:
+                match = False
+                diffs = diffs + ['%s in the export "%s", the proposal "%s"' % (what, have, u[k])]
     if t == u['before'].get('export_ts'):
         notes.append('note: the export is the same as before the change')
     note = ('export = proposal' if match else 'MISMATCH: %s' % '; '.join(diffs)) + ''.join(' · ' + x for x in notes)
@@ -724,15 +751,18 @@ def api_edit_after(data, uid, body):
                 u['section'] = _section(body['section'])
             if body.get('members') is not None:
                 u['members'] = _members(body['members'], [m['name'] for v in u['before']['interface'].values() for m in v])
-        elif body.get('after') is not None or u.get('kind') == 'network':
+        elif body.get('after') is not None or u.get('kind') == 'network' and not (
+                body.get('title_after') is not None or body.get('comment_after') is not None):
             if body.get('after') is None:
-                raise state.StateError('after: the network model is required', 400)
+                raise state.StateError('after: the network model is required (or title_after / comment_after)', 400)
             after = _after_model(body['after'], 'FBD' if fbd.is_fbd(body['after']) else 'LAD')
             if body['after'].get('layout') and not fbd.is_fbd(after):
                 after['layout'] = _layout(after)[0]          # the client's layout is not trusted here
             if fbd.is_fbd(after) != fbd.is_fbd(u['after']):
                 raise state.StateError('the language of the proposal (LAD/FBD) must stay the same', 400)
             u['after'] = after
+        if u.get('kind') == 'network':
+            _texts_after(u, body)
         if u.get('kind') == 'new_network':
             if body.get('title') is not None:
                 u['title'] = _one_line(body['title'], 'title', True)
@@ -818,6 +848,11 @@ def _network_texts(u, file):
     """(network number, title, comment) to set through SetNetworkText after the import, or None."""
     if u.get('kind') == 'new_network':
         return u['after_nw'] + 1, u['title'], u.get('comment') or None
+    if 'title_after' in u or 'comment_after' in u:   # the network as _replace_in_file found it (by title, else number)
+        nets = s7dcl.load_block(file)['networks']
+        n = next((x for x in nets if u.get('title') and x['title'] == u['title'] and x['nw'] == u['nw']), None) or \
+            next((x for x in nets if u.get('title') and x['title'] == u['title']), None) or nets[u['nw'] - 1]
+        return n['nw'], u.get('title_after'), u.get('comment_after')
     return None
 
 

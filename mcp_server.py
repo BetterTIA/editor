@@ -141,8 +141,8 @@ def where(u):
     return 'NW %s: %s' % (u.get('nw'), u.get('title') or '')
 
 
-KIND_FIELDS = {'network': ('nw', 'after'), 'interface': ('section', 'members'), 'new_network': ('after_nw', 'title', 'after')}
-OPTIONAL = ('comment', 'language', 'title_after', 'comment_after')
+KIND_FIELDS = {'network': ('nw',), 'interface': ('section', 'members'), 'new_network': ('after_nw', 'title', 'after')}
+OPTIONAL = ('after', 'comment', 'language', 'title_after', 'comment_after')
 
 
 def propose_edit(e, a, client=None):
@@ -242,6 +242,8 @@ TS = {'type': 'string', 'description': 'export timestamp YYYYMMDD-HHMMSS (defaul
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
 KIND = {'type': 'string', 'enum': ['network', 'interface', 'new_network'],
         'description': 'what the edit changes (default network)'}
+TITLE_AFTER = {'type': 'string', 'description': 'network edit: the new network title ("" = keep the current one)'}
+COMMENT_AFTER = {'type': 'string', 'description': 'network edit: the new network comment ("" = keep the current one)'}
 SECTION = {'type': 'string', 'enum': ['Input', 'Output', 'InOut', 'Static', 'Temp', 'Constant'],
            'description': 'interface section the members are added to'}
 MEMBERS = {'type': 'array', 'description': 'interface members to add (adding only; changing or removing is not offered)',
@@ -260,7 +262,8 @@ TOOLS = [
      _schema({'project': S, 'state': {'type': 'string', 'enum': STATES}}), list_edits),
     ('get_edit', 'One edit: before/after models, diff marks, rule errors, checks, writes, history and the TIA steps.',
      _schema({'id': S}, ['id']), get_edit),
-    ('propose_edit', 'Create a new edit in state Proposal. kind "network" (default): an "after" model of network nw. '
+    ('propose_edit', 'Create a new edit in state Proposal. kind "network" (default): an "after" model of network nw and/or its new title / comment '
+                     '(title_after, comment_after). '
                      'kind "interface": add members to one section of the block interface (section + members). '
                      'kind "new_network": a new network after NW after_nw (0 = at the start) with a unique title, '
                      'optional comment and language (LAD/FBD, default the block language) and its "after" model. '
@@ -273,13 +276,15 @@ TOOLS = [
               'title': {'type': 'string', 'description': 'new_network: title (unique in the block)'},
               'comment': {'type': 'string', 'description': 'new_network: network comment'},
               'language': {'type': 'string', 'enum': ['LAD', 'FBD'], 'description': 'new_network: default the block language'},
+              'title_after': TITLE_AFTER, 'comment_after': COMMENT_AFTER,
               'by': {'type': 'string', 'description': 'author shown in the history (default: the client name)'}},
              ['project', 'round', 'block']), propose_edit),
     ('update_edit', 'Change a Proposal: the "after" model of a network edit, the members/section of an interface edit, '
                     'and the note.',
      _schema({'id': S, 'after': MODEL, 'note': S, 'section': SECTION, 'members': MEMBERS,
               'title': {'type': 'string', 'description': 'new_network: title'},
-              'comment': {'type': 'string', 'description': 'new_network: comment'}}, ['id']), update_edit),
+              'comment': {'type': 'string', 'description': 'new_network: comment'},
+              'title_after': TITLE_AFTER, 'comment_after': COMMENT_AFTER}, ['id']), update_edit),
     ('run_check', 'Compare an export (newest or given) with the edit\'s "after" model and record the check.',
      _schema({'id': S, 'export_ts': TS}, ['id']), run_check),
     ('get_procedure', 'Step-by-step instructions for making the edit by hand in TIA Portal (markdown).',

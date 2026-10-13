@@ -48,7 +48,7 @@ def where(u):
         return 'Interface: +%d %s' % (len(u.get('members') or []), u.get('section'))
     if u.get('kind') == 'new_network':
         return 'NW %s+ (new): %s' % (u.get('after_nw'), u.get('title') or '(no title)')
-    return 'NW %s: %s' % (u['nw'], u.get('title') or '(no title)')
+    return 'NW %s: %s%s' % (u['nw'], u.get('title') or '(no title)', ' → %s' % u['title_after'] if u.get('title_after') else '')
 
 
 def header(u):
@@ -272,6 +272,10 @@ def procedure(u):
     else:
         inner = steps_fbd(u) if fbd.is_fbd(u['after']) else steps_lad(u)
         steps = ['Open the block %s and find network **NW %s: %s**.' % (_c(block_name(u)), u['nw'], u.get('title') or '')]
+        if u.get('title_after'):
+            inner.append('Rename the network title to **%s** (click the title line of the network and type).' % u['title_after'])
+        if u.get('comment_after'):
+            inner.append('Change the network comment to “%s” (the comment line below the title).' % u['comment_after'])
     steps += inner or ['The proposal does not differ from the export — nothing to change in TIA.']
     if u.get('f') and inner:
         steps.append('Compile the safety program and check the F-signature; safety changes are protected by the F-CPU password / '

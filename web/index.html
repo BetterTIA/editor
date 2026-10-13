@@ -224,6 +224,9 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 .iface td { padding: 2px 6px; border-bottom: 1px dashed var(--edge); overflow-wrap: anywhere; }
 .iface tr.added td { color: var(--added); font-weight: 700; background: color-mix(in srgb, var(--added) 8%, transparent); }
 .iface .other { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.texts > div { padding: 2px 0; } .texts .old { color: var(--deleted); text-decoration: line-through; } .texts .new { color: var(--added); }
+.texts .hint { display: inline-block; min-width: 70px; }
+.tools input.wide { width: 260px; }
 /* ---------- edit tree ---------- */
 .tree { padding-bottom: var(--s2); border-bottom: 1px solid var(--edge); }
 .tree .u0, .tree .u1, .tree .u2 { padding: 3px var(--s3); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -573,7 +576,7 @@ function treeHtml(st, activeId) {
 function editWhere(u) {
   if (u.kind === 'interface') return `Interface: +${(u.members || []).length} ${u.section}`;
   if (u.kind === 'new_network') return `NW ${u.after_nw}+ (new): ${u.title || ''}`;
-  return `NW ${u.nw}: ${u.title || ''}`;
+  return `NW ${u.nw}: ${u.title || ''}${u.title_after ? ' → ' + u.title_after : ''}`;
 }
 const treeKey = u => u.kind === 'interface' || u.kind === 'new_network' ? u.kind + ':' + u.id : 'nw:' + u.nw;
 const treeOrder = u => u.kind === 'interface' ? -1 : u.kind === 'new_network' ? u.after_nw + 0.5 : u.nw;
@@ -702,6 +705,9 @@ async function showEdit(uid, error) {
     (d.errors.length ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.length})</b> — open it in the editor and fix:<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
     d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
+    (d.texts ? `<details class="panel" open><summary>Network text <span class="sum">title / comment, set after the import</span></summary><div class="body texts">` +
+      Object.entries(d.texts).map(([k, [a, b]]) => `<div><span class="hint">${k === 'title_after' ? 'Title' : 'Comment'}</span> ` +
+        `<span class="old">${esc(a || '(none)')}</span> → <b class="new">${esc(b)}</b></div>`).join('') + `</div></details>` : '') +
     (d.interface ? `<details class="panel" open><summary>Interface <span class="sum">section ${esc(d.interface.section)}: before / after</span>` +
       `<span class="legend"><span class="p">added</span></span></summary><div class="body">${interfaceHtml(d.interface)}</div></details>`
     : `<details class="panel" open><summary>Model <span class="sum">${u.kind === 'new_network' ? `new ${esc(u.language || '')} network after NW ${u.after_nw}` : '"after" against the export'}</span>` +
@@ -908,7 +914,10 @@ async function editor(uid) {
            `<button id="ed-neg" title="Create a ones complement (Ctrl+Shift+4 in TIA)">Negate input</button>`
          : `<button id="ed-branch" title="pick two places in one rung; element = the one selected in the palette, otherwise an NO contact">Branch</button>`) +
     `<button id="ed-delete" title="Delete">Delete</button><span class="sep"></span>` +
-    `<button id="ed-save" class="hl">Save proposal</button><button id="ed-close">Close editor</button></div></div>` +
+    `<button id="ed-save" class="hl">Save proposal</button><button id="ed-close">Close editor</button></div>` +
+    `<div class="tools" style="margin:0"><label>Title <input id="ed-title" class="wide" value="${esc(u.kind === 'new_network' ? u.title : u.title_after || u.title || '')}"></label>` +
+    `<label>Comment <input id="ed-comment" class="wide" value="${esc(u.kind === 'new_network' ? u.comment || '' : u.comment_after || u.comment_before || '')}"></label>` +
+    `<span class="hint">set after the import (Writer SetNetworkText)</span></div></div>` +
     `<div class="mode" id="ed-mode"></div>` +
     `<div class="canvas" id="ed-canvas"></div>` +
     `<div class="legend" style="margin-top:var(--s2)">Against the export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span><span class="e">rule error</span></div>` +
@@ -927,6 +936,7 @@ async function editor(uid) {
   }
   $('ed-delete').onclick = () => { if (ed.select) deleteSelected(); };
   $('ed-save').onclick = save;
+  for (const i of ['ed-title', 'ed-comment']) $(i).oninput = () => { ed.changed = true; };
   $('ed-close').onclick = () => {
     if (!ed.changed || confirm('Unsaved changes will be lost. Close?')) location.href = `?edit=${enc(u.id)}`;
   };
@@ -974,7 +984,9 @@ async function deleteSelected() {
 }
 async function save() {
   try {
-    const r = await apiJson('POST', `/api/edits/${enc(ed.u.id)}/after`, {after: ed.after});
+    const texts = ed.u.kind === 'new_network' ? {title: $('ed-title').value, comment: $('ed-comment').value}
+                                              : {title_after: $('ed-title').value, comment_after: $('ed-comment').value};
+    const r = await apiJson('POST', `/api/edits/${enc(ed.u.id)}/after`, Object.assign({after: ed.after}, texts));
     ed.changed = false;
     mode(`Saved ${new Date().toLocaleTimeString()}` + (r.errors.length ? ` — ${errorCount(r.errors.length, LANG())} (flagged in the edit header)` : ' — no errors'), true);
   } catch (e) { mode('⚠ Save failed: ' + e.message); }
