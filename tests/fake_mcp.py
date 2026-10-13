@@ -1,13 +1,17 @@
 """Fake TIAC_Writer / TIAC_Reader (MCP over stdio) for tests and demos — it never talks to TIA Portal.
 
-python tests\\fake_mcp.py writer [--state DIR] [--sample DIR] [--multi-instances] [--slow S]
-python tests\\fake_mcp.py reader --export-root DIR --project Demo_Line [--state DIR] [--sample DIR]
+python tests\\fake_mcp.py writer [--state DIR] [--sample DIR] [--multi-instances | --no-portal] [--slow S]
+python tests\\fake_mcp.py reader --export-root DIR --project Demo_Line [--state DIR] [--sample DIR] [--no-portal]
 
 "TIA project" = the --state folder (default %TEMP%\\tiac_fake_tia): a block appears there after its first import;
 until then it is read from --sample (default: the Demo_Line sample 20261012-120000\\PLC_1\\Blocks).
 Writer: Connect, ResolveObjectPath, ExportBlocksAsDocuments (copies .s7dcl/.s7res to exportPath), PreviewImport,
 ImportFromDocuments (copies the documents to --state and appends a line to <state>\\imports.jsonl).
-Reader: export_to_folder — a new folder <export-root>\\<project>\\<YYYYMMDD-HHMMSS>\\<PLC>\\Blocks\\… with the block
+Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
+--multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
+CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
+Reader: get_project_status; export_to_folder without pathPrefixes = the whole PLC from the sample in 2 chunks
+(runId + offset=nextOffset). With pathPrefixes — a new folder <export-root>\\<project>\\<YYYYMMDD-HHMMSS>\\<PLC>\\Blocks\\… with the block
 from --state (or from the sample), answers JSON {exportFolder, complete, manifest}.
 """
 import argparse
@@ -41,11 +45,48 @@ def copy_tree(z, dst, block):
             shutil.copyfile(os.path.join(z, block + p), os.path.join(dst, block + p))
 
 
+PROJECT_PATH = 'C:\\TIA\\Demo_Line\\Demo_Line.ap21'
+DEVICES = [{'name': 'PLC_1', 'type': 'CPU 1516F-3 PN/DP', 'kind': 'PlcSoftware', 'softwarePath': 'PLC_1'},
+           {'name': 'HMI_1', 'type': 'TP1200 Comfort', 'kind': 'HmiSoftware', 'softwarePath': 'HMI_1'}]
+
+
+def portals(a):
+    if a.no_portal:
+        return []
+    p = [{'portalId': 4711, 'projectPath': PROJECT_PATH, 'isConnected': False}]
+    if a.multi_instances:
+        p.append({'portalId': 4712, 'projectPath': 'C:\\TIA\\Other_Line\\Other_Line.ap21', 'isConnected': False})
+    return p
+
+
 def writer(a, nm, arg):
+    if nm == 'GetPortals':
+        return json.dumps({'portalId': '', 'portals': portals(a)})
     if nm == 'Connect':
-        if a.multi_instances:
+        if a.multi_instances and not arg.get('portalId'):
             raise ValueError('More than one TIA Portal instance is running — pass portalId')
-        return 'Connected to TIA Portal V21 (fake)'
+        if a.no_portal and not arg.get('portalId'):
+            return 'Started a new TIA Portal V21 instance (fake)'
+        if arg.get('portalId') and arg['portalId'] not in [x['portalId'] for x in portals(a)]:
+            raise ValueError('no TIA Portal instance with portalId %s' % arg['portalId'])
+        return 'Connected to TIA Portal V21 (fake), portalId %s' % (arg.get('portalId') or 4711)
+    if nm == 'GetProject':
+        return json.dumps({'projects': [{'name': 'Demo_Line', 'path': PROJECT_PATH, 'kind': 'project'}]})
+    if nm in ('GetDevices', 'GetProjectTree'):
+        return json.dumps({'devices': DEVICES})
+    if nm == 'GetState':
+        return json.dumps({'portalId': 4711, 'connected': True, 'project': PROJECT_PATH, 'writeMode': True})
+    if nm == 'OpenTiaProject':
+        if not str(arg.get('path', '')).lower().endswith(('.ap21', '.als21')):
+            raise ValueError('not a TIA Portal V21 project: %s' % arg.get('path'))
+        return json.dumps({'portalId': 4711, 'project': {'name': os.path.splitext(os.path.basename(arg['path']))[0],
+                                                          'path': arg['path']},
+                           'devices': DEVICES, 'softwarePaths': ['PLC_1']})
+    if nm == 'CloseProject':
+        return 'Project closed (fake)'
+    if nm == 'GetSoftwareTree':
+        return json.dumps({'softwarePath': arg['softwarePath'], 'blocks': sorted(
+            os.path.basename(x)[:-6] for x in glob.glob(os.path.join(a.sample, '**', '*.s7dcl'), recursive=True))})
     if 'softwarePath' not in arg:
         raise ValueError('softwarePath is required')
     if nm == 'ResolveObjectPath':
@@ -68,20 +109,59 @@ def writer(a, nm, arg):
     raise ValueError('unknown tool %s for the fake Writer' % nm)
 
 
+RUNS = {}
+
+
+def new_folder(a):
+    t = datetime.now()
+    while True:                                          # unique folder timestamp
+        folder = os.path.join(a.export_root, a.project, t.strftime('%Y%m%d-%H%M%S'))
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+            return folder
+        t += timedelta(seconds=1)
+
+
+def export_plc(a, arg):
+    """Whole PLC: the sample PLC folder (blocks taken from --state when imported there) in 2 chunks."""
+    plc_dir = os.path.dirname(a.sample)                  # …\PLC_1
+    files = sorted(os.path.relpath(os.path.join(d, f), plc_dir) for d, _, fs in os.walk(plc_dir) for f in fs)
+    if arg.get('runId'):
+        folder, start = RUNS[arg['runId']], int(arg.get('offset') or 0)
+    else:
+        folder, start = new_folder(a), 0
+        RUNS[os.path.basename(folder)] = folder
+    end = len(files) if start else len(files) // 2
+    plc = arg.get('plcName') or 'PLC_1'
+    for rel in files[start:end]:
+        src = os.path.join(a.state, os.path.relpath(rel, 'Blocks')) if rel.startswith('Blocks') else ''
+        dst = os.path.join(folder, plc, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src if src and os.path.exists(src) else os.path.join(plc_dir, rel), dst)
+    with open(os.path.join(folder, 'manifest.jsonl'), 'a', encoding='utf-8') as f:
+        for rel in files[start:end]:
+            f.write(json.dumps({'path': plc + '/' + rel.replace(os.sep, '/'), 'format': 'documents'}) + '\n')
+    res = {'exportFolder': folder, 'manifest': os.path.join(folder, 'manifest.jsonl'), 'exported': end - start,
+           'complete': end == len(files), 'runId': os.path.basename(folder)}
+    if end < len(files):
+        res['nextOffset'] = end
+    return json.dumps(res)
+
+
 def reader(a, nm, arg):
+    if nm == 'get_project_status':
+        if a.no_portal:
+            return json.dumps({'connected': False, 'message': 'TIA Portal is not running'})
+        return json.dumps({'connected': True, 'projectName': a.project, 'projectPath': PROJECT_PATH})
     if nm != 'export_to_folder':
         raise ValueError('unknown tool %s for the fake Reader' % nm)
+    if not arg.get('pathPrefixes'):
+        return export_plc(a, arg)
     prefix = arg['pathPrefixes'][0].strip('/')
     parts = prefix.split('/')                            # <PLC>/Blocks/<Group…>/<block>
     plc, block = parts[0], parts[-1]
     z, group = find(a, block)
-    t = datetime.now()
-    while True:                                          # unique folder timestamp
-        ts = t.strftime('%Y%m%d-%H%M%S')
-        folder = os.path.join(a.export_root, a.project, ts)
-        if not os.path.exists(folder):
-            break
-        t += timedelta(seconds=1)
+    folder = new_folder(a)
     copy_tree(z, os.path.join(folder, plc, 'Blocks', *[x for x in group.split('/') if x]), block)
     with open(os.path.join(folder, 'manifest.jsonl'), 'w', encoding='utf-8') as f:
         f.write(json.dumps({'path': prefix, 'format': 'documents'}) + '\n')
@@ -97,6 +177,7 @@ def main():
     ap.add_argument('--export-root')
     ap.add_argument('--project', default='Demo_Line')
     ap.add_argument('--multi-instances', action='store_true')
+    ap.add_argument('--no-portal', action='store_true', help='TIA Portal is not running')
     ap.add_argument('--slow', type=float, default=0)
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)
@@ -112,6 +193,9 @@ def main():
                  'serverInfo': {'name': 'fake-' + a.role, 'version': '0'}}
         elif z['method'] == 'tools/call':
             time.sleep(a.slow)
+            with open(os.path.join(a.state, 'calls.jsonl'), 'a', encoding='utf-8') as f:
+                f.write(json.dumps({'role': a.role, 'tool': z['params']['name'],
+                                    'arguments': z['params'].get('arguments') or {}}) + '\n')
             try:
                 v = {'content': [{'type': 'text', 'text': fn(a, z['params']['name'], z['params'].get('arguments') or {})}]}
             except Exception as e:                       # tool error = isError, not a server crash

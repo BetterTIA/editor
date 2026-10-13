@@ -44,7 +44,10 @@ def load(data, project):
 def save(data, project, obj):
     """Atomic write: the whole file to .tmp in the same folder, then os.replace (the old file survives an error)."""
     verify_structure(obj)
-    c = _file(data, project)
+    _write_json(_file(data, project), obj)
+
+
+def _write_json(c, obj):
     os.makedirs(os.path.dirname(c), exist_ok=True)
     tmp = '%s.tmp-%d-%d' % (c, os.getpid(), threading.get_ident())
     try:
@@ -71,6 +74,37 @@ def verify_structure(obj):
         if u['id'] in ids:
             raise StateError('duplicate id %s' % u['id'], 400)
         ids.add(u['id'])
+
+
+# ---------- project registry <data>/projects.json ----------
+# [{name, source: exports|tia|ap21, export_root, project_path?, tia: {softwarePath, plcName}?, last_snapshot?, added}]
+
+def registry(data):
+    c = os.path.join(data, 'projects.json') if data else ''
+    if not c or not os.path.exists(c):
+        return []
+    with open(c, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def save_registry(data, items):
+    if not data:
+        raise StateError('the server runs without --data', 503)
+    _write_json(os.path.join(data, 'projects.json'), items)
+
+
+def register(data, name, **fields):
+    """Add or update a registry entry (by name) -> entry."""
+    _file(data, name)                                 # checks --data and the project name
+    with LOCK:
+        items = registry(data)
+        p = next((x for x in items if x['name'] == name), None)
+        if p is None:
+            p = {'name': name, 'added': now()}
+            items.append(p)
+        p.update({k: v for k, v in fields.items() if v is not None})
+        save_registry(data, items)
+    return p
 
 
 def projects(data):

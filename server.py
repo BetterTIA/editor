@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 import fbd
 import catalog
@@ -36,26 +36,59 @@ def export_index(root):
     if not os.path.isdir(root):
         return res
     for project in sorted(os.listdir(root)):
-        pd = os.path.join(root, project)
-        if not os.path.isdir(pd):
+        x = project_index(root, project)
+        if x:
+            res[project] = x
+    return res
+
+
+def project_index(root, project):
+    """{ts: {block: path}} of one project folder <root>/<project>."""
+    res, pd = {}, os.path.join(root, project)
+    if not os.path.isdir(pd):
+        return res
+    for ts in sorted(os.listdir(pd)):
+        if not TS.match(ts):
             continue
-        for ts in sorted(os.listdir(pd)):
-            if not TS.match(ts):
-                continue
-            blocks = {}
-            for dp, _, files in os.walk(os.path.join(pd, ts)):
-                for f in files:
-                    if f.endswith('.s7dcl'):
-                        blocks.setdefault(f[:-6], os.path.join(dp, f))
-            if blocks:
-                res.setdefault(project, {})[ts] = blocks
+        blocks = {}
+        for dp, _, files in os.walk(os.path.join(pd, ts)):
+            for f in files:
+                if f.endswith('.s7dcl'):
+                    blocks.setdefault(f[:-6], os.path.join(dp, f))
+        if blocks:
+            res[ts] = blocks
+    return res
+
+
+def project_root(root, data, project):
+    """Export root of a project: from the registry, otherwise the server's default --export-root."""
+    try:
+        return next((p['export_root'] for p in state.registry(data) if p['name'] == project), root)
+    except (OSError, ValueError, KeyError, TypeError):
+        return root
+
+
+def all_exports(root, data):
+    """{project: {ts: {block: path}}} of the default export root plus the registered projects with their own root."""
+    res = export_index(root)
+    try:
+        reg = state.registry(data)
+    except (OSError, ValueError):
+        reg = []
+    for p in reg:
+        if os.path.normcase(os.path.abspath(p.get('export_root') or root)) != os.path.normcase(os.path.abspath(root)):
+            x = project_index(p['export_root'], p['name'])
+            if x:
+                res[p['name']] = x
+            else:
+                res.pop(p['name'], None)
     return res
 
 
 def find_block(root, project, block, ts=None):
     """-> (ts, path, blocks) of the newest export with the block; blocks = newest copies of all project blocks up to ts
     (so a partial export finds instance DBs and FCs in an older one). Names come only from the index (no paths built from the URL)."""
-    exp = export_index(root).get(project)
+    exp = project_index(root, project)
     if not exp:
         raise KeyError('unknown project')
     for t in sorted(exp, reverse=True):
@@ -92,9 +125,9 @@ def _load(root, project, block, ts=None):
     return t, b
 
 
-def api_exports(root):
+def api_exports(root, data=''):
     res = []
-    for project, exp in export_index(root).items():
+    for project, exp in all_exports(root, data).items():
         latest = {}
         for ts in sorted(exp):
             for block in exp[ts]:
@@ -213,7 +246,7 @@ def api_state(data, project=None):
 
 
 def api_state_put(root, data, project, obj):
-    if project not in export_index(root):
+    if not project_index(root, project):
         raise KeyError('unknown project')
     with state.LOCK:
         state.save(data, project, obj)
@@ -359,7 +392,7 @@ def api_procedure(data, uid, root=None):
 # ---------- catalog, editor ----------
 
 def api_catalog(root, project):
-    if project not in export_index(root):
+    if not project_index(root, project):
         raise KeyError('unknown project')
     return catalog.catalog(root, project)
 
@@ -493,8 +526,8 @@ TIA_LOCK = threading.Lock()          # one TIA instance = one Upload / Check at 
 CONNECTION_ERROR = 'TIA is busy or the Writer/Reader cannot be started: '
 
 
-def _tia(s, project):
-    t = s.get('tia') or {}
+def _tia(s, project, data=''):
+    t = s.get('tia') or next((p.get('tia') for p in state.registry(data) if p['name'] == project), None) or {}
     if not t.get('softwarePath'):
         raise state.StateError('project %s has no TIA settings (tia: {softwarePath, plcName, groupPath?}) — '
                                  'set them in the UI on a change ("TIA settings") or through PUT /api/state' % project)
@@ -596,7 +629,7 @@ def api_upload(root, data, uid, mcp, timeout=300):
         raise state.StateError('Upload only in state Approved (now %s)' % u['state'])
     if _is_f_edit(root, u):
         raise state.StateError('F-block: no Upload — make the change by hand following the TIA steps')
-    tia = _tia(s, u['project'])
+    tia = _tia(s, u['project'], data)
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
     steps, work = [], tempfile.mkdtemp(prefix='tiac_upload_')
@@ -661,7 +694,7 @@ def api_check(root, data, uid, mcp, timeout=300):
     project, s, u = state.find(data, uid)
     if u['state'] != 'Signed':
         raise state.StateError('Check only in state Signed (now %s)' % u['state'])
-    tia = _tia(s, project)
+    tia = _tia(s, project, data)
     try:                                              # PLC and group from the existing export of the block
         t0, fpath, _ = find_block(root, project, u['block'])
         parts = os.path.relpath(fpath, os.path.join(root, project, t0))[:-len('.s7dcl')].replace('\\', '/').split('/')
@@ -673,7 +706,7 @@ def api_check(root, data, uid, mcp, timeout=300):
         raise state.StateError('another Upload / Check is running — wait until it ends')
     steps, k_res = [], None
     try:
-        before = set(export_index(root).get(project, {}))
+        before = set(project_index(root, project))
         try:
             with _client(mcp, 'reader', timeout) as k:
                 arg = {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
@@ -686,8 +719,8 @@ def api_check(root, data, uid, mcp, timeout=300):
                     steps.append({'step': 'export_to_folder', 'ok': True, 'message': t[:1000]})
                     if j.get('complete', True) is not False:
                         break
-                    arg.update(runId=j.get('runId'), nextOffset=j.get('nextOffset'))
-            new_items = set(export_index(root).get(project, {})) - before
+                    arg.update(runId=j.get('runId'), offset=j.get('nextOffset'))
+            new_items = set(project_index(root, project)) - before
             ts = [x for x in re.findall(r'\d{8}-\d{6}', ' '.join(texts)) if x in new_items] or sorted(new_items)
             if not ts:
                 raise s7dcl_write.WriteError("no Reader export found in the editor's export root (%s\\%s) — response: %s"
@@ -708,11 +741,364 @@ def api_check(root, data, uid, mcp, timeout=300):
             'message': write['message'], 'write': write, 'edit': u}
 
 
+# ---------- projects, TIA status, snapshots (jobs) ----------
+
+STATUS_TIMEOUT = 30                  # one tool call of the status check (s)
+OPEN_TIMEOUT = 1800                  # OpenTiaProject may start TIA Portal and open a large project
+
+
+def _json_any(t):
+    try:
+        return json.loads(t)
+    except (ValueError, TypeError):
+        return None
+
+
+def _dicts(x):
+    """All dicts in a JSON value, depth first, the value itself first."""
+    if isinstance(x, dict):
+        yield x
+        for v in x.values():
+            yield from _dicts(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from _dicts(v)
+
+
+def _project_of(d):
+    """{name, path} of a project from a dict with projectPath/path/projectName/name… (tolerant: the shape is not fixed)."""
+    path = next((d[k] for k in ('projectPath', 'path', 'fullPath', 'filePath') if isinstance(d.get(k), str) and d[k]), '')
+    name = next((d[k] for k in ('projectName', 'name', 'project') if isinstance(d.get(k), str) and d[k]), '')
+    if not name and path:
+        name = os.path.splitext(os.path.basename(path.replace('\\', '/')))[0]
+    return {'name': name, 'path': path}
+
+
+def portal_instances(t):
+    """GetPortals answer -> [{portalId, project, path, attached}]; None when the answer is not JSON.
+    The top-level portalId (the attached instance) is not an instance of its own."""
+    j = _json_any(t)
+    if j is None:
+        return None
+    res = []
+    for d in _dicts(list(j.values()) if isinstance(j, dict) else j):
+        if d.get('portalId') not in (None, '') and not any(r['portalId'] == d['portalId'] for r in res):
+            pr = _project_of(next((x for x in _dicts(d) if _project_of(x)['path']), d))
+            res.append({'portalId': d['portalId'], 'project': pr['name'], 'path': pr['path'],
+                        'attached': bool(d.get('isConnected') or d.get('connected') or d.get('attached'))})
+    return res
+
+
+def project_info(t):
+    """GetProject / OpenTiaProject answer -> {name, path} of the first open project (empty when not found)."""
+    for d in _dicts(_json_any(t)):
+        pr = _project_of(d)
+        if pr['path']:
+            return pr
+    return {'name': '', 'path': ''}
+
+
+def plc_list(t):
+    """GetProjectTree / GetDevices / OpenTiaProject answer -> [{softwarePath, plcName}].
+    shortcut: any dict with a softwarePath (or a softwarePaths list) counts, filtered by a kind/type field saying 'plc'
+    when there is one — tighten when the real answer shape is known."""
+    res, j = [], _json_any(t)
+
+    def add(sp, name, kind=''):
+        if isinstance(sp, str) and sp and not any(r['softwarePath'] == sp for r in res):
+            res.append({'softwarePath': sp, 'plcName': str(name or sp.split('/')[-1]), 'kind': str(kind or '')})
+    for d in _dicts(j):
+        add(d.get('softwarePath'), d.get('plcName') or d.get('name'), d.get('kind') or d.get('type'))
+    for d in _dicts(j):                               # plain lists last: entries with a kind win
+        for sp in d.get('softwarePaths') or []:
+            add(sp, None)
+    plc = [r for r in res if 'plc' in r['kind'].lower()]
+    return [{'softwarePath': r['softwarePath'], 'plcName': r['plcName']} for r in (plc or res)]
+
+
+def reader_export_root(mcp):
+    """The Reader's own export root from its command (--export-root X) or env TIA_MCP_EXPORT_ROOT; None when unknown."""
+    cfg = (mcp or {}).get('reader')
+    if not cfg:
+        return None
+    cmd, env = cfg[0], cfg[1] or {}
+    for i, x in enumerate(cmd[:-1]):
+        if x == '--export-root':
+            return cmd[i + 1]
+    return env.get('TIA_MCP_EXPORT_ROOT')
+
+
+def api_tia_status(mcp, portal_id=None, timeout=STATUS_TIMEOUT):
+    """Writer GetPortals: no instance -> not running (no Connect: without portalId it would start TIA); one (or the
+    chosen one) -> Connect {portalId} + GetProject -> attached; more -> choose. Reader get_project_status when attached."""
+    res = {'tia': 'unknown', 'project': None, 'project_path': None, 'portalId': None, 'instances': [],
+           'writer': 'configured' if (mcp or {}).get('writer') else 'missing',
+           'reader': 'configured' if (mcp or {}).get('reader') else 'missing',
+           'reader_export_root': reader_export_root(mcp), 'ai': 'no client', 'checked': True, 'time': state.now()}
+    if res['writer'] == 'missing':
+        return res
+    try:
+        with _client(mcp, 'writer', timeout) as w:
+            inst = portal_instances(w.call('GetPortals', {}))
+            if inst is None:
+                raise mcp_client.MCPError('GetPortals answer is not JSON')
+            res['instances'] = inst
+            if not inst:
+                res['tia'] = 'not running'
+                return res
+            chosen = next((x for x in inst if str(x['portalId']) == str(portal_id)), None) if portal_id \
+                else (inst[0] if len(inst) == 1 else None)
+            if chosen is None:
+                res['tia'] = 'choose'
+                return res
+            res.update(tia='running', project=chosen['project'], project_path=chosen['path'], portalId=chosen['portalId'])
+            w.call('Connect', {'portalId': chosen['portalId']})
+            pr = project_info(w.call('GetProject', {'portalId': chosen['portalId']}))
+            res.update(tia='attached', project=pr['name'] or chosen['project'], project_path=pr['path'] or chosen['path'])
+    except mcp_client.MCPError as e:
+        res['writer'] = 'error: %s' % str(e)[:300]
+        return res
+    if res['reader'] == 'configured' and res['tia'] == 'attached':
+        try:
+            with _client(mcp, 'reader', timeout) as r:
+                r.call('get_project_status', {})
+        except mcp_client.MCPError as e:
+            res['reader'] = 'error: %s' % str(e)[:300]
+    return res
+
+
+def refresh_status(h, portal_id=None):
+    """Recompute the TIA status and keep it as the cached one; while a job holds TIA the cached one is returned."""
+    if TIA_LOCK.locked():
+        return dict(h.tia_status, busy=True)
+    chosen = portal_id or h.tia_status.get('chosen')
+    st = dict(api_tia_status(h.mcp, chosen), chosen=chosen, autoconnect=h.tia_status.get('autoconnect'))
+    h.tia_status.clear()
+    h.tia_status.update(st)
+    return st
+
+
+def sync_registry(root, data):
+    """Projects found in the default export root are added to the registry (source exports)."""
+    if not data:
+        return
+    known = {p['name'] for p in state.registry(data)}
+    for name, exp in export_index(root).items():
+        if name not in known:
+            state.register(data, name, source='exports', export_root=root, last_snapshot=max(exp))
+
+
+def api_projects(root, data, jobs):
+    if data:
+        items = state.registry(data)
+    else:                                             # without --data: the default export root only
+        items = [{'name': n, 'source': 'exports', 'export_root': root} for n in export_index(root)]
+    for p in items:
+        idx = project_index(p.get('export_root') or root, p['name'])
+        counts = {}
+        if data:
+            try:
+                for u in state.load(data, p['name'])['edits']:
+                    counts[u['state']] = counts.get(u['state'], 0) + 1
+            except (state.StateError, OSError, ValueError):
+                pass
+        job = next((j for j in reversed(list(jobs.values())) if j.get('project') == p['name']), None)
+        p.update(exports=len(idx), latest_export=max(idx) if idx else None, edits=counts, job=job)
+    running = [j for j in jobs.values() if j['state'] == 'running']
+    return {'projects': items, 'default_export_root': root, 'running_job': running[-1] if running else None}
+
+
+def api_project_add_exports(data, body):
+    """Export folder on disk: a project folder (<project>\\<YYYYMMDD-HHMMSS>\\…) or an export root with project folders."""
+    raw = str(body.get('path') or '').strip().strip('"')
+    path = os.path.abspath(raw) if raw else ''
+    if not path or not os.path.isdir(path):
+        raise state.StateError('the export folder does not exist: %s' % (raw or '(empty)'), 400)
+    idx = project_index(os.path.dirname(path), os.path.basename(path))
+    found = [(os.path.dirname(path), os.path.basename(path), max(idx))] if idx else \
+        [(path, n, max(e)) for n, e in export_index(path).items()]
+    if not found:
+        raise state.StateError('no Reader export in %s (expected <project>\\<YYYYMMDD-HHMMSS>\\<PLC>\\…\\*.s7dcl)' % path, 400)
+    return {'projects': [state.register(data, n, source='exports', export_root=r, last_snapshot=ts) for r, n, ts in found]}
+
+
+def api_project_delete(data, name):
+    """Remove from the registry only — export folders and changes (state.json) stay on disk."""
+    with state.LOCK:
+        items = state.registry(data)
+        rest = [p for p in items if p['name'] != name]
+        if len(rest) == len(items):
+            raise KeyError('project %s is not registered' % name)
+        state.save_registry(data, rest)
+    return {'removed': name}
+
+
+class SnapshotError(Exception):
+    pass
+
+
+def start_job(jobs, kind, project, fn):
+    """Background job under TIA_LOCK (one Upload / Check / snapshot at a time) -> job record (GET /api/jobs/<id>)."""
+    if not TIA_LOCK.acquire(blocking=False):
+        raise state.StateError('another Upload / Check / snapshot is running — wait until it ends')
+    job = {'id': 'J%03d' % (len(jobs) + 1), 'kind': kind, 'project': project, 'state': 'running', 'steps': [],
+           'exported': 0, 'chunks': 0, 'error': None, 'started': state.now(), 'finished': None}
+    jobs[job['id']] = job
+
+    def run():
+        try:
+            job['result'] = fn(job)
+            job['state'] = 'done'
+        except Exception as e:                        # the thread must always end the job and free the lock
+            job['state'] = 'error'
+            job['error'] = (CONNECTION_ERROR if isinstance(e, mcp_client.MCPError) else '') + str(e)[:2000]
+        finally:
+            job['finished'] = state.now()
+            TIA_LOCK.release()
+    threading.Thread(target=run, daemon=True).start()
+    return job
+
+
+def _export_folder(j):
+    """Reader answer -> (export root, project folder, ts) from the first string with a …\\<project>\\<YYYYMMDD-HHMMSS> part."""
+    for d in _dicts(j):
+        for v in d.values():
+            if isinstance(v, str):
+                parts = re.split(r'[\\/]', v)
+                for i in range(len(parts) - 1, 1, -1):
+                    if TS.match(parts[i]):
+                        return os.sep.join(parts[:i - 1]), parts[i - 1], parts[i]
+    return None
+
+
+def _same(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, portal=None, software_path=None,
+             close=False):
+    """TIA project -> Reader export of the whole PLC (chunked) -> registry. name None = a new project named by the Reader folder."""
+    reg = next((p for p in state.registry(data) if p['name'] == name), None) if name else None
+    if reg:
+        source, path = reg.get('source') or source, path or reg.get('project_path')
+        software_path = software_path or (reg.get('tia') or {}).get('softwarePath')
+    steps = job['steps']
+
+    def step(label, fn):
+        try:
+            v = fn()
+        except Exception as e:
+            steps.append({'step': label, 'ok': False, 'message': str(e)[:1000]})
+            raise
+        steps.append({'step': label, 'ok': True, 'message': str(v)[:1000]})
+        return v
+    if isinstance(portal, str):
+        portal = int(portal) if portal.isdigit() else (portal or None)   # the Writer's portalId is a process id (integer)
+    with _client(mcp, 'writer', timeout) as w:
+        plcs = []
+        if source == 'ap21':
+            if not path:
+                raise SnapshotError('project %s has no .ap21 path' % name)
+            t = step('OpenTiaProject', lambda: w.call(
+                'OpenTiaProject', dict({'path': path}, **({'portalId': portal} if portal else {})), max(timeout, OPEN_TIMEOUT)))
+            portal = next((d['portalId'] for d in _dicts(_json_any(t)) if d.get('portalId') not in (None, '')), portal)
+            plcs = plc_list(t)
+        else:
+            if not portal:
+                inst = portal_instances(step('GetPortals', lambda: w.call('GetPortals', {})))
+                if not inst:
+                    raise SnapshotError('TIA Portal is not running — open the project in TIA Portal first '
+                                        '(the editor does not start TIA for an open project)')
+                if len(inst) > 1:
+                    job['portal_choices'] = inst
+                    raise SnapshotError('%d TIA Portal instances are running — choose one in the status bar' % len(inst))
+                portal = inst[0]['portalId']
+            step('Connect', lambda: w.call('Connect', {'portalId': portal}))
+        pid = {'portalId': portal} if portal else {}
+        pr = project_info(step('GetProject', lambda: w.call('GetProject', pid)))
+        job['tia_project'] = pr['name']
+        if not plcs:
+            plcs = plc_list(step('GetProjectTree', lambda: w.call('GetProjectTree', pid)))
+        if not plcs:
+            plcs = plc_list(step('GetDevices', lambda: w.call('GetDevices', pid)))
+        if software_path:
+            plc = next((x for x in plcs if x['softwarePath'] == software_path),
+                       {'softwarePath': software_path, 'plcName': software_path.split('/')[-1]})
+        elif len(plcs) == 1:
+            plc = plcs[0]
+        else:
+            job['plc_choices'] = plcs
+            raise SnapshotError('the project has %d PLCs — choose one' % len(plcs) if plcs else
+                                'no PLC software found (GetProjectTree / GetDevices) — give the softwarePath')
+        job['plc'] = plc
+        target = (reg or {}).get('export_root')
+        before = set(project_index(target, name)) if target else set()
+        with _client(mcp, 'reader', timeout) as r:
+            arg = {'include': ['blocks', 'types', 'tagTables'], 'formats': ['documents'], 'plcName': plc['plcName'],
+                   'timeBudgetSeconds': 120}
+            if source == 'ap21' and path:
+                arg['projectPath'] = path
+            folder, t = None, ''
+            while True:                               # complete:false -> continue with runId + offset=nextOffset
+                t = step('export_to_folder #%d' % (job['chunks'] + 1), lambda: r.call('export_to_folder', arg))
+                j = _json_any(t)
+                j = j if isinstance(j, dict) else {}
+                job['chunks'] += 1
+                job['exported'] += next((j[k] for k in ('exported', 'exportedCount', 'count') if isinstance(j.get(k), int)), 0)
+                folder = folder or _export_folder(j)
+                if j.get('complete', True) is not False:
+                    break
+                if j.get('nextOffset') is None or job['chunks'] > 10000:
+                    raise SnapshotError('the Reader export is not complete and gives no nextOffset: %s' % t[:300])
+                arg.update(runId=j.get('runId'), offset=j['nextOffset'])
+        if folder is None:                            # no folder in the answer -> a new timestamp in the project's root
+            new = sorted(set(project_index(target, name)) - before) if target else []
+            if not new:
+                raise SnapshotError('the Reader answer names no export folder and none appeared in the project — '
+                                    'the Reader writes to its own --export-root (%s): %s'
+                                    % (reader_export_root(mcp) or 'unknown', t[:300]))
+            folder = (target, name, new[-1])
+        rroot, pname, ts = folder
+        if reg and not (_same(rroot, reg['export_root']) and pname == name):
+            raise SnapshotError(('the Reader exported to %s, but project %s reads %s — the Reader writes to its own '
+                                 '--export-root and names the folder after the TIA project; make them match, or add the '
+                                 'project from the Reader folder') % (os.path.join(rroot, pname, ts), name,
+                                                                       os.path.join(reg['export_root'], name)))
+        if not reg and any(p['name'] == pname and not _same(p['export_root'], rroot) for p in state.registry(data)):
+            raise SnapshotError('project %s is already registered with another export root — remove it first or take '
+                                'the snapshot from its card' % pname)
+        p = state.register(data, pname, source=source, export_root=rroot, last_snapshot=ts,
+                           project_path=path or pr['path'] or None,
+                           tia={'softwarePath': plc['softwarePath'], 'plcName': plc['plcName']})
+        job['project'] = pname
+        if close:
+            step('CloseProject', lambda: w.call('CloseProject', pid))
+    return {'project': p, 'export_ts': ts, 'export_folder': os.path.join(rroot, pname, ts)}
+
+
+def api_snapshot(h, name, body, source=None):
+    """POST /api/projects/<name>/snapshot, or a new project from TIA (name None, source tia | ap21) -> job."""
+    body = body if isinstance(body, dict) else {}
+    if not h.data:
+        raise state.StateError('the server runs without --data', 503)
+    if name and not any(p['name'] == name for p in state.registry(h.data)):
+        raise KeyError('project %s is not registered' % name)
+    path = str(body.get('path') or '').strip().strip('"') or None
+    if source == 'ap21' and not (path and re.search(r'\.(ap|als)\d+$', path, re.I)):
+        raise state.StateError('give the full path of a .apXX project or .alsXX session file', 400)
+    portal = body.get('portalId') or (h.tia_status.get('portalId') if h.tia_status.get('tia') == 'attached' else None)
+    return start_job(h.jobs, 'snapshot', name, lambda job: snapshot(
+        job, h.root, h.data, h.mcp, h.mcp_timeout, name, source or 'tia', path, portal,
+        str(body.get('softwarePath') or '') or None, bool(body.get('close'))))
+
+
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
     mcp = None                       # {'writer': (command, env) | None, 'reader': …}
     mcp_timeout = 300
+    jobs = {}
+    tia_status = {}
 
     def log_message(self, fmt, *args):
         pass
@@ -727,15 +1113,28 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def _body(self):
-        n = int(self.headers.get('Content-Length') or 0)
-        if n > 5_000_000:
-            raise ValueError('the body is too large')
-        return json.loads(self.rfile.read(n).decode('utf-8') or 'null')
+        if self._b is None:                           # read once (the route may look at the project first)
+            n = int(self.headers.get('Content-Length') or 0)
+            if n > 5_000_000:
+                raise ValueError('the body is too large')
+            self._b = [json.loads(self.rfile.read(n).decode('utf-8') or 'null')]
+        return self._b[0]
 
     def _handle(self, method):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         c = u.path
+        self._b = None
+
+        def root(project):                                # export root of the project (registry or --export-root)
+            return project_root(self.root, self.data, str(project or ''))
+
+        def root_of(uid):
+            return root(state.find(self.data, uid)[0])
+
+        def body_project():
+            b = self._body()
+            return b.get('project') if isinstance(b, dict) else ''
         try:
             if method == 'GET' and c in ('/', '/index.html'):
                 with open(os.path.join(WEB, 'index.html'), 'rb') as f:
@@ -747,36 +1146,59 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b)
             elif method == 'GET' and c == '/api/exports':
-                self._json(api_exports(self.root))
+                self._json(api_exports(self.root, self.data))
             elif method == 'GET' and c == '/api/block':
-                self._json(api_block(self.root, q.get('project', ''), q.get('block', ''), q.get('ts')))
+                self._json(api_block(root(q.get('project')), q.get('project', ''), q.get('block', ''), q.get('ts')))
             elif method == 'GET' and c == '/api/network':
-                self._json(api_network(self.root, q.get('project', ''), q.get('block', ''),
+                self._json(api_network(root(q.get('project')), q.get('project', ''), q.get('block', ''),
                                        int(q.get('nw', '1')), q.get('ts'), int(q.get('width', '0'))))
             elif method == 'GET' and c == '/api/state':
                 self._json(api_state(self.data, q.get('project')))
             elif method == 'PUT' and c == '/api/state':
-                self._json(api_state_put(self.root, self.data, q.get('project', ''), self._body()))
+                self._json(api_state_put(root(q.get('project')), self.data, q.get('project', ''), self._body()))
             elif method == 'POST' and c == '/api/edits':
-                self._json(api_edit_create(self.root, self.data, self._body()), 201)
+                self._json(api_edit_create(root(body_project()), self.data, self._body()), 201)
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/state', c):
                 self._json(api_edit_state(self.data, c.split('/')[3], self._body()))
             elif method == 'GET' and re.fullmatch(r'/api/edits/[\w-]+', c):
-                self._json(api_edit_detail(self.data, c.split('/')[3], int(q.get('width', '0')), self.root))
+                self._json(api_edit_detail(self.data, c.split('/')[3], int(q.get('width', '0')), root_of(c.split('/')[3])))
             elif method == 'GET' and re.fullmatch(r'/api/edits/[\w-]+/procedure', c):
-                self._json(api_procedure(self.data, c.split('/')[3], self.root))
+                self._json(api_procedure(self.data, c.split('/')[3], root_of(c.split('/')[3])))
             elif method == 'GET' and c == '/api/catalog':
-                self._json(api_catalog(self.root, q.get('project', '')))
+                self._json(api_catalog(root(q.get('project')), q.get('project', '')))
             elif method == 'POST' and c == '/api/layout':
-                self._json(api_layout(self.root, self._body()))
+                self._json(api_layout(root(body_project()), self._body()))
             elif method in ('POST', 'PUT') and re.fullmatch(r'/api/edits/[\w-]+/after', c):
                 self._json(api_edit_after(self.data, c.split('/')[3], self._body()))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check-export', c):
-                self._json(api_check_export(self.root, self.data, c.split('/')[3], self._body()))
+                self._json(api_check_export(root_of(c.split('/')[3]), self.data, c.split('/')[3], self._body()))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/upload', c):
-                self._json(api_upload(self.root, self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
+                self._json(api_upload(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check', c):
-                self._json(api_check(self.root, self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
+                self._json(api_check(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
+            elif method == 'GET' and c == '/api/projects':
+                self._json(api_projects(self.root, self.data, self.jobs))
+            elif method == 'POST' and c == '/api/projects':
+                b = self._body() if isinstance(self._body(), dict) else {}
+                if b.get('source') == 'exports':
+                    self._json(api_project_add_exports(self.data, b), 201)
+                elif b.get('source') in ('tia', 'ap21'):
+                    self._json({'job': api_snapshot(self, None, b, b['source'])}, 202)
+                else:
+                    raise state.StateError('source must be exports | tia | ap21', 400)
+            elif method == 'DELETE' and re.fullmatch(r'/api/projects/[^/]+', c):
+                self._json(api_project_delete(self.data, unquote(c.split('/')[3])))
+            elif method == 'POST' and re.fullmatch(r'/api/projects/[^/]+/snapshot', c):
+                self._json({'job': api_snapshot(self, unquote(c.split('/')[3]), self._body())}, 202)
+            elif method == 'GET' and c == '/api/jobs':
+                self._json({'jobs': list(self.jobs.values())})
+            elif method == 'GET' and re.fullmatch(r'/api/jobs/[\w-]+', c):
+                self._json(self.jobs[c.split('/')[3]])
+            elif method == 'GET' and c == '/api/tia/status':
+                if q.get('refresh') == '1' or q.get('portalId'):
+                    self._json(refresh_status(self, q.get('portalId')))
+                else:
+                    self._json(dict(self.tia_status))
             elif method == 'POST' and c == '/api/check':
                 self._json(api_add_check(self.data, self._body()))
             else:
@@ -797,10 +1219,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self._handle('PUT')
 
+    def do_DELETE(self):
+        self._handle('DELETE')
 
-def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300):
-    h = type('H', (Handler,), {'root': root, 'data': data, 'mcp': mcp, 'mcp_timeout': mcp_timeout})
-    return ThreadingHTTPServer((host, port), h)
+
+def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300, autoconnect=False):
+    """autoconnect: check the TIA status once in the background at start (and the home page checks it when opened)."""
+    h = type('H', (Handler,), {'root': root, 'data': data, 'mcp': mcp, 'mcp_timeout': mcp_timeout, 'jobs': {},
+                               'tia_status': {'tia': 'unknown', 'checked': False, 'autoconnect': autoconnect}})
+    sync_registry(root, data)
+    srv = ThreadingHTTPServer((host, port), h)
+    if autoconnect:
+        threading.Thread(target=refresh_status, args=(h,), daemon=True).start()
+    return srv
 
 
 def mcp_config(mcp_json, writer_cmd=None, reader_cmd=None):
@@ -821,9 +1252,11 @@ def main():
     ap.add_argument('--writer-cmd', help='Writer command instead of .mcp.json (e.g. "python tests\\fake_mcp.py writer")')
     ap.add_argument('--reader-cmd', help='Reader command instead of .mcp.json')
     ap.add_argument('--mcp-timeout', type=int, default=300, help='timeout of one tool call (s)')
+    ap.add_argument('--no-autoconnect', action='store_true',
+                    help='do not check TIA Portal at start and when the home page opens (only the Refresh button does)')
     a = ap.parse_args()
     srv = create_server(a.port, a.export_root, a.data, mcp=mcp_config(a.mcp_json, a.writer_cmd, a.reader_cmd),
-                        mcp_timeout=a.mcp_timeout)
+                        mcp_timeout=a.mcp_timeout, autoconnect=not a.no_autoconnect)
     print('TIAC_Editor at http://localhost:%d  (export root %s, data %s)' % (a.port, a.export_root, a.data), flush=True)
     try:
         srv.serve_forever()
