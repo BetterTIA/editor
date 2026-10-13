@@ -209,20 +209,21 @@ class TestApiEditor(unittest.TestCase):
         self.assertEqual(s, 409)
         self.assertIn('Proposal', e['chyba'])
 
-    def test_signed_rozhoduje_posledni_kontrola(self):
+    def test_checked_rozhoduje_posledni_kontrola(self):
         _, net = self.req('GET', '/api/network?projekt=%s&blok=FB_Dopravnik&nw=1' % PROJEKT)
         _, u = self.req('POST', '/api/uprava', {'projekt': PROJEKT, 'kolo': 'k', 'blok': 'FB_Dopravnik', 'nw': 1,
                                                  'po': {'prvky': net['prvky'], 'rungy': net['rungy']}})
         uid = u['id']
         self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Approved'})
+        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})[0], 200)   # volný
         self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': True})
         self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': False})
-        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})[0], 409)
+        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked'})[0], 409)
         self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': True})
-        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})[0], 200)
+        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked'})[0], 200)
         self.req('POST', '/api/kontrola', {'uprava_id': uid, 'shoda': False})
         _, d = self.req('GET', '/api/uprava/%s' % uid)
-        self.assertEqual((d['uprava']['stav'], d['signed_povolen']), ('Signed', False))   # stav se sám nevrací
+        self.assertEqual((d['uprava']['stav'], d['checked_povolen']), ('Checked', False))   # stav se sám nevrací
         self.assertIn('NESHODA', d['varovani'][0])
 
 

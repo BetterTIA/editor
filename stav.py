@@ -8,7 +8,9 @@ import re
 import threading
 from datetime import datetime
 
-STAVY = ['Proposal', 'Approved', 'Signed', 'Uploaded', 'Tested']
+# od 13. 10. 2026 šest stavů: Signed = zapsáno v projektu (Honza / Writer), Checked = Reader export = návrh.
+# Starší stav.json s pěti stavy se načte beze změny (jména stavů zůstala).
+STAVY = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
 ZAMEK = threading.RLock()
 
 
@@ -94,8 +96,8 @@ def najdi(data, uid):
     raise KeyError('úprava %s neexistuje' % uid)
 
 
-def signed_povolen(u):
-    """O odemknutí Signed rozhoduje poslední kontrola (pozdější neshoda zase zamkne)."""
+def checked_povolen(u):
+    """O odemknutí Checked rozhoduje poslední kontrola (pozdější neshoda zase zamkne); Signed je volný."""
     k = u.get('kontroly') or []
     return bool(k) and k[-1].get('shoda') is True
 
@@ -112,7 +114,7 @@ def zmen_stav(u, novy, kdo):
     i, j = STAVY.index(u['stav']), STAVY.index(novy)
     if abs(i - j) != 1:
         raise ChybaStavu('přechod %s → %s není povolen (jen o krok vpřed nebo zpět)' % (u['stav'], novy))
-    if novy == 'Signed' and not signed_povolen(u):
-        raise ChybaStavu('Signed až po kontrole exportem se shodou (POST /api/kontrola)')
+    if novy == 'Checked' and j > i and not checked_povolen(u):
+        raise ChybaStavu('Checked až po kontrole exportem se shodou (Check / POST /api/kontrola)')
     u['stav'] = novy
     u.setdefault('historie', []).append({'stav': novy, 'cas': ted(), 'kdo': kdo or 'Honza'})

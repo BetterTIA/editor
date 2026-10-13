@@ -71,13 +71,13 @@ ul.vyber { list-style: none; padding: 0; columns: 3 220px; }
 ul.vyber a { color: var(--text); }
 /* M2: rozdíl a stavy */
 :root { --pridany: #4ade80; --zmeneny: #fb923c; --smazany: #f87171;
-        --s-Proposal: #a8a8a8; --s-Approved: #00D7FF; --s-Signed: #c084fc; --s-Uploaded: #facc15; --s-Tested: #4ade80; }
+        --s-Proposal: #a8a8a8; --s-Approved: #00D7FF; --s-Signed: #c084fc; --s-Checked: #2dd4bf; --s-Uploaded: #facc15; --s-Tested: #4ade80; }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) { --pridany: #15803d; --zmeneny: #c2410c; --smazany: #b91c1c;
-    --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Uploaded: #a16207; --s-Tested: #15803d; }
+    --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Checked: #0f766e; --s-Uploaded: #a16207; --s-Tested: #15803d; }
 }
 :root[data-theme="light"] { --pridany: #15803d; --zmeneny: #c2410c; --smazany: #b91c1c;
-  --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Uploaded: #a16207; --s-Tested: #15803d; }
+  --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Checked: #0f766e; --s-Uploaded: #a16207; --s-Tested: #15803d; }
 svg g.d-pridany .prv, svg g.d-pridany .box { stroke: var(--pridany); stroke-width: 2.5; }
 svg g.d-pridany text, svg g.d-pridany .titul { fill: var(--pridany); font-weight: bold; }
 svg g.d-zmeneny .prv, svg g.d-zmeneny .box { stroke: var(--zmeneny); stroke-width: 2.5; }
@@ -95,7 +95,7 @@ svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decora
 .stav { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; font-weight: 600; margin: 0 6px;
         border: 1px solid var(--sc); color: var(--sc); }
 .s-Proposal { --sc: var(--s-Proposal); } .s-Approved { --sc: var(--s-Approved); } .s-Signed { --sc: var(--s-Signed); }
-.s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); }
+.s-Checked { --sc: var(--s-Checked); } .s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); }
 .hlavicka { color: var(--tlum); margin: 2px 0 8px; }
 .hlavicka b { color: var(--text); font-weight: 600; }
 .tlacitka { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
@@ -109,6 +109,8 @@ svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decora
 .legenda { font-size: 12px; color: var(--tlum); margin: 4px 0; display: flex; gap: 14px; }
 .legenda span::before { content: '■ '; } .legenda .p { color: var(--pridany); } .legenda .z { color: var(--zmeneny); }
 .legenda .s { color: var(--smazany); }
+.stavy-leg { font-size: 11px; color: var(--tlum); margin: 4px 0; } .stavy-leg .stav { margin: 0 3px; opacity: .55; }
+.stavy-leg .stav.akt { opacity: 1; background: color-mix(in srgb, var(--sc) 18%, transparent); }
 /* M3: editor */
 .hlavni.edit { grid-template-columns: 280px 1fr 250px; }
 #paleta { border-left: 1px solid var(--hrana); border-right: 0; }
@@ -469,6 +471,9 @@ async function zmenStav(uid, stav) {
   if (!r.ok) throw new Error(j.chyba || r.status);
 }
 
+// od 13. 10. 2026: Signed = zapsáno v projektu (Honza / Upload přes Writer), Checked = Reader export = návrh (Check)
+const STAVY = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested'];
+
 async function zobrazUpravu(uid, chyba) {
   const d = await api(`/api/uprava/${enc(uid)}?sirka=${sirkaPlatna()}`);
   const u = d.uprava;
@@ -481,7 +486,7 @@ async function zobrazUpravu(uid, chyba) {
   } catch (e) { /* blok už v exportu není: strom stačí */ }
   $('nw').innerHTML = vlevo;
   const m = $('obsah');
-  const tlSigned = d.dalsi === 'Signed' && !d.signed_povolen;
+  const tlChecked = d.dalsi === 'Checked' && !d.checked_povolen;
   const jazyk = d.jazyk || 'LAD';
   m.innerHTML =
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.druh || '')}${u.cislo_bloku ?? ''} "${esc(u.blok)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.titulek || '')}</h1>` +
@@ -489,7 +494,7 @@ async function zobrazUpravu(uid, chyba) {
     (u.poznamka ? `<p class="komentar">${esc(u.poznamka)}</p>` : '') +
     `<div class="tlacitka">` +
     (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
-    (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlSigned ? 'disabled title="Signed až po poslední kontrole exportem se shodou (POST /api/kontrola)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
+    (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlChecked ? 'disabled title="Checked až po poslední kontrole exportem se shodou (Check / Zkontrolovat exportem)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
     (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : `<button id="kontrola" title="porovná nejnovější export Readeru s návrhem a zapíše kontrolu">Zkontrolovat exportem</button>`) +
     `</div>` +
     (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla ${jazyk} (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
@@ -497,9 +502,10 @@ async function zobrazUpravu(uid, chyba) {
     `<div class="kontroly"><h3>Kontroly exportem</h3>` +
     (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
       `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
-      : '<div>Zatím žádná — Signed se odemkne, když poslední kontrola je shoda.</div>') + `</div>` +
+      : '<div>Zatím žádná — Checked se odemkne, když poslední kontrola je shoda.</div>') + `</div>` +
     `<div class="kontroly postup" id="postup"></div>` +
     d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
+    `<div class="stavy-leg">Stavy: ${STAVY.map(x => `<span class="stav s-${x}${x === u.stav ? ' akt' : ''}">${x}</span>`).join('→')}</div>` +
     `<div class="legenda">Model „po“ proti exportu: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
   if ($('upravit')) $('upravit').onclick = () => { location.href = `?uprava=${enc(u.id)}&upravit=1`; };
   if ($('kontrola')) $('kontrola').onclick = async () => {

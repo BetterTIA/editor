@@ -330,11 +330,11 @@ def api_uprava_detail(data, uid, sirka=0, root=None):
     _, _, u = stav.najdi(data, uid)
     vys = _kresba_rozdilu(u['pred'], u['po'], sirka)
     k = u.get('kontroly') or []
-    if stav.STAVY.index(u['stav']) >= stav.STAVY.index('Signed') and k and k[-1].get('shoda') is False:
+    if stav.STAVY.index(u['stav']) >= stav.STAVY.index('Checked') and k and k[-1].get('shoda') is False:
         vys['varovani'].insert(0, 'Poslední kontrola exportem je NESHODA, ale úprava už je %s — stav se sám nevrací, '
                                   'zkontroluj zápis v projektu.' % u['stav'])
     dalsi, predchozi = stav.prechody(u)
-    vys.update({'uprava': u, 'dalsi': dalsi, 'predchozi': predchozi, 'signed_povolen': stav.signed_povolen(u),
+    vys.update({'uprava': u, 'dalsi': dalsi, 'predchozi': predchozi, 'checked_povolen': stav.checked_povolen(u),
                 'chyby': _validuj(u['po'], u.get('f'), root, u['projekt'])})
     return vys
 

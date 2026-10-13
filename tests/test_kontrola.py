@@ -105,6 +105,7 @@ class TestKontrolaExportem(unittest.TestCase):
                                                  'po': r['po']})
         uid = u['id']
         self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Approved'})
+        self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})          # zapsáno ručně (Signed je volný)
         # 1) tentýž export jako před úpravou -> neshoda, chybí kontakt
         kod, txt = self.cli('--uprava', uid)
         self.assertEqual(kod, 1)
@@ -116,7 +117,7 @@ class TestKontrolaExportem(unittest.TestCase):
         kod, txt = self.cli('--uprava', uid)
         self.assertEqual(kod, 1)
         self.assertIn('jiný operand: návrh kontakt "Pojistka_OK", export kontakt "Pojistka_XX"', txt)
-        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})[0], 409)
+        self.assertEqual(self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked'})[0], 409)
         # 3) export se zápisem, ale network posunutý (nový network před NW1, volá FC) -> shoda + poznámka
         novy = ('    {\n        S7_Language := "LAD";\n        S7_NetworkTitle := "MLC_0"\n    }\n    NETWORK\n'
                 '        RUNG wire#powerrail\n            Contact( #Start )\n            "FC_Vetve"(  )\n'
@@ -134,9 +135,9 @@ class TestKontrolaExportem(unittest.TestCase):
         kod, txt = self.cli('--uprava', uid, '--export-ts', TS1)
         self.assertEqual(kod, 0, txt)
         self.assertTrue(txt.startswith('SHODA'))
-        # po shodě projde Approved -> Signed
-        s, u = self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed'})
-        self.assertEqual((s, u['stav']), (200, 'Signed'))
+        # po shodě projde Signed -> Checked
+        s, u = self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked'})
+        self.assertEqual((s, u['stav']), (200, 'Checked'))
         self.assertEqual([k['shoda'] for k in u['kontroly']], [False, False, True, True])
         # chyby: neexistující export / úprava -> exit 2
         self.assertEqual(self.cli('--uprava', uid, '--export-ts', '20991231-000000')[0], 2)

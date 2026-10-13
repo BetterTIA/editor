@@ -38,18 +38,40 @@ class TestAutomat(unittest.TestCase):
             stav.zmen_stav(u, 'Hotovo', 'Honza')
         self.assertEqual(e.exception.kod, 400)
 
-    def test_signed_jen_se_shodou(self):
+    def test_signed_volny_checked_jen_se_shodou(self):
         u = self.u('Approved')
+        stav.zmen_stav(u, 'Signed', 'Honza')                       # od 13. 10. Signed bez kontroly
+        self.assertEqual(stav.prechody(u), ('Checked', 'Approved'))
         with self.assertRaises(stav.ChybaStavu) as e:
-            stav.zmen_stav(u, 'Signed', 'Honza')
+            stav.zmen_stav(u, 'Checked', 'Honza')
         self.assertEqual(e.exception.kod, 409)
-        u['kontroly'].append({'shoda': False})
-        with self.assertRaises(stav.ChybaStavu):
-            stav.zmen_stav(u, 'Signed', 'Honza')
         u['kontroly'].append({'shoda': True})
-        stav.zmen_stav(u, 'Signed', 'Honza')
-        self.assertEqual(u['stav'], 'Signed')
-        self.assertEqual(stav.prechody(u), ('Uploaded', 'Approved'))
+        u['kontroly'].append({'shoda': False})                     # rozhoduje poslední
+        with self.assertRaises(stav.ChybaStavu):
+            stav.zmen_stav(u, 'Checked', 'Honza')
+        u['kontroly'].append({'shoda': True})
+        stav.zmen_stav(u, 'Checked', 'TIAC_Reader')
+        self.assertEqual((u['stav'], u['historie'][-1]['kdo']), ('Checked', 'TIAC_Reader'))
+        self.assertEqual(stav.prechody(u), ('Uploaded', 'Signed'))
+        stav.zmen_stav(u, 'Uploaded', 'Honza')
+        u['kontroly'].append({'shoda': False})
+        stav.zmen_stav(u, 'Checked', 'Honza')                      # krok zpět do Checked kontrola neblokuje
+
+    def test_stary_stav_s_peti_stavy(self):
+        d = tempfile.mkdtemp()
+        try:
+            stary = {'upravy': [{'id': 'U00%d' % i, 'stav': s, 'historie': [], 'kontroly': []}
+                                for i, s in enumerate(['Proposal', 'Approved', 'Signed', 'Uploaded', 'Tested'], 1)]}
+            os.makedirs(os.path.join(d, PROJEKT))
+            with open(os.path.join(d, PROJEKT, 'stav.json'), 'w', encoding='utf-8') as f:
+                json.dump(stary, f)
+            st = stav.nacti(d, PROJEKT)
+            self.assertEqual(st, stary)
+            stav.uloz(d, PROJEKT, st)                                  # projde kontrolou struktury i zápisem
+            self.assertEqual(stav.nacti(d, PROJEKT), stary)
+            self.assertEqual(stav.prechody(st['upravy'][3]), ('Tested', 'Checked'))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     def test_atomicky_zapis(self):
         d = tempfile.mkdtemp()
@@ -126,18 +148,19 @@ class TestApiUpravy(unittest.TestCase):
         self.zaloz()
         s, u = self.req('POST', '/api/uprava/U001/stav', {'stav': 'Approved', 'kdo': 'Honza'})
         self.assertEqual((s, u['stav']), (200, 'Approved'))
-        s, e = self.req('POST', '/api/uprava/U001/stav', {'stav': 'Signed', 'kdo': 'Honza'})
+        self.assertEqual(self.req('POST', '/api/uprava/U001/stav', {'stav': 'Signed', 'kdo': 'Honza'})[0], 200)
+        s, e = self.req('POST', '/api/uprava/U001/stav', {'stav': 'Checked', 'kdo': 'Honza'})
         self.assertEqual(s, 409)
         self.assertIn('kontrole', e['chyba'])
         s, u = self.req('POST', '/api/kontrola', {'uprava_id': 'U001', 'shoda': True, 'export_ts': '20261012-130000',
                                                    'poznamka': 'export po zápisu = návrh'})
         self.assertEqual((s, len(u['kontroly'])), (200, 1))
-        self.assertEqual(self.req('POST', '/api/uprava/U001/stav', {'stav': 'Signed'})[0], 200)
+        self.assertEqual(self.req('POST', '/api/uprava/U001/stav', {'stav': 'Checked'})[0], 200)
         self.assertEqual(self.req('POST', '/api/uprava/U001/stav', {'stav': 'Tested'})[0], 409)
         self.assertEqual(self.req('POST', '/api/kontrola', {'uprava_id': 'U001', 'shoda': 'ano'})[0], 400)
         self.assertEqual(self.req('POST', '/api/uprava/U999/stav', {'stav': 'Approved'})[0], 404)
         _, st = self.req('GET', '/api/stav?projekt=%s' % PROJEKT)
-        self.assertEqual([h['stav'] for h in st['upravy'][0]['historie']], ['Proposal', 'Approved', 'Signed'])
+        self.assertEqual([h['stav'] for h in st['upravy'][0]['historie']], ['Proposal', 'Approved', 'Signed', 'Checked'])
 
     def test_detail_pro_ui(self):
         self.zaloz()
@@ -146,7 +169,7 @@ class TestApiUpravy(unittest.TestCase):
         self.assertEqual(d['rozdil'], {'p3': 'zmeneny', 'n1': 'pridany', 'x:p7': 'smazany'})
         self.assertIsNotNone(d['kresba'])
         self.assertIn('x:p7', d['rozlozeni'])
-        self.assertEqual((d['dalsi'], d['predchozi'], d['signed_povolen']), ('Approved', None, False))
+        self.assertEqual((d['dalsi'], d['predchozi'], d['checked_povolen']), ('Approved', None, False))
         s, html = self.req('GET', '/?uprava=U001&snimek=1')
         self.assertEqual(s, 200)
         self.assertIn(b'zobrazUpravu', html)

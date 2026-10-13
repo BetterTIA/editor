@@ -243,6 +243,8 @@ class TestApiF2(unittest.TestCase):
         self.assertEqual(kod, 0, out.getvalue())                               # export po zápisu (TS2) = shoda
         s, x = self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed', 'kdo': 'test'})
         self.assertEqual((s, x['stav']), (200, 'Signed'))
+        s, x = self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Checked', 'kdo': 'test'})
+        self.assertEqual((s, x['stav']), (200, 'Checked'))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(kontrola.main(['--server', 'http://127.0.0.1:%d' % self.port, '--postup', uid]), 0)
