@@ -1,12 +1,13 @@
-"""Kontrola „export po zápisu = návrh" (M4) — CLI pro Clauda i Honzu.
+"""Export check "export after writing = proposal" — command-line client for the editor server.
 
-python kontrola.py --server http://localhost:8765 --uprava U003 [--export-ts 20261012-140000]
-python kontrola.py --postup U003        # vytiskne postup skládání pro TIA (markdown) — F2
-python kontrola.py --check U003         # M5: Check = TIAC_Reader export bloku + kontrola; při shodě Signed -> Checked
+python check.py --server http://localhost:8765 --edit U003 [--export-ts 20261012-140000]
+python check.py --procedure U003        # prints the TIA steps for the change (markdown)
+python check.py --check U003            # Check = TIAC_Reader exports the block + export check; on a match Signed -> Checked
 
-Server najde v export rootu nejnovější (nebo zadaný) export bloku úpravy, network podle titulku (pak podle čísla),
-porovná ho s modelem „po" podle obsahu (typ + operand/piny + série/větve, bez id a rozložení) a zapíše kontrolu.
-Exit: 0 = shoda, 1 = neshoda, 2 = chyba.
+The server finds the newest (or the given) export of the change's block in the export root, the network by title
+(then by number), compares it with the "after" model by content (type + operand/pins + series/branches, ignoring ids
+and layout) and records the check.
+Exit: 0 = match, 1 = mismatch, 2 = error.
 """
 import argparse
 import json
@@ -36,18 +37,18 @@ def procedure(server, edit):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description='TIAC_Editor: check export after zápisu against návrhu')
+    ap = argparse.ArgumentParser(description='TIAC_Editor: check the export after writing against the proposal')
     ap.add_argument('--server', default='http://localhost:8765')
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument('--edit', help='zkontroluje export after zápisu against návrhu')
-    g.add_argument('--procedure', metavar='UPRAVA', help='vytiskne procedure skládání for TIA (markdown)')
-    g.add_argument('--check', metavar='UPRAVA', help='Check: Reader exportuje block, check, při shodě Checked')
-    ap.add_argument('--export-ts', help='timestamp export (jinak nejnovější s block)')
+    g.add_argument('--edit', help='check the export after writing against the proposal')
+    g.add_argument('--procedure', metavar='EDIT', help='print the TIA steps for the change (markdown)')
+    g.add_argument('--check', metavar='EDIT', help='Check: the Reader exports the block, export check, Checked on a match')
+    ap.add_argument('--export-ts', help='export timestamp (default: the newest one with the block)')
     a = ap.parse_args(argv)
     try:
         if a.procedure:
             if hasattr(sys.stdout, 'reconfigure'):
-                sys.stdout.reconfigure(encoding='utf-8')     # konzole Windows (cp1250) by spadla na „⟦
+                sys.stdout.reconfigure(encoding='utf-8')     # a cp1250 Windows console would fail on characters like ⟦
             print(procedure(a.server, a.procedure)['markdown'], end='')
             return 0
         if a.check:

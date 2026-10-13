@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,19 +7,19 @@
 <style>
 :root {
   --bg: #1e1e1e; --panel: #252526; --edge: #3a3a3a; --text: #f0f0f0; --muted: #a8a8a8;
-  --accent: #00D7FF; --wire: #8A8A8A; --warnings: #fb923c; --select: #0e3a47;
+  --accent: #00D7FF; --wire: #8A8A8A; --warning: #fb923c; --select: #0e3a47;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg: #ffffff; --panel: #f3f3f3; --edge: #d0d0d0; --text: #111111; --muted: #555555;
-    --accent: #0a7ea4; --wire: #4a4a4a; --warnings: #c2410c; --select: #d6f1fa;
+    --accent: #0a7ea4; --wire: #4a4a4a; --warning: #c2410c; --select: #d6f1fa;
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
   --bg: #ffffff; --panel: #f3f3f3; --edge: #d0d0d0; --text: #111111; --muted: #555555;
-  --accent: #0a7ea4; --wire: #4a4a4a; --warnings: #c2410c; --select: #d6f1fa;
+  --accent: #0a7ea4; --wire: #4a4a4a; --warning: #c2410c; --select: #d6f1fa;
   color-scheme: light;
 }
 * { box-sizing: border-box; }
@@ -43,7 +43,7 @@ main { overflow: auto; padding: 14px 18px; min-width: 0; }
 h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
 h1 .c { color: var(--accent); font-family: Consolas, monospace; }
 .comment { color: var(--muted); margin: 0 0 8px; white-space: pre-wrap; }
-.warnings { color: var(--warnings); border: 1px solid var(--warnings); padding: 6px 10px; border-radius: 4px; margin: 8px 0; }
+.warning { color: var(--warning); border: 1px solid var(--warning); padding: 6px 10px; border-radius: 4px; margin: 8px 0; }
 .canvas { overflow: auto; border: 1px solid var(--edge); border-radius: 4px; background: var(--bg); padding: 6px 0; }
 svg text { font: 12px Consolas, "DejaVu Sans Mono", monospace; fill: var(--text); }
 svg .pin { font-size: 11px; fill: var(--muted); }
@@ -64,12 +64,12 @@ svg .hit-pin { fill: transparent; cursor: pointer; }
 .procedure button { font: inherit; font-size: 12px; padding: 1px 9px; border-radius: 4px; border: 1px solid var(--edge);
                  background: var(--panel); color: var(--text); cursor: pointer; text-transform: none; letter-spacing: 0; }
 .errors .var { color: var(--muted); }
-svg g.d-changed text.without-changes { fill: var(--text); font-weight: normal; }   /* FBD: u změněného boxu jen změněné piny */
+svg g.d-changed text.without-changes { fill: var(--text); font-weight: normal; }   /* FBD: on a changed box only the changed pins */
 pre, .rungs { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
 .rungs div { border-bottom: 1px dashed var(--edge); padding: 2px 0; }
 ul.select { list-style: none; padding: 0; columns: 3 220px; }
 ul.select a { color: var(--text); }
-/* M2: rozdíl a stavy */
+/* M2: diff and states */
 :root { --added: #4ade80; --changed: #fb923c; --deleted: #f87171;
         --s-Proposal: #a8a8a8; --s-Approved: #00D7FF; --s-Signed: #c084fc; --s-Checked: #2dd4bf; --s-Uploaded: #facc15; --s-Tested: #4ade80; }
 @media (prefers-color-scheme: light) {
@@ -106,10 +106,10 @@ svg g.d-deleted text, svg g.d-deleted .symbol { fill: var(--deleted); text-decor
 .checks { font-size: 13px; margin: 6px 0 10px; }
 .checks h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px; }
 .checks .ok { color: var(--added); } .checks .bad { color: var(--deleted); }
-/* M5: Upload / Check, zápisy, nastavení TIA */
+/* M5: Upload / Check, writes, TIA settings */
 .buttons button.tia { border-color: var(--s-Signed); color: var(--s-Signed); font-weight: 600; }
 .buttons button.tia.check { border-color: var(--s-Checked); color: var(--s-Checked); }
-.buttons .fblock { font-size: 12px; color: var(--warnings); align-self: center; }
+.buttons .fblock { font-size: 12px; color: var(--warning); align-self: center; }
 .progress { font-size: 12px; color: var(--muted); align-self: center; }
 .writes ol { margin: 2px 0 6px 18px; padding: 0; color: var(--muted); font-size: 12px; }
 .writes ol li.bad { color: var(--deleted); }
@@ -148,10 +148,10 @@ svg .place:hover, svg .place.near { fill-opacity: .9; }
 svg .place.chosen { fill: var(--changed); stroke: var(--changed); fill-opacity: .9; }
 svg .hit { fill: transparent; cursor: pointer; }
 svg .frame-select { fill: var(--accent); fill-opacity: .10; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
-svg .frame-error { fill: none; stroke: var(--warnings); stroke-width: 2; }
+svg .frame-error { fill: none; stroke: var(--warning); stroke-width: 2; }
 .editor-bottom { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 16px; margin-top: 10px; }
 .editor-bottom h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
-.errors div { color: var(--warnings); padding: 3px 0; cursor: pointer; font-size: 13px; }
+.errors div { color: var(--warning); padding: 3px 0; cursor: pointer; font-size: 13px; }
 .errors .ok { color: var(--added); cursor: default; }
 .editor-bottom > div { min-width: 0; }
 .properties table { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
@@ -161,11 +161,11 @@ svg .frame-error { fill: none; stroke: var(--warnings); stroke-width: 2; }
                     color: var(--text); border: 1px solid var(--edge); border-radius: 3px; }
 .properties input:focus { border-color: var(--accent); outline: none; }
 .properties .section td { color: var(--accent); font-family: inherit; padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
-.mark-errors { color: var(--warnings); font-weight: 600; margin-left: 8px; }
+.mark-errors { color: var(--warning); font-weight: 600; margin-left: 8px; }
 </style>
 </head>
 <body>
-<header><b>TIAC_Editor</b><span class="info" id="info">prohlížeč a úpravy</span></header>
+<header><b>TIAC_Editor</b><span class="info" id="info">viewer and editor</span></header>
 <div class="main">
   <aside id="nw"></aside>
   <main id="content"></main>
@@ -262,10 +262,10 @@ function box(g, d, p) {
   el(g, 'text', {x: bx + bw / 2, y: y_hl + 4, 'text-anchor': 'middle', class: 'symbol'}, p.name || '');
   if (p.template) el(g, 'text', {x: bx + bw / 2, y: y_hl + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.template);
   if (p.instance) description(g, bx + bw / 2, top - 6, p.instance);
-  // vstupy: [napájení, ...vstupy]
+  // inputs: [power, ...inputs]
   [{pin: p.power[0], operand: null}, ...p.inputs].forEach((pin, i) => {
     const yy = rows[i];
-    const feed = String(pin.operand).startsWith('wire#');   // přívod: vodič vede až z buňky left
+    const feed = String(pin.operand).startsWith('wire#');   // feed: the wire comes all the way from the left cell
     if (i > 0) el(g, 'line', {class: 'wire', x1: feed ? d.x : bx - 12, y1: yy, x2: bx, y2: yy});
     if (pin.pin) el(g, 'text', {x: bx + 5, y: yy + 4, class: 'pin'}, pin.pin);
     if (i > 0 && !feed) description(g, bx - 15, yy + 4, pin.operand, 'end');
@@ -278,7 +278,7 @@ function box(g, d, p) {
   });
   if (p.below) description(g, bx + bw / 2, bottom + 14, p.below);
 }
-// FBD (F1): geometrie z fbd.rozloz — boxy s piny, negace kroužkem, signály ortogonálně, uzly odboček
+// FBD (F1): geometry from the FBD layout — boxes with pins, negation as a circle, orthogonal signals, tap nodes
 function drawFBD(net, diff) {
   const k = net.drawing;
   const svg = document.createElementNS(NS, 'svg');
@@ -315,7 +315,7 @@ function drawFBD(net, diff) {
       if (v.pin) quiet(el(g, 'text', {x: d.x + d.w - 4, y: v.y + 4, 'text-anchor': 'end', class: 'pin'}, v.pin), chg);
     }
   }
-  if (k.empty) el(svg, 'text', {x: 16, y: k.height / 2 + 4, class: 'empty'}, '(prázdný network)');
+  if (k.empty) el(svg, 'text', {x: 16, y: k.height / 2 + 4, class: 'empty'}, '(empty network)');
   return svg;
 }
 function draw(net, diff) {
@@ -339,7 +339,7 @@ function draw(net, diff) {
     else box(g, d, p);
   }
   el(svg, 'line', {class: 'rail', x1: k.rail.x, y1: k.rail.y1, x2: k.rail.x, y2: k.rail.y2});
-  if (k.empty) el(svg, 'text', {x: k.rail.x + 14, y: k.height / 2 + 4, class: 'empty'}, '(prázdný network)');
+  if (k.empty) el(svg, 'text', {x: k.rail.x + 14, y: k.height / 2 + 4, class: 'empty'}, '(empty network)');
   return svg;
 }
 function elementDescription(p) {
@@ -364,7 +364,7 @@ function rungList(net) {
   return div;
 }
 
-// ---------- stránka ----------
+// ---------- page ----------
 async function showExports() {
   const ex = await api('/api/exports');
   let h = '<h1>Exports</h1>';
@@ -372,15 +372,15 @@ async function showExports() {
     h += `<h2>${esc(p.project)}</h2><ul class="select">` +
       p.blocks.map(b => `<li><a href="${link({project: p.project, block: b.block, nw: null})}">${esc(b.block)}</a></li>`).join('') + '</ul>';
   }
-  $('content').innerHTML = h || 'Žádné exports.';
+  $('content').innerHTML = h || 'No exports.';
 }
 const enc = encodeURIComponent;
-const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // cívky k pravému edge okna as v TIA
+const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // coils at the right edge of the window, as in TIA
 
-// strom úprav: projekt → kolo → blok → NW → úprava
+// edit tree: project → round → block → NW → edit
 function treeHtml(st, activeId) {
-  let h = '<h2>Úpravy</h2><div class="tree">';
-  if (!st.projects.length) h += '<p class="empty">Zatím žádné úpravy.</p>';
+  let h = '<h2>Edits</h2><div class="tree">';
+  if (!st.projects.length) h += '<p class="empty">No edits yet.</p>';
   const group = (field, key) => {
     const m = new Map();
     for (const x of field) { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
@@ -409,7 +409,7 @@ function treeHtml(st, activeId) {
 let lastState = {projects: []};
 async function loadTree(activeId) {
   try { lastState = await api('/api/state'); return treeHtml(lastState, activeId); }
-  catch (e) { return `<h2>Úpravy</h2><p class="warnings">⚠ ${esc(e.message)}</p>`; }
+  catch (e) { return `<h2>Edits</h2><p class="warning">⚠ ${esc(e.message)}</p>`; }
 }
 function networksHtml(b, nw, url) {
   return `<h2>${esc(b.block)} — networks</h2>` + b.networks.map(n =>
@@ -441,16 +441,16 @@ async function showNetwork(project, block) {
   const m = $('content');
   m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.title || '')}</h1>` +
     (net.comment ? `<p class="comment">${esc(net.comment)}</p>` : '') +
-    net.warnings.map(v => `<div class="warnings">⚠ ${esc(v)}</div>`).join('');
+    net.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('');
   const fbd = net.language === 'FBD' && net.drawing;
   if (net.language === 'LAD' && net.drawing || fbd) {
     const pp = lastState.projects.find(p => p.project === project);
     const round = pp && pp.edits.length ? pp.edits[pp.edits.length - 1].round : 'Round 1';
     const d = document.createElement('div');
     d.className = 'tools';
-    d.innerHTML = `<button class="hl" id="proposal">Propose úpravu</button> round <input id="proposal-round" value="${esc(round)}">` +
-                  (net.as_lad ? `<button id="as-lad" class="${q.get('lad') === '1' ? 'active' : ''}" title="only ke čtení; only síť z &, >=1, negací a =">` +
-                                  `${q.get('lad') === '1' ? 'Zobrazit as FBD' : 'Zobrazit as LAD'}</button>` : '') +
+    d.innerHTML = `<button class="hl" id="proposal">Propose edit</button> round <input id="proposal-round" value="${esc(round)}">` +
+                  (net.as_lad ? `<button id="as-lad" class="${q.get('lad') === '1' ? 'active' : ''}" title="read-only; only for a network made of &, >=1, negations and =">` +
+                                  `${q.get('lad') === '1' ? 'Show as FBD' : 'Show as LAD'}</button>` : '') +
                   `<span class="mode" id="proposal-error"></span>`;
     m.appendChild(d);
     if ($('as-lad')) $('as-lad').onclick = () => { location.href = link({lad: q.get('lad') === '1' ? null : '1'}); };
@@ -463,7 +463,7 @@ async function showNetwork(project, block) {
     };
   }
   if (net.as_lad && q.get('lad') === '1') {
-    m.insertAdjacentHTML('beforeend', '<p class="comment">Zobrazeno as LAD — only ke čtení; každé přiřazení is vlastní rung, sdílené části se opakují.</p>');
+    m.insertAdjacentHTML('beforeend', '<p class="comment">Shown as LAD — read-only; each assignment is its own rung, shared parts are repeated.</p>');
     canvas(m, {drawing: net.as_lad.drawing, elements: net.as_lad.elements, rungs: net.as_lad.rungs});
   } else canvas(m, net);
 }
@@ -481,19 +481,19 @@ async function changeState(uid, state) {
   if (!r.ok) throw new Error(j.error || r.status);
 }
 
-// od 13. 10. 2026: Signed = zapsáno v projektu (Honza / Upload přes Writer), Checked = Reader export = návrh (Check)
+// Signed = written into the project (by hand / Upload through the Writer), Checked = Reader export matches the proposal (Check)
 const STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested'];
 
 async function showEdit(uid, error) {
   const d = await api(`/api/edits/${enc(uid)}?width=${canvasWidth()}`);
   const u = d.edit;
-  $('info').textContent = `${u.project} · úprava ${u.id} · export před ${u.before.export_ts}`;
+  $('info').textContent = `${u.project} · edit ${u.id} · base export ${u.before.export_ts}`;
   document.title = `TIAC_Editor — ${u.id} ${u.block} NW${u.nw}`;
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
     left += networksHtml(b, u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
-  } catch (e) { /* blok už v exportu není: strom stačí */ }
+  } catch (e) { /* block no longer in the export: the tree is enough */ }
   $('nw').innerHTML = left;
   const m = $('content');
   const btnChecked = d.next === 'Checked' && !d.checked_allowed;
@@ -504,42 +504,42 @@ async function showEdit(uid, error) {
     (u.note ? `<p class="comment">${esc(u.note)}</p>` : '') +
     `<div class="buttons">` +
     (d.previous ? `<button data-state="${esc(d.previous)}">← ${esc(d.previous)}</button>` : '') +
-    (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked až after poslední check export se match (Check / Zkontrolovat export)"' : ''}>${esc(d.next)} →</button>` : '') +
-    (u.state === 'Proposal' ? `<button id="edit_mode">EditMode</button>` : `<button id="check-export" title="porovná nejnovější export Readeru s návrhem a zapíše check">Zkontrolovat export</button>`) +
-    (u.state === 'Approved' ? (u.f ? `<span class="fblock">F-block: writes Honza by Procedure for TIA</span>`
-      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer zapíše network do project TIA (export block → náhrada network → import Override) → Signed' : 'nejdřív Nastavení TIA project'}">Upload →</button>`) : '') +
-    (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exportuje block, porovná s návrhem; při shodě → Checked' : 'nejdřív Nastavení TIA project'}">Check →</button>` : '') +
+    (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked only after the latest export check matches (Check / Check export)"' : ''}>${esc(d.next)} →</button>` : '') +
+    (u.state === 'Proposal' ? `<button id="edit_mode">Edit</button>` : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
+    (u.state === 'Approved' ? (u.f ? `<span class="fblock">F-block: change it by hand following the TIA steps</span>`
+      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed' : 'fill in the TIA settings for the project first'}">Upload →</button>`) : '') +
+    (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exports the block and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check →</button>` : '') +
     `<span class="progress" id="progress"></span>` +
     `</div>` +
-    `<details class="tia-settings"${d.tia ? '' : ' open'}><summary>Nastavení TIA project ${esc(u.project)}: ${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'nenastaveno (Upload/Check fails)'}</summary>` +
+    `<details class="tia-settings"${d.tia ? '' : ' open'}><summary>TIA settings for project ${esc(u.project)}: ${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'not set (Upload/Check will fail)'}</summary>` +
     `softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1">` +
     `plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1">` +
-    `groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(dohledá Writer)">` +
-    `<button id="tia-save">Uložit</button></details>` +
-    (d.errors.length ? `<div class="warnings">⚠ Návrh porušuje rules ${language} (${d.errors.length}):<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
-    (error ? `<div class="warnings">⚠ ${esc(error)}</div>` : '') +
-    `<div class="checks"><h3>Checks export</h3>` +
+    `groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(Writer looks it up)">` +
+    `<button id="tia-save">Save</button></details>` +
+    (d.errors.length ? `<div class="warning">⚠ The proposal breaks ${language} rules (${d.errors.length}):<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
+    (error ? `<div class="warning">⚠ ${esc(error)}</div>` : '') +
+    `<div class="checks"><h3>Export checks</h3>` +
     (u.checks && u.checks.length ? u.checks.map(k =>
       `<div><span class="${k.match ? 'ok' : 'bad'}">${k.match ? '✓ match' : '✗ mismatch'}</span> · ${esc(k.time.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.note ? ' · ' + esc(k.note) : ''}</div>`).join('')
-      : '<div>Zatím žádná — Checked se odemkne, když poslední check is match.</div>') + `</div>` +
+      : '<div>None yet — Checked unlocks when the latest check is a match.</div>') + `</div>` +
     (u.writes && u.writes.length ? `<div class="checks writes"><h3>Upload / Check (Writer, Reader)</h3>` + u.writes.map(z =>
       `<div><span class="${z.ok ? 'ok' : 'bad'}">${z.ok ? '✓' : '✗'} ${esc(z.tool)}</span> · ${esc(z.time.replace('T', ' '))} · ${esc(z.message)}</div>` +
       `<ol>${(z.steps || []).map(k => `<li class="${k.ok ? '' : 'bad'}" title="${esc(k.message)}">${esc(k.step)}${k.ok ? '' : ': ' + esc(k.message)}</li>`).join('')}</ol>`).join('') + `</div>` : '') +
     `<div class="checks procedure" id="procedure"></div>` +
-    d.warnings.map(v => `<div class="warnings">⚠ ${esc(v)}</div>`).join('') +
+    d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
     `<div class="states-leg">States: ${STATES.map(x => `<span class="state s-${x}${x === u.state ? ' active' : ''}">${x}</span>`).join('→')}</div>` +
-    `<div class="legend">Model „after“ against export: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span></div>`;
+    `<div class="legend">Model "after" against the export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></div>`;
   if ($('edit_mode')) $('edit_mode').onclick = () => { location.href = `?edit=${enc(u.id)}&edit_mode=1`; };
   if ($('check-export')) $('check-export').onclick = async () => {
     $('check-export').disabled = true;
     try {
       const k = await apiJson('POST', `/api/edits/${enc(u.id)}/check-export`, {});
       await showEdit(uid, k.match ? null : `Check export ${k.export_ts}: ${k.note}`);
-    } catch (e) { await showEdit(uid, 'Check export selhala: ' + e.message); }
+    } catch (e) { await showEdit(uid, 'Export check failed: ' + e.message); }
   };
-  // M5: Upload (Writer) / Check (Reader) — běží na serveru, tady jen průběh a výsledek; chyba nesmí shodit stránku
-  for (const [id, path, description] of [['upload', 'upload', 'Upload: TIAC_Writer writes network…'],
-                                    ['check', 'check', 'Check: TIAC_Reader exportuje block a porovnává…']]) {
+  // M5: Upload (Writer) / Check (Reader) — runs on the server, here only progress and result; an error must not break the page
+  for (const [id, path, description] of [['upload', 'upload', 'Upload: TIAC_Writer is writing the network…'],
+                                    ['check', 'check', 'Check: TIAC_Reader is exporting the block and comparing…']]) {
     if (!$(id) || $(id).disabled) continue;
     $(id).onclick = async () => {
       for (const b of m.querySelectorAll('.buttons button')) b.disabled = true;
@@ -558,7 +558,7 @@ async function showEdit(uid, error) {
       if (Object.keys(t).length) st.tia = t; else delete st.tia;
       await apiJson('PUT', `/api/state?project=${enc(u.project)}`, st);
       await showEdit(uid);
-    } catch (e) { await showEdit(uid, 'Nastavení TIA: ' + e.message); }
+    } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
   };
   for (const b of m.querySelectorAll('button[data-state]')) {
     b.onclick = async () => {
@@ -567,67 +567,67 @@ async function showEdit(uid, error) {
     };
   }
   canvas(m, d, d.diff);
-  try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* bez postupu */ }
+  try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* no TIA steps */ }
 }
-// F2: postup skládání pro TIA (markdown -> seznam), kopírování pro Honzu
+// F2: TIA steps (markdown -> list), with copy to clipboard
 function md(t) {
   return esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 }
 function procedurePanel(p) {
   const el_ = $('procedure');
   if (!el_) return;
-  el_.innerHTML = `<h3>Procedure for TIA <button id="procedure-copy" title="zkopíruje markdown">kopírovat</button></h3>` +
+  el_.innerHTML = `<h3>TIA steps <button id="procedure-copy" title="copies the markdown">copy</button></h3>` +
     `<div class="header"><b>${esc(p.header)}</b></div><ol>${p.steps.map(k => `<li>${md(k)}</li>`).join('')}</ol>`;
   $('procedure-copy').onclick = async () => {
-    try { await navigator.clipboard.writeText(p.markdown); $('procedure-copy').textContent = 'zkopírováno'; }
-    catch (e) { $('procedure-copy').textContent = 'nelze kopírovat'; }
+    try { await navigator.clipboard.writeText(p.markdown); $('procedure-copy').textContent = 'copied'; }
+    catch (e) { $('procedure-copy').textContent = 'cannot copy'; }
   };
 }
 
 // ---------- M3: editor ----------
 const ed = {u: null, before: null, after: null, hist: [], redo: [], select: null, insert: null, branch: null, res: null,
             cat: null, changed: false, fbd: false, f: false, input: null};
-const errorCount = (n, j) => `${n} ${n === 1 ? 'error' : n < 5 ? 'errors' : 'errors'} ${j || 'LAD'}`;
+const errorCount = (n, j) => `${n} ${j || 'LAD'} ${n === 1 ? 'error' : 'errors'}`;
 const KIND = p => ed.fbd ? 'fbd' : /^coil|^ret$/.test(p.type) ? 'coil' : p.type === 'box' ? 'box' : 'contact';
 const LANG = () => ed.fbd ? 'FBD' : 'LAD';
 
 async function editor(uid) {
   const d = await api(`/api/edits/${enc(uid)}`);
   const u = d.edit;
-  if (u.state !== 'Proposal') { await showEdit(uid, `Upravovat lze only návrh ve state Proposal (teď ${u.state}).`); return; }
+  if (u.state !== 'Proposal') { await showEdit(uid, `Only a proposal in state Proposal can be edited (now ${u.state}).`); return; }
   const fbd = u.after.language === 'FBD';
   Object.assign(ed, {u, fbd, f: !!u.f, input: null,
                      before: fbd ? {language: 'FBD', elements: u.before.elements} : {elements: u.before.elements, rungs: u.before.rungs},
                      after: fbd ? {language: 'FBD', elements: u.after.elements} : {elements: u.after.elements, rungs: u.after.rungs},
                      hist: [], redo: [], select: null, insert: null, branch: null, changed: false});
   ed.cat = await api(`/api/catalog?project=${enc(u.project)}`);
-  $('info').textContent = `${u.project} · editor úpravy ${u.id} · export před ${u.before.export_ts}`;
-  document.title = `TIAC_Editor — edit_mode ${u.id}`;
+  $('info').textContent = `${u.project} · editing ${u.id} · base export ${u.before.export_ts}`;
+  document.title = `TIAC_Editor — edit ${u.id}`;
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
     left += networksHtml(b, u.nw, n => `?project=${enc(u.project)}&block=${enc(u.block)}&nw=${n}`);
-  } catch (e) { /* blok v exportu není */ }
+  } catch (e) { /* block not in the export */ }
   $('nw').innerHTML = left;
   document.querySelector('.main').classList.add('edit');
   palette();
   operands();
   $('content').innerHTML =
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
-    `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · úprava v editor</div>` +
+    `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · editing</div>` +
     `<div class="tools">` +
-    `<button id="ed-undo" title="Ctrl+Z">↶ Zpět</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button>` +
-    (fbd ? `<button id="ed-plus" title="Insert input (Ctrl+Shift+3 v TIA)">+ input</button><button id="ed-minus" title="odebere vybraný (jinak poslední) input">− input</button>` +
-           `<button id="ed-neg" title="Create a ones complement (Ctrl+Shift+4 v TIA)">Negate input</button>`
-         : `<button id="ed-branch" title="select dvě místa v one rung; element = vybraný v paletě, jinak spínací contact">Větev</button>`) +
-    `<button id="ed-delete" title="Delete">Smazat</button>` +
-    `<button id="ed-save" class="hl">Uložit návrh</button><button id="ed-close">Zavřít editor</button></div>` +
+    `<button id="ed-undo" title="Ctrl+Z">↶ Undo</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button>` +
+    (fbd ? `<button id="ed-plus" title="Insert input (Ctrl+Shift+3 in TIA)">+ input</button><button id="ed-minus" title="removes the selected (otherwise the last) input">− input</button>` +
+           `<button id="ed-neg" title="Create a ones complement (Ctrl+Shift+4 in TIA)">Negate input</button>`
+         : `<button id="ed-branch" title="pick two places in one rung; element = the one selected in the palette, otherwise an NO contact">Branch</button>`) +
+    `<button id="ed-delete" title="Delete">Delete</button>` +
+    `<button id="ed-save" class="hl">Save proposal</button><button id="ed-close">Close editor</button></div>` +
     `<div class="mode" id="ed-mode"></div>` +
     `<div class="canvas" id="ed-canvas"></div>` +
-    `<div class="legend">Against export: <span class="p">přidáno</span><span class="z">změněno</span><span class="s">smazáno</span>` +
-    ` · <span style="color:var(--warnings)">■ error rules</span></div>` +
-    `<div class="editor-bottom"><div><h3>Rules ${LANG()}${ed.f ? ' · F-block' : ''}</h3><div class="errors" id="ed-errors"></div></div>` +
-    `<div><h3>Properties element</h3><div class="properties" id="ed-properties"></div></div></div>`;
+    `<div class="legend">Against export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span>` +
+    ` · <span style="color:var(--warning)">■ rule error</span></div>` +
+    `<div class="editor-bottom"><div><h3>${LANG()} rules${ed.f ? ' · F-block' : ''}</h3><div class="errors" id="ed-errors"></div></div>` +
+    `<div><h3>Element properties</h3><div class="properties" id="ed-properties"></div></div></div>`;
   $('ed-undo').onclick = undo;
   $('ed-redo').onclick = redo;
   if ($('ed-branch')) $('ed-branch').onclick = () => { ed.branch = ed.branch ? null : {from: null}; render(); };
@@ -642,7 +642,7 @@ async function editor(uid) {
   $('ed-delete').onclick = () => { if (ed.select) deleteSelected(); };
   $('ed-save').onclick = save;
   $('ed-close').onclick = () => {
-    if (!ed.changed || confirm('Neuložené změny se zahodí. Zavřít?')) location.href = `?edit=${enc(u.id)}`;
+    if (!ed.changed || confirm('Unsaved changes will be lost. Close?')) location.href = `?edit=${enc(u.id)}`;
   };
   const pl = $('ed-canvas');
   pl.addEventListener('dragover', e => { if (ed.insert) { e.preventDefault(); highlightNear(nearest(e)); } });
@@ -650,7 +650,7 @@ async function editor(uid) {
   pl.addEventListener('drop', e => { e.preventDefault(); const m = nearest(e); if (m) insertAt(m); });
   document.addEventListener('keydown', keys);
   await recompute([]);
-  // scénáře pro snímky / Clauda (headless nemá myš): &ops=<JSON operací>, &vyber=<id>, &paleta=<klíč>, &vetev=r,k
+  // scenarios for screenshots / automation (headless has no mouse): &ops=<JSON operations>, &select=<id>, &palette=<key>, &branch=r,k
   if (q.get('ops')) await recompute(JSON.parse(q.get('ops')));
   if (q.get('select')) { ed.select = q.get('select'); ed.input = q.get('input') ? +q.get('input') : null; render(); }
   if (q.get('palette')) selectPalette(q.get('palette'));
@@ -690,8 +690,8 @@ async function save() {
   try {
     const r = await apiJson('POST', `/api/edits/${enc(ed.u.id)}/after`, {after: ed.after});
     ed.changed = false;
-    mode(`Uloženo ${new Date().toLocaleTimeString('cs-CZ')}` + (r.errors.length ? ` — ${errorCount(r.errors.length, LANG())} (hlavička úpravy is označí)` : ' — without errors'), true);
-  } catch (e) { mode('⚠ Uložení selhalo: ' + e.message); }
+    mode(`Saved ${new Date().toLocaleTimeString()}` + (r.errors.length ? ` — ${errorCount(r.errors.length, LANG())} (flagged in the edit header)` : ' — no errors'), true);
+  } catch (e) { mode('⚠ Save failed: ' + e.message); }
 }
 function mode(text, message) {
   const r = $('ed-mode');
@@ -713,7 +713,7 @@ function keys(e) {
   else if ((e.key === 'Delete' || e.key === 'Backspace') && ed.select) { e.preventDefault(); deleteSelected(); }
 }
 
-// paleta: instrukce + bloky projektu, hledání podle názvu
+// palette: instructions + project blocks, search by name
 function palette() {
   const p = $('palette');
   p.hidden = false;
@@ -727,7 +727,7 @@ function paletteList() {
   const source = ed.fbd ? ed.cat.fbd.concat(ed.cat.instruction.filter(x => x.element.type === 'box' && !/_TRIG$/.test(x.key)))
                        : ed.cat.instruction;
   for (const x of source) { if (!sk.has(x.group)) sk.set(x.group, []); sk.get(x.group).push(x); }
-  sk.set('Blocks project', ed.cat.blocks.map(b => ({key: b.key, name: b.name, description: `${b.f ? 'F-' : ''}${b.kind}${b.number ?? ''}` +
+  sk.set('Project blocks', ed.cat.blocks.map(b => ({key: b.key, name: b.name, description: `${b.f ? 'F-' : ''}${b.kind}${b.number ?? ''}` +
           (b.instance.length ? ' · ' + b.instance.join(', ') : '')})));
   let html = '';
   for (const [group, item] of sk) {
@@ -736,7 +736,7 @@ function paletteList() {
     html += `<h2>${esc(group)}</h2>` + f.map(x => `<div class="item" draggable="true" data-key="${esc(x.key)}" title="${esc(x.description || '')}">` +
       `<b>${esc(x.name)}</b><span>${esc(x.description || '')}</span></div>`).join('');
   }
-  $('pal-list').innerHTML = html || '<p class="empty">Nothing nenalezeno.</p>';
+  $('pal-list').innerHTML = html || '<p class="empty">Nothing found.</p>';
   for (const el of $('pal-list').querySelectorAll('.item')) {
     el.onclick = () => selectPalette(ed.insert && ed.insert.key === el.dataset.key ? null : el.dataset.key);
     el.ondragstart = e => { e.dataTransfer.setData('text/plain', el.dataset.key); selectPalette(el.dataset.key); };
@@ -754,7 +754,7 @@ function template(key) {
   const x = (ed.fbd ? ed.cat.fbd.find(i => i.key === key) : null) || ed.cat.instruction.find(i => i.key === key) ||
             ed.cat.blocks.find(b => b.key === key);
   const pr = x ? JSON.parse(JSON.stringify(x.element)) : null;
-  if (pr && ed.fbd && !pr.name) pr.name = x.name;          // only for text režimu; FBD vkládá by klíče
+  if (pr && ed.fbd && !pr.name) pr.name = x.name;          // only for the mode text; FBD inserts by key
   return pr;
 }
 function selectPalette(key) {
@@ -763,7 +763,7 @@ function selectPalette(key) {
   markPalette();
   render();
 }
-// našeptávání operandů: tagy, členy globálních DB, proměnné upravovaného bloku (#…), instanční DB
+// operand suggestions: tags, global DB members, variables of the edited block (#…), instance DBs
 function operands() {
   const o = [];
   for (const t of ed.cat.tags) o.push([`"${t.name}"`, `${t.type} ${t.address}`]);
@@ -776,7 +776,7 @@ function operands() {
   $('operands').innerHTML = o.map(([v, l]) => `<option value="${esc(v)}" label="${esc(l)}"></option>`).join('');
 }
 
-// místa vložení: platná pro vybraný prvek palety, ve větvi všechna (začátek) / za začátkem v témže rungu (konec)
+// insertion places: those valid for the selected palette element; in branch mode all (start) / after the start in the same rung (end)
 function visiblePlaces() {
   const m = ed.res.places || [];
   if (ed.branch) return ed.branch.from ? m.filter(x => x.r === ed.branch.from.r && x.k > ed.branch.from.k) : m;
@@ -843,7 +843,7 @@ function render() {
     const gm = el(svg, 'g', {});
     visiblePlaces().forEach((m, i) => {
       const c = el(gm, 'circle', {class: 'place', cx: m.x, cy: m.y, r: 7, 'data-i': i});
-      el(c, 'title', {}, m.fbd ? (m.to ? `box ${m.to.id}, ${m.new_input ? 'nový ' : ''}input ${m.to.input}` : 'nová logická path')
+      el(c, 'title', {}, m.fbd ? (m.to ? `box ${m.to.id}, ${m.new_input ? 'new ' : ''}input ${m.to.input}` : 'new logic path')
                                : `rung ${m.r + 1}, position ${m.k}`);
       c.onclick = ev => { ev.stopPropagation(); insertAt(m); };
     });
@@ -852,11 +852,11 @@ function render() {
       if (a) el(gm, 'circle', {class: 'place chosen', cx: a.x, cy: a.y, r: 7});
     }
   }
-  // režim, chyby, vlastnosti, tlačítka
-  if (ed.fbd && ed.insert) mode(`Vkládání: ${ed.insert.element.name || ed.insert.key} — klikni on input box (box převezme jeho signál), below poslední input (nový input) nebo left bottom (nová logická path). Esc zruší.`);
-  else if (ed.branch) mode(ed.branch.from ? 'Větev: klikni on end úseku ve stejném rung (Esc zruší).'
-                                  : `Větev${ed.insert ? ' s ' + ed.insert.element.name : ''}: klikni on začátek úseku (Esc zruší).`);
-  else if (ed.insert) mode(`Vkládání: ${ed.insert.element.name || ed.insert.key} — klikni on zvýrazněné místo nebo přetáhni on vodič (Esc zruší).`);
+  // mode, errors, properties, buttons
+  if (ed.fbd && ed.insert) mode(`Inserting: ${ed.insert.element.name || ed.insert.key} — click a box input (the box takes over its signal), below the last input (new input) or bottom left (new logic path). Esc cancels.`);
+  else if (ed.branch) mode(ed.branch.from ? 'Branch: click the end of the section in the same rung (Esc cancels).'
+                                  : `Branch${ed.insert ? ' with ' + ed.insert.element.name : ''}: click the start of the section (Esc cancels).`);
+  else if (ed.insert) mode(`Inserting: ${ed.insert.element.name || ed.insert.key} — click a highlighted place or drag onto a wire (Esc cancels).`);
   else if (!$('ed-mode').classList.contains('message')) mode('');
   if ($('ed-branch')) $('ed-branch').classList.toggle('active', !!ed.branch);
   if (ed.fbd) {
@@ -868,11 +868,11 @@ function render() {
   $('ed-undo').disabled = !ed.hist.length;
   $('ed-redo').disabled = !ed.redo.length;
   $('ed-delete').disabled = !ed.select;
-  const nch = res.errors.filter(c => !c.warnings).length;
+  const nch = res.errors.filter(c => !c.warning).length;
   $('ed-mark').innerHTML = nch ? `<span class="mark-errors">⚠ ${errorCount(nch, LANG())}</span> ·` : '';
   $('ed-errors').innerHTML = res.errors.length
-    ? res.errors.map(c => `<div data-id="${esc(c.id || '')}" class="${c.warnings ? 'var' : ''}">⚠ ${esc(c.error)}</div>`).join('')
-    : '<div class="ok">✓ Without errors.</div>';
+    ? res.errors.map(c => `<div data-id="${esc(c.id || '')}" class="${c.warning ? 'var' : ''}">⚠ ${esc(c.error)}</div>`).join('')
+    : '<div class="ok">✓ No errors.</div>';
   for (const d of $('ed-errors').querySelectorAll('div[data-id]'))
     if (d.dataset.id) d.onclick = () => { ed.select = d.dataset.id; render(); };
   properties();
@@ -882,21 +882,21 @@ function propertiesFBD(v, p) {
   const T = {and: '&', or: '>=1', xor: 'x', assign: '=', s: 'S', r: 'R', sr: 'SR', rs: 'RS', ptrig: 'P_TRIG', ntrig: 'N_TRIG'};
   const P = Object.fromEntries(ed.after.elements.map(x => [x.id, x]));
   const inp = (attrs, value) => `<input ${attrs} value="${esc(value ?? '')}" list="operands" autocomplete="off">`;
-  const neg = (attrs, on) => `<label title="negate (Ctrl+Shift+4 v TIA)" style="white-space:nowrap"><input type="checkbox" ${attrs} ${on ? 'checked' : ''} style="width:auto"> NOT</label>`;
+  const neg = (attrs, on) => `<label title="negate (Ctrl+Shift+4 in TIA)" style="white-space:nowrap"><input type="checkbox" ${attrs} ${on ? 'checked' : ''} style="width:auto"> NOT</label>`;
   let h = `<table><colgroup><col style="width:96px"><col><col style="width:62px"></colgroup>` +
           `<tr class="section"><td colspan="3">${esc(p.id)} · ${esc(T[p.type] || p.name || p.type)}${p.instance ? ' ' + esc(p.instance) : ''}</td></tr>`;
   if (T[p.type] && 'operand' in p && !['and', 'or', 'xor'].includes(p.type))
-    h += `<tr><td>${['ptrig', 'ntrig'].includes(p.type) ? 'bit paměti' : 'operand'}</td><td colspan="2">${inp('data-op="above"', p.operand)}</td></tr>`;
+    h += `<tr><td>${['ptrig', 'ntrig'].includes(p.type) ? 'edge bit' : 'operand'}</td><td colspan="2">${inp('data-op="above"', p.operand)}</td></tr>`;
   if (p.type === 'call' && p.instance != null) h += `<tr><td>instance</td><td colspan="2">${inp('data-op="above"', p.instance)}</td></tr>`;
   if (p.inputs.length) h += `<tr class="section"><td colspan="3">Inputs</td></tr>`;
   for (const x of p.inputs) {
-    const source = x.signal ? `<span style="color:var(--muted)">← výstup ${esc(T[(P[x.signal] || {}).type] || (P[x.signal] || {}).name || x.signal)} (${esc(x.signal)})</span>`
+    const source = x.signal ? `<span style="color:var(--muted)">← output ${esc(T[(P[x.signal] || {}).type] || (P[x.signal] || {}).name || x.signal)} (${esc(x.signal)})</span>`
                            : inp(`data-input="${x.n}"`, x.operand);
     h += `<tr${ed.input === x.n ? ' style="background:var(--select)"' : ''}><td>${esc(x.pin)}${['and', 'or', 'xor'].includes(p.type) ? '' : ''}</td><td>${source}</td><td>${neg(`data-neg="${x.n}"`, x.neg)}</td></tr>`;
   }
-  if (p.outputs.length) h += `<tr class="section"><td colspan="3">Výstupy</td></tr>`;
+  if (p.outputs.length) h += `<tr class="section"><td colspan="3">Outputs</td></tr>`;
   for (const x of p.outputs) h += `<tr><td>${esc(x.pin)}</td><td>${inp(`data-output="${esc(x.pin)}"`, x.operand)}</td><td>${neg(`data-negv="${esc(x.pin)}"`, x.neg)}</td></tr>`;
-  h += `<tr><td>výstup box</td><td></td><td>${neg('data-negh="1"', p.neg_output)}</td></tr>`;
+  h += `<tr><td>box output</td><td></td><td>${neg('data-negh="1"', p.neg_output)}</td></tr>`;
   v.innerHTML = h + '</table>';
   for (const i of v.querySelectorAll('[data-op]')) i.onchange = () => applyOp({type: 'change_operand', id: p.id, operand: i.value});
   for (const i of v.querySelectorAll('[data-input]')) i.onchange = () => applyOp({type: 'change_operand', id: p.id, input: +i.dataset.input, operand: i.value});
@@ -908,7 +908,7 @@ function propertiesFBD(v, p) {
 function properties() {
   const v = $('ed-properties');
   const p = ed.select && ed.after.elements.find(x => x.id === ed.select);
-  if (!p) { v.innerHTML = `<p class="comment">Klikni on ${ed.fbd ? 'box nebo jeho input' : 'element'} v plátně. Delete smaže, Ctrl+Z vrátí.</p>`; return; }
+  if (!p) { v.innerHTML = `<p class="comment">Click ${ed.fbd ? 'a box or one of its inputs' : 'an element'} on the canvas. Delete removes it, Ctrl+Z undoes.</p>`; return; }
   if (ed.fbd) { propertiesFBD(v, p); return; }
   const field = (key, value, description, list) => `<tr><td>${esc(description)}</td><td><input data-field="${key}" value="${esc(value ?? '')}" list="${list || 'operands'}" autocomplete="off"></td></tr>`;
   let h = `<table><colgroup><col style="width:96px"><col></colgroup><tr class="section"><td colspan="2" title="${esc(elementDescription(p))}">${esc(p.id)} · ${esc(elementDescription(p))}</td></tr>`;
@@ -919,13 +919,13 @@ function properties() {
       if (b && b.instance.length) h += `<tr><td></td><td style="color:var(--muted);font-size:12px">instance ${esc(p.name)}: ${b.instance.map(esc).join(', ')}</td></tr>`;
     }
     if (p.template != null) h += field('template', p.template, 'type', '');
-    if (p.below != null) h += field('below', p.below, 'bit edges');
+    if (p.below != null) h += field('below', p.below, 'edge bit');
     if (p.inputs.length) h += `<tr class="section"><td colspan="2">Inputs</td></tr>`;
     p.inputs.forEach((x, i) => {
-      h += x.operand.startsWith('wire#') ? `<tr><td>${esc(x.pin)}</td><td style="color:var(--muted)">← napájeno větví ${esc(x.operand.slice(5))}</td></tr>`
+      h += x.operand.startsWith('wire#') ? `<tr><td>${esc(x.pin)}</td><td style="color:var(--muted)">← fed by branch ${esc(x.operand.slice(5))}</td></tr>`
                                          : `<tr><td>${esc(x.pin)}</td><td><input data-pin="inputs:${i}" value="${esc(x.operand)}" list="operands" autocomplete="off"></td></tr>`;
     });
-    if (p.outputs.length) h += `<tr class="section"><td colspan="2">Výstupy</td></tr>`;
+    if (p.outputs.length) h += `<tr class="section"><td colspan="2">Outputs</td></tr>`;
     p.outputs.forEach((x, i) => { h += `<tr><td>${esc(x.pin)}</td><td><input data-pin="outputs:${i}" value="${esc(x.operand)}" list="operands" autocomplete="off"></td></tr>`; });
   } else if (p.type === 'comparison') {
     h += field('in1', p.in1, 'IN1');
@@ -933,7 +933,7 @@ function properties() {
     h += field('in2', p.in2, 'IN2') + field('template', p.template, 'type', '');
   } else if (p.type !== 'not') {
     h += field('operand', p.operand, 'operand');
-    if (p.type === 'contact_p' || p.type === 'contact_n') h += field('bit', p.bit, 'bit edges');
+    if (p.type === 'contact_p' || p.type === 'contact_n') h += field('bit', p.bit, 'edge bit');
   }
   v.innerHTML = h + '</table>';
   for (const i of v.querySelectorAll('[data-field]')) i.onchange = () => applyOp({type: 'change', id: p.id, values: {[i.dataset.field]: i.value}});
@@ -959,7 +959,7 @@ async function start() {
   document.body.dataset.done = '1';
 }
 start().catch(e => {
-  $('content').innerHTML = `<div class="warnings">⚠ ${esc(e.message)}</div>`;
+  $('content').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`;
   document.body.dataset.done = '1';
 });
 </script>

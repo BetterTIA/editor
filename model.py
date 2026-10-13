@@ -1,9 +1,9 @@
-"""Operace nad modelem networku „po" (M3): vložení do série, paralelní větev, smazání, změna operandů;
-místa vložení pro editor a pravidla LAD (validace).
+"""Operations on the "after" network model: insert in series, parallel branch, delete, change operands;
+insertion places for the editor and LAD rules (validation).
 
-Model = {prvky: [{id, typ, …}], rungy: [{z, cesta: [id | 'wire#wN'], do}]} (tvar /api/network).
-Místo = {r: index rungu, k: index v `cesta`} — vložení před položku k (k == len(cesta) = na konec rungu).
-Nové prvky dostávají id n1, n2, … (rozdil.py páruje podle id), nové uzly wire#wN.
+Model = {elements: [{id, type, …}], rungs: [{from, path: [id | 'wire#wN'], to}]} (the /api/network shape).
+Place = {r: rung index, k: index in `path`} — insert before item k (k == len(path) = at the end of the rung).
+New elements get ids n1, n2, … (diff.py pairs by id), new nodes wire#wN.
 """
 import copy
 import re
@@ -20,7 +20,7 @@ class OperationError(ValueError):
 
 
 def kind(p):
-    """'civka' | 'box' | 'kontakt' (kontakty, porovnání, NOT) — určuje platná místa vložení."""
+    """'coil' | 'box' | 'contact' (contacts, comparisons, NOT) — decides the valid insertion places."""
     return 'coil' if p['type'] in COILS else 'box' if p['type'] == 'box' else 'contact'
 
 
@@ -64,16 +64,16 @@ def _new_element(model, element):
 
 
 def _feeds(model):
-    """Uzly, které napájejí pin boxu (`pin := wire#wN`)."""
+    """Nodes that feed a box pin (`pin := wire#wN`)."""
     return {x['operand'][5:] for p in model['elements'] if p['type'] == 'box'
             for x in p['inputs'] if x['operand'].startswith('wire#')}
 
 
-# ---------- poloha v zapojení ----------
+# ---------- position in the circuit ----------
 
 def in_parallel(model, ri, k):
-    """Leží místo k rungu ri uvnitř zavřené paralelní větve? (rung do uzlu, nebo úsek, ke kterému vede
-    jiný rung z téhož začátku / z dřívějšího uzlu téhož rungu)."""
+    """Is place k of rung ri inside a closed parallel branch? (a rung into a node, or a section that another
+    rung leads to from the same start / from an earlier node of the same rung)."""
     r = model['rungs'][ri]
     if r['to'] is not None:
         return True
@@ -87,7 +87,7 @@ def in_parallel(model, ri, k):
 
 
 def validity(model, ri, k):
-    """-> {kontakt, box, civka}: co se smí vložit na místo."""
+    """-> {contact, box, coil}: what may be inserted at the place."""
     r = model['rungs'][ri]
     coils = {p['id'] for p in model['elements'] if p['type'] in COILS}
     after_coil = any(x in coils for x in r['path'][:k])
@@ -99,8 +99,8 @@ def validity(model, ri, k):
 
 
 def places(model, drawing):
-    """Místa vložení s geometrií z kresby (podle id prvků): před každým prvkem a za prvkem, po kterém
-    následuje uzel nebo konec rungu. -> [{r, k, x, y, kontakt, box, civka}]"""
+    """Insertion places with geometry from the drawing (by element id): before every element and after an element
+    followed by a node or the end of the rung. -> [{r, k, x, y, contact, box, coil}]"""
     if not drawing:
         return []
     geo = {d['id']: d for d in drawing['elements']}
@@ -117,20 +117,20 @@ def places(model, drawing):
             if _is_wire(it) or it not in geo:
                 continue
             d = geo[it]
-            # tělo prvku (box: obdélník, jinak symbol kolem cx) -> místo = střed vodiče mezi hranou buňky a tělem
+            # element body (box: rectangle, otherwise a symbol around cx) -> place = middle of the wire between cell edge and body
             l, p = (d['bx'], d['bx'] + d['bw']) if 'bx' in d else (d['cx'] - 16, d['cx'] + 16)
             add(ri, k, (d['x'] + l) / 2, d['y'])
             if k + 1 == len(c) or _is_wire(c[k + 1]):
                 add(ri, k + 1, (p + d['x'] + d['w']) / 2, d['y'])
         if not [x for x in c if not _is_wire(x)] and r['from'] == 'powerrail' and len(model['rungs']) == 1:
-            add(ri, len(c), drawing['rail']['x'] + 40, (drawing['rail']['y1'] + drawing['rail']['y2']) / 2)   # prázdný network
+            add(ri, len(c), drawing['rail']['x'] + 40, (drawing['rail']['y1'] + drawing['rail']['y2']) / 2)   # empty network
     return res
 
 
-# ---------- operace ----------
+# ---------- operations ----------
 
 def insert(model, place, element):
-    """Vloží prvek do série na místo. -> (model, id)"""
+    """Insert an element in series at the place. -> (model, id)"""
     m = copy.deepcopy(model)
     r, k = _rung(m, place)
     p = _new_element(m, element)
@@ -140,7 +140,7 @@ def insert(model, place, element):
 
 
 def _node(m, r, k, end):
-    """Uzel na místě k rungu r (případně vloží nový wire#). konec=True a k na konci otevřeného rungu -> None."""
+    """Node at place k of rung r (inserts a new wire# if needed). end=True and k at the end of an open rung -> None."""
     c = r['path']
     if k == 0 and not end:
         return r['from']
@@ -156,30 +156,30 @@ def _node(m, r, k, end):
 
 
 def branch(model, src, dst, element):
-    """Paralelní větev s jedním prvkem z místa `od` do místa `do` téhož rungu.
-    `do` na konci otevřeného rungu = výstupní (otevřená) větev. -> (model, id)"""
+    """Parallel branch with one element from place `src` to place `dst` of the same rung.
+    `dst` at the end of an open rung = output (open) branch. -> (model, id)"""
     m = copy.deepcopy(model)
     r, a = _rung(m, src)
     r2, b = _rung(m, dst)
     if r is not r2 or a >= b:
         raise OperationError('branch: both places must be in the same rung and the start before the end')
-    target = _node(m, r, b, True)                    # nejdřív konec: vložení uzlu na b neposune a
+    target = _node(m, r, b, True)                    # end first: inserting a node at b does not shift a
     start = _node(m, r, a, False)
     p = _new_element(m, element)
     m['elements'].append(p)
-    m['rungs'].append({'from': start, 'path': [p['id']], 'to': target})   # na konec: indexy rungů (místa) se neposunou
+    m['rungs'].append({'from': start, 'path': [p['id']], 'to': target})   # appended: rung indexes (places) do not shift
     return m, p['id']
 
 
 def delete(model, pid):
-    """Smaže prvek; u boxu i rungy, které napájely jeho piny. Prázdné větve a nepoužité uzly uklidí."""
+    """Delete an element; for a box also the rungs that fed its pins. Cleans up empty branches and unused nodes."""
     m = copy.deepcopy(model)
     P = {p['id']: p for p in m['elements']}
     if pid not in P:
         raise OperationError('element %s does not exist' % pid)
     gone = {pid}
     queue = [pid]
-    while queue:                                  # přívody pinů smazaného boxu (rekurzivně)
+    while queue:                                  # feeds of the deleted box's pins (recursively)
         p = P[queue.pop()]
         if p['type'] != 'box':
             continue
@@ -199,8 +199,8 @@ def delete(model, pid):
 
 
 def cleanup(m):
-    """Prázdné větve pryč (prázdná zavřená větev = zkrat), prázdný hlavní rung zůstane jen jako jediný;
-    uzly wire#, které nic nespojují, se vyhodí."""
+    """Remove empty branches (an empty closed branch = short circuit); an empty main rung stays only if it is the
+    only one; wire# nodes that connect nothing are dropped."""
     modification = True
     while modification:
         modification = False
@@ -208,7 +208,7 @@ def cleanup(m):
             empty = not [x for x in r['path'] if not _is_wire(x)]
             if empty and (r['to'] is not None or r['from'] != 'powerrail' or len(m['rungs']) > 1):
                 if any(o['from'] in {x[5:] for x in r['path']} for o in m['rungs'] if o is not r):
-                    continue                       # z jeho uzlu vede další větev
+                    continue                       # another branch starts from its node
                 m['rungs'].remove(r)
                 modification = True
         used = _feeds(m)
@@ -223,7 +223,7 @@ def cleanup(m):
 
 
 def change(model, pid, values):
-    """Změní operand / piny / instanci prvku (jen povolená pole)."""
+    """Change an element's operand / pins / instance (allowed fields only)."""
     if not isinstance(values, dict) or not set(values) <= CHANGEABLE:
         raise OperationError('only %s can be changed' % sorted(CHANGEABLE))
     m = copy.deepcopy(model)
@@ -243,8 +243,8 @@ def change(model, pid, values):
 
 
 def apply(model, op, template=None):
-    """Jedna operace z API: {typ: vloz|vetev|smaz|zmen, …}. sablona(prvek) převede klíč palety na prvek.
-    -> (model, id dotčeného prvku | None)"""
+    """One operation from the API: {type: insert|branch|delete|change, …}. template(key) turns a palette key
+    into an element. -> (model, id of the affected element | None)"""
     if not isinstance(op, dict):
         raise OperationError('an operation must be an object')
     t = op.get('type')
@@ -262,13 +262,13 @@ def apply(model, op, template=None):
     raise OperationError('unknown operation %r' % (t,))
 
 
-# ---------- validace (pravidla LAD) ----------
+# ---------- validation (LAD rules) ----------
 
 def validate(model):
-    """-> [{id | None, chyba}] — pravidla, která TIA odmítne nebo která návrh nedokončí."""
+    """-> [{id | None, error}] — rules that TIA rejects or that leave the proposal unfinished."""
     P = {p['id']: p for p in model['elements']}
     ch = []
-    produced = {'powerrail'}                       # uzly, do kterých vede proud
+    produced = {'powerrail'}                       # nodes that power flows into
     for r in model['rungs']:
         produced |= {x[5:] for x in r['path'] if _is_wire(x)}
         if r['to']:
@@ -289,7 +289,7 @@ def validate(model):
                                                  'Put it in the main or the output branch.' % nm})
             if p['type'] in COILS and (r['to'] is not None or it != elements_r[-1]):
                 ch.append({'id': it, 'error': 'Coil %s is not at the end of the rung — nothing may follow a coil.' % nm})
-    for oi, o in enumerate(model['rungs']):      # paralelní úsek, jehož hlavní cesta je jen vodič
+    for oi, o in enumerate(model['rungs']):      # parallel section whose main path is only a wire
         if o['to'] is None or o['to'] in feeds:
             continue
         for ri, r in enumerate(model['rungs']):
@@ -322,7 +322,7 @@ def validate(model):
                 ch.append({'id': p['id'], 'error': 'Missing instance: %s' % nm})
             if 'below' in p and not (p.get('below') or '').strip():
                 ch.append({'id': p['id'], 'error': 'Missing edge memory bit: %s' % nm})
-            if p.get('call') == 'instruction':          # u instrukce jsou vstupy povinné (u FB volitelné)
+            if p.get('call') == 'instruction':          # inputs are mandatory for an instruction (optional for an FB)
                 empty_pins = [x['pin'] for x in p['inputs'] if not x['operand'].strip()]
                 if empty_pins:
                     ch.append({'id': p['id'], 'error': 'Missing %s: %s' % (', '.join(empty_pins), nm)})

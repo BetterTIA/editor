@@ -1,6 +1,6 @@
-"""Úložiště úprav (`<data>/<projekt>/stav.json`) a stavový automat úprav.
+"""Change storage (`<data>/<project>/state.json`) and the change state machine.
 
-Server je jediný zapisovatel; zápis atomicky (dočasný soubor + os.replace) pod zámkem.
+The server is the only writer; writes are atomic (temporary file + os.replace) under a lock.
 """
 import json
 import os
@@ -9,8 +9,8 @@ import threading
 from datetime import datetime
 
 
-# od 13. 10. 2026 šest stavů: Signed = zapsáno v projektu (Honza / Writer), Checked = Reader export = návrh.
-# Starší stav.json s pěti stavy se načte beze změny (jména stavů zůstala).
+# Six states: Signed = written to the project (by hand or by the Writer), Checked = Reader export = proposal.
+# An older state.json with five states loads unchanged (the state names stayed the same).
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
 LOCK = threading.RLock()
 
@@ -42,7 +42,7 @@ def load(data, project):
 
 
 def save(data, project, obj):
-    """Atomický zápis: celý soubor do .tmp ve stejné složce, pak os.replace (starý soubor zůstane při chybě)."""
+    """Atomic write: the whole file to .tmp in the same folder, then os.replace (the old file survives an error)."""
     verify_structure(obj)
     c = _file(data, project)
     os.makedirs(os.path.dirname(c), exist_ok=True)
@@ -80,7 +80,7 @@ def projects(data):
 
 
 def new_id(data):
-    """Id úprav jsou jedinečná přes všechny projekty (?uprava=U001 pak nepotřebuje projekt)."""
+    """Change ids are unique across all projects (so ?edit=U001 does not need the project)."""
     n = 0
     for p in projects(data):
         for u in load(data, p)['edits']:
@@ -91,7 +91,7 @@ def new_id(data):
 
 
 def find(data, uid):
-    """-> (projekt, stav, uprava) ; KeyError když není."""
+    """-> (project, state, edit); KeyError when missing."""
     for p in projects(data):
         s = load(data, p)
         for u in s['edits']:
@@ -101,13 +101,13 @@ def find(data, uid):
 
 
 def checked_allowed(u):
-    """O odemknutí Checked rozhoduje poslední kontrola (pozdější neshoda zase zamkne); Signed je volný."""
+    """The last check decides whether Checked is unlocked (a later mismatch locks it again); Signed is free."""
     k = u.get('checks') or []
     return bool(k) and k[-1].get('match') is True
 
 
 def transitions(u):
-    """-> (další stav | None, předchozí stav | None)"""
+    """-> (next state | None, previous state | None)"""
     i = STATES.index(u['state'])
     return (STATES[i + 1] if i + 1 < len(STATES) else None, STATES[i - 1] if i > 0 else None)
 

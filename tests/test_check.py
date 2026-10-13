@@ -1,4 +1,4 @@
-"""M4: kontrola „export po zápisu = návrh" — porovnání podle obsahu, hledání networku podle titulku, CLI, Signed."""
+"""M4: check "export after the write = proposal" — content comparison, finding the network by title, CLI, Signed."""
 import contextlib
 import http.client
 import io
@@ -37,28 +37,28 @@ class TestContentMatch(unittest.TestCase):
     def test_topology(self):
         a = self.nw(1)
         b = json.loads(json.dumps(a))
-        b['rungs'][0]['path'] = ['p1', 'wire#w1', 'p3', 'p4']               # p2 paralelně k p1 místo do série
+        b['rungs'][0]['path'] = ['p1', 'wire#w1', 'p3', 'p4']               # p2 parallel to p1 instead of in series
         b['rungs'].append({'from': 'powerrail', 'path': ['p2'], 'to': 'w1'})
         match, r = diff.content_match(a, b)
         self.assertFalse(match)
-        self.assertIn('liší se zapojení', r[0])
+        self.assertIn('the wiring differs', r[0])
 
     def test_box_pins(self):
         a = self.nw(4)
         b = json.loads(json.dumps(a))
-        b['elements'][1]['inputs'][1]['operand'] = '#Jiny'
+        b['elements'][1]['inputs'][1]['operand'] = '#Other'
         match, r = diff.content_match(a, b)
-        self.assertEqual(r, ['jiné pins FB_Belt "DB_Belt1": Direction #Direction → #Jiny'])
+        self.assertEqual(r, ['different pins FB_Belt "DB_Belt1": Direction #Direction → #Other'])
 
     def test_branch_without_element_in_main_path(self):
         m = model.delete({'elements': self.nw(2)['elements'], 'rungs': self.nw(2)['rungs']}, 'p1')
         ch = model.validate(m)
-        self.assertEqual([c['id'] for c in ch], ['p5', 'p6'])                # obě přemostěné větve
+        self.assertEqual([c['id'] for c in ch], ['p5', 'p6'])                # both bypassed branches
         self.assertTrue(all('Branch without an element in the main path' in c['error'] for c in ch))
 
 
 class TestExportCheck(unittest.TestCase):
-    """Export root v temp: nejdřív jen původní export, „nové exporty" se přidávají během testu."""
+    """Export root in temp: at first only the original export, "new exports" are added during the test."""
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
@@ -105,41 +105,41 @@ class TestExportCheck(unittest.TestCase):
                                                  'after': r['after']})
         uid = u['id']
         self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
-        self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Signed'})          # zapsáno ručně (Signed je volný)
-        # 1) tentýž export jako před úpravou -> neshoda, chybí kontakt
+        self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Signed'})          # written by hand (Signed is free)
+        # 1) the same export as before the edit -> mismatch, contact missing
         code, txt = self.cli('--edit', uid)
         self.assertEqual(code, 1)
-        self.assertIn('chybí v export: contact "Fuse_OK"', txt)
+        self.assertIn('missing in export: contact "Fuse_OK"', txt)
         self.assertIn('the same as before the change', txt)
-        # 2) export s jiným operandem -> neshoda s poznámkou
+        # 2) export with a different operand -> mismatch with a note
         s7dcl, s7res = _read(TS1, '.s7dcl'), _read(TS1, '.s7res')
         self.export('20261012-150000', s7dcl.replace('"Fuse_OK"', '"Fuse_XX"'), s7res)
         code, txt = self.cli('--edit', uid)
         self.assertEqual(code, 1)
-        self.assertIn('jiný operand: návrh contact "Fuse_OK", export contact "Fuse_XX"', txt)
+        self.assertIn('different operand: proposal contact "Fuse_OK", export contact "Fuse_XX"', txt)
         self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 409)
-        # 3) export se zápisem, ale network posunutý (nový network před NW1, volá FC) -> shoda + poznámka
+        # 3) export with the write, but the network moved (new network before NW1, calls FC) -> match + note
         new_value = ('    {\n        S7_Language := "LAD";\n        S7_NetworkTitle := "MLC_0"\n    }\n    NETWORK\n'
                 '        RUNG wire#powerrail\n            Contact( #Start )\n            "FC_Branches"(  )\n'
                 '        END_RUNG\n    END_NETWORK\n')
         i = s7dcl.index('    {\n        S7_Language := "LAD";\n        S7_NetworkTitle := "MLC_1"')
         self.export('20261012-160000', s7dcl[:i] + new_value + s7dcl[i:],
-                    s7res.replace('MultiLingualTexts:\n', 'MultiLingualTexts:\n  - id: MLC_0\n    en-US: Nový network\n', 1))
+                    s7res.replace('MultiLingualTexts:\n', 'MultiLingualTexts:\n  - id: MLC_0\n    en-US: New network\n', 1))
         s, k = self.req('POST', '/api/edits/%s/check-export' % uid, {})
         self.assertEqual((s, k['match'], k['export_ts'], k['nw_export']), (200, True, '20261012-160000', 2))
         self.assertIn('the network moved: NW 1 → NW 2', k['note'])
         _, n1 = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=1' % PROJECT)
-        self.assertEqual((n1['elements'][1]['call'], n1['elements'][1]['name']), ('fc', 'FC_Branches'))   # FC ze staršího exportu
-        # 4) zadaný export se zápisem (vzorek TS1) -> shoda, exit 0
+        self.assertEqual((n1['elements'][1]['call'], n1['elements'][1]['name']), ('fc', 'FC_Branches'))   # FC from an older export
+        # 4) given export with the write (sample TS1) -> match, exit 0
         self.export(TS1, s7dcl, s7res)
         code, txt = self.cli('--edit', uid, '--export-ts', TS1)
         self.assertEqual(code, 0, txt)
         self.assertTrue(txt.startswith('MATCH'))
-        # po shodě projde Signed -> Checked
+        # after a match Signed -> Checked passes
         s, u = self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})
         self.assertEqual((s, u['state']), (200, 'Checked'))
         self.assertEqual([k['match'] for k in u['checks']], [False, False, True, True])
-        # chyby: neexistující export / úprava -> exit 2
+        # errors: nonexistent export / edit -> exit 2
         self.assertEqual(self.cli('--edit', uid, '--export-ts', '20991231-000000')[0], 2)
         self.assertEqual(self.cli('--edit', 'U999')[0], 2)
 

@@ -1,4 +1,4 @@
-"""M3: katalog, operace modelu, pravidla LAD, API editoru a uložení „po"."""
+"""M3: catalog, model operations, LAD rules, editor API and saving "after"."""
 import http.client
 import json
 import shutil
@@ -35,14 +35,14 @@ class TestCatalog(unittest.TestCase):
         fc = next(x for x in CAT['blocks'] if x['key'] == 'fc:FC_Branches')
         self.assertIsNone(fc['element']['instance'])
         dop = next(x for x in CAT['blocks'] if x['name'] == 'FB_Conveyor')
-        self.assertIn({'name': 'T_Startup', 'type': 'TON_TIME'}, dop['interface']['static'])   # atribut {…} přeskočen
+        self.assertIn({'name': 'T_Startup', 'type': 'TON_TIME'}, dop['interface']['static'])   # attribute {…} skipped
 
     def test_db_and_tags(self):
         db = {d['name']: d for d in CAT['db']}
         self.assertEqual(db['DB_Belt1']['instance_type'], 'FB_Belt')
         members = {c['name']: c['type'] for c in db['DB_Machine']['members']}
         self.assertEqual((members['Speed'], members['Counter']), ('Real', 'Struct'))
-        self.assertNotIn('Pieces', members)                                    # vnořené členy STRUCT ne
+        self.assertNotIn('Pieces', members)                                    # nested STRUCT members excluded
         self.assertIn({'name': 'Emergency_Stop', 'type': 'Bool', 'address': '%I0.1', 'table': 'Default tag table'}, CAT['tags'])
 
     def test_instruction(self):
@@ -53,7 +53,7 @@ class TestCatalog(unittest.TestCase):
         ton = catalog.element(CAT, 'TON')
         self.assertEqual((ton['power'], ton['inputs'][0]['pin'], ton['template']), (['IN', 'Q'], 'PT', 'Time'))
         with self.assertRaises(KeyError):
-            catalog.element(CAT, 'fb:Neni')
+            catalog.element(CAT, 'fb:Missing')
 
 
 class TestOperations(unittest.TestCase):
@@ -70,7 +70,7 @@ class TestOperations(unittest.TestCase):
         m, i = model.branch(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, catalog.element(CAT, 'fb:FB_Belt'))
         self.assertEqual(m['rungs'][0]['path'], ['p1', 'p2', 'p3', 'wire#w1', 'p4'])
         self.assertEqual(m['rungs'][1], {'from': 'w1', 'path': [i], 'to': None})
-        self.assertEqual(model.validate(m), [])                             # box ve výstupní větvi smí
+        self.assertEqual(model.validate(m), [])                             # a box in the output branch is allowed
         r, _ = layout.layout(m['rungs'], m['elements'])
         self.assertGreater(r[i]['r'], r['p4']['r'])
 
@@ -79,13 +79,13 @@ class TestOperations(unittest.TestCase):
         self.assertEqual(m['rungs'][0]['path'], ['p1', 'wire#w2', 'p2', 'wire#w1', 'p3', 'p4'])
         self.assertEqual(m['rungs'][1], {'from': 'w2', 'path': [i], 'to': 'w1'})
         r, _ = layout.layout(m['rungs'], m['elements'])
-        self.assertEqual(r[i]['c'], r['p2']['c'])                          # paralelně ke kontaktu p2
-        z = model.delete(m, i)                                               # prázdná větev i uzly pryč
+        self.assertEqual(r[i]['c'], r['p2']['c'])                          # parallel to contact p2
+        z = model.delete(m, i)                                               # empty branch and its nodes removed
         self.assertEqual(z['rungs'], nw(1)['rungs'])
         self.assertEqual(len(z['elements']), 4)
 
     def test_delete_box_with_feed(self):
-        m = model.delete(nw(4), 'p2')                                        # FB s pinem napájeným větví
+        m = model.delete(nw(4), 'p2')                                        # FB with a pin fed by a branch
         self.assertEqual(m['rungs'], [{'from': 'powerrail', 'path': ['p1'], 'to': None}])
         self.assertEqual([p['id'] for p in m['elements']], ['p1'])
 
@@ -103,13 +103,13 @@ class TestOperations(unittest.TestCase):
         mi = {(x['r'], x['k']): x for x in model.places(n, k)}
         self.assertEqual(sorted(mi), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)])
         self.assertTrue(mi[(0, 0)]['box'] and not mi[(0, 0)]['coil'])
-        self.assertEqual((mi[(0, 4)]['contact'], mi[(0, 4)]['coil']), (False, False))   # za cívkou nic
+        self.assertEqual((mi[(0, 4)]['contact'], mi[(0, 4)]['coil']), (False, False))   # nothing after the coil
         n2 = nw(2)
         _, k = layout.layout(n2['rungs'], n2['elements'], 1000)
         mi = {(x['r'], x['k']): x for x in model.places(n2, k)}
-        self.assertFalse(mi[(0, 0)]['box'])                                # před uzlem w1 = uvnitř paralely
-        self.assertFalse(mi[(1, 0)]['box'])                                # ve větvi
-        self.assertTrue(mi[(0, 2)]['box'])                                 # za uzlem w1
+        self.assertFalse(mi[(0, 0)]['box'])                                # before node w1 = inside the parallel section
+        self.assertFalse(mi[(1, 0)]['box'])                                # in a branch
+        self.assertTrue(mi[(0, 2)]['box'])                                 # after node w1
 
 
 class TestValidation(unittest.TestCase):
@@ -125,7 +125,7 @@ class TestValidation(unittest.TestCase):
         ch = model.validate(m)
         self.assertEqual([c['id'] for c in ch], [i])
         self.assertIn('parallel branch', ch[0]['error'])
-        m, i = model.insert(nw(2), {'r': 0, 'k': 0}, catalog.element(CAT, 'MOVE'))   # hlavní větev uvnitř paralely
+        m, i = model.insert(nw(2), {'r': 0, 'k': 0}, catalog.element(CAT, 'MOVE'))   # main branch inside the parallel section
         self.assertTrue(any('parallel branch' in c for c in self.errors(m)))
 
     def test_coil_middle(self):
@@ -171,7 +171,7 @@ class TestApiEditor(unittest.TestCase):
         s, k = self.req('GET', '/api/catalog?project=%s' % PROJECT)
         self.assertEqual(s, 200)
         self.assertIn('fb:FB_Belt', [b['key'] for b in k['blocks']])
-        self.assertEqual(self.req('GET', '/api/catalog?project=Neni')[0], 404)
+        self.assertEqual(self.req('GET', '/api/catalog?project=Missing')[0], 404)
 
     def test_layout_with_operations(self):
         before = nw(1)
@@ -185,7 +185,7 @@ class TestApiEditor(unittest.TestCase):
         self.assertEqual(r['errors'], [])
         self.assertTrue(r['places'])
         s, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': before,
-                                                   'ops': [{'type': 'insert', 'place': {'r': 0, 'k': 0}, 'element': 'fb:Neni'}]})
+                                                   'ops': [{'type': 'insert', 'place': {'r': 0, 'k': 0}, 'element': 'fb:Missing'}]})
         self.assertEqual(s, 400)
         self.assertEqual(self.req('POST', '/api/layout', {'after': before, 'ops': [{'type': 'delete', 'id': 'p9'}]})[0], 400)
 
@@ -197,11 +197,11 @@ class TestApiEditor(unittest.TestCase):
         _, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': u['after'], 'ops': [
             {'type': 'branch', 'from': {'r': 0, 'k': 1}, 'to': {'r': 0, 'k': 2}, 'element': 'fb:FB_Belt'}]})
         s, v = self.req('POST', '/api/edits/%s/after' % u['id'], {'after': r['after']})
-        self.assertEqual(s, 200)                                           # uložit lze i s chybou
+        self.assertEqual(s, 200)                                           # saving works even with an error
         self.assertEqual(len(v['errors']), 1)
         _, d = self.req('GET', '/api/edits/%s' % u['id'])
         self.assertEqual(d['diff'], {'n1': 'added'})
-        self.assertEqual(len(d['errors']), 1)                               # hlavička úpravy je označí
+        self.assertEqual(len(d['errors']), 1)                               # the edit header marks them
         self.assertIn('edited', d['edit'])
         self.assertEqual(self.req('POST', '/api/edits/%s/after' % u['id'], {'after': {'elements': 1}})[0], 400)
         self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
@@ -215,7 +215,7 @@ class TestApiEditor(unittest.TestCase):
                                                  'after': {'elements': net['elements'], 'rungs': net['rungs']}})
         uid = u['id']
         self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
-        self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Signed'})[0], 200)   # volný
+        self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Signed'})[0], 200)   # free
         self.req('POST', '/api/check', {'edit_id': uid, 'match': True})
         self.req('POST', '/api/check', {'edit_id': uid, 'match': False})
         self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 409)
@@ -223,7 +223,7 @@ class TestApiEditor(unittest.TestCase):
         self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 200)
         self.req('POST', '/api/check', {'edit_id': uid, 'match': False})
         _, d = self.req('GET', '/api/edits/%s' % uid)
-        self.assertEqual((d['edit']['state'], d['checked_allowed']), ('Checked', False))   # stav se sám nevrací
+        self.assertEqual((d['edit']['state'], d['checked_allowed']), ('Checked', False))   # the state does not revert by itself
         self.assertIn('MISMATCH', d['warnings'][0])
 
 

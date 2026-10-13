@@ -1,33 +1,35 @@
-"""Postup skládání úpravy v editoru TIA V21 (F2): z rozdílu před / po očíslované kroky česky.
+"""TIA steps for an edit in the TIA V21 editor (F2): numbered steps derived from the before / after difference.
 
-Hlavička vždy `<druh><číslo> "<blok>" · NW <n>: <titulek>` (pravidlo Honzy 12. 10.). Názvy povelů jen ty ověřené
-v lokální nápovědě TIA V21 (nota TIAC_Editor §5b, tabulka POVELY se zdrojem); co ověřené není, je slovy s ⟦neověřeno⟧.
+The header is always `<kind><number> "<block>" · NW <n>: <title>`. Command names are only those verified in the local
+TIA V21 help (table COMMANDS with the source); anything unverified is described in words and marked ⟦unverified⟧.
 """
 import model
 import diff
 import fbd
 
-N = '⟦neověřeno⟧'
-# povel -> (text do kroku, zdroj v nápovědě V21) — §5b noty
+N = '⟦unverified⟧'
+# command -> (text for the step, source in the V21 help)
 COMMANDS = {
-    'insert_input': ('pravým klikem on poslední input → **Insert input** (`Ctrl+Shift+3`)',
-                     'ProgBlockFUP „Adding additional inputs and outputs to FBD elements"'),
-    'delete_input': ('select input → pravý click → **Delete** (jde only u přidaných vstupů)',
-                     'ProgBlockFUP „Removing instruction inputs and outputs"'),
-    'negate': ('select pin → **Create a ones complement** (`Ctrl+Shift+4`)',
-               'ProgPLCProgramEditor „Using the keyboard in the program editor"'),
-    'delete': ('pravý click → **Delete**', 'ProgBlockFUP „Deleting FBD elements"'),
-    'replace': ('klikni on trojúhelník v rohu box (list otevře i `Alt+F2`) a select', 'ProgBlockFUP „Replacing FBD elements"'),
-    'and': ('klávesa `F9` (AND)', 'ProgPLCProgramEditor „Using the keyboard…"'),
-    'or': ('klávesa `F10` (OR)', 'ProgPLCProgramEditor „Using the keyboard…"'),
-    'assign': ('klávesa `Shift+F7` (assignment)', 'ProgPLCProgramEditor „Using the keyboard…"'),
-    'empty_box': ('prázdný box `F8` a type select trojúhelníkem right nahoře', 'ProgBlockFUP „…using an empty box"'),
-    'instructions': ('task card **Instructions** → Basic instructions → Bit logic operations, přetáhni',
-                     'ProgBlockFUP „Inserting FBD elements using the Instructions task card"'),
-    'call': ('z Project tree → Program blocks přetáhni block do network; v dialogu **Call options** zvol',
-             'ProgBlockFUP „Inserting block calls using a drag-and-drop operation"'),
-    'change_instance': ('pravý click on volání → **Change instance**', 'ProgBlockFUP „Changing the instance type"'),
-    'logic_path': ('vlož instruction without spojení se stávající (nová logická path)', 'ProgBlockFUP „Inserting a logic path"'),
+    'insert_input': ('right-click the last input → **Insert input** (`Ctrl+Shift+3`)',
+                     'ProgBlockFUP "Adding additional inputs and outputs to FBD elements"'),
+    'delete_input': ('select the input → right-click → **Delete** (only possible for added inputs)',
+                     'ProgBlockFUP "Removing instruction inputs and outputs"'),
+    'negate': ('select the pin → **Create a ones complement** (`Ctrl+Shift+4`)',
+               'ProgPLCProgramEditor "Using the keyboard in the program editor"'),
+    'delete': ('right-click → **Delete**', 'ProgBlockFUP "Deleting FBD elements"'),
+    'replace': ('click the triangle in the corner of the box (`Alt+F2` also opens the list) and select',
+                'ProgBlockFUP "Replacing FBD elements"'),
+    'and': ('key `F9` (AND)', 'ProgPLCProgramEditor "Using the keyboard…"'),
+    'or': ('key `F10` (OR)', 'ProgPLCProgramEditor "Using the keyboard…"'),
+    'assign': ('key `Shift+F7` (assignment)', 'ProgPLCProgramEditor "Using the keyboard…"'),
+    'empty_box': ('empty box `F8`, then select the type with the triangle at the top right', 'ProgBlockFUP "…using an empty box"'),
+    'instructions': ('**Instructions** task card → Basic instructions → Bit logic operations, drag it in',
+                     'ProgBlockFUP "Inserting FBD elements using the Instructions task card"'),
+    'call': ('drag the block from Project tree → Program blocks into the network; in the **Call options** dialog choose',
+             'ProgBlockFUP "Inserting block calls using a drag-and-drop operation"'),
+    'change_instance': ('right-click the call → **Change instance**', 'ProgBlockFUP "Changing the instance type"'),
+    'logic_path': ('insert the instruction without connecting it to the existing logic (new logic path)',
+                   'ProgBlockFUP "Inserting a logic path"'),
 }
 REPLACEABLE = [{'and', 'or', 'xor'}, {'sr', 'rs'}]
 
@@ -38,7 +40,7 @@ def _p(k):
 
 def header(u):
     return '%s%s "%s" · NW %s: %s' % (u.get('kind') or '', u.get('block_number') if u.get('block_number') is not None else '',
-                                      u['block'], u['nw'], u.get('title') or '(without title)')
+                                      u['block'], u['nw'], u.get('title') or '(no title)')
 
 
 def _c(x):
@@ -48,16 +50,16 @@ def _c(x):
 # ---------- FBD ----------
 
 def _box(p, M):
-    """Popis boxu, podle kterého ho Honza v networku najde."""
+    """Description of the box by which the user finds it in the network."""
     if p['type'] in ('call', 'instruction'):
-        return 'volání %s%s' % (_c(p.get('name')), ' (instance %s)' % _c(p['instance']) if p.get('instance') else '')
+        return 'call %s%s' % (_c(p.get('name')), ' (instance %s)' % _c(p['instance']) if p.get('instance') else '')
     if p['type'] in fbd.WITH_OPERAND:
-        return 'box %s s operand %s' % (_c(fbd.SYMBOL[p['type']]), _c(p.get('operand')))
+        return 'box %s with operand %s' % (_c(fbd.SYMBOL[p['type']]), _c(p.get('operand')))
     inp = []
     for v in p['inputs']:
         if v.get('signal'):
             z = M.get(v['signal'])
-            inp.append(('NOT ' if v.get('neg') else '') + ('výstup %s' % _c(fbd.SYMBOL.get(z['type']) or z.get('name')) if z else 'signál'))
+            inp.append(('NOT ' if v.get('neg') else '') + ('output of %s' % _c(fbd.SYMBOL.get(z['type']) or z.get('name')) if z else 'signal'))
         else:
             inp.append(('NOT ' if v.get('neg') else '') + _c(v['operand']))
     return 'box %s (inputs %s)' % (_c(fbd.SYMBOL[p['type']]), ', '.join(inp))
@@ -70,27 +72,27 @@ def _capitalize(t):
 def _source(v, M):
     if v.get('signal'):
         z = M.get(v['signal'])
-        return 'výstup %s' % (_box(z, M) if z else 'box')
+        return 'the output of %s' % (_box(z, M) if z else 'box')
     return _c(v['operand'])
 
 
 def _insertion(p, where):
     t = p['type']
     if t == 'call' and p.get('call') in ('fb', 'fc'):
-        inst = ('' if not p.get('instance') else ' **Multi-instance** (jméno v rozhraní %s)' % _c(p['instance'][1:])
+        inst = ('' if not p.get('instance') else ' **Multi-instance** (name in the interface %s)' % _c(p['instance'][1:])
                 if p['instance'].startswith('#') else ' **Single instance** (DB %s)' % _c(p['instance']))
-        return 'Vlož volání %s %s: %s%s.' % (_c(p.get('name')), where, _p('call') if inst else _p('call').split(';')[0], inst)
+        return 'Insert the call %s %s: %s%s.' % (_c(p.get('name')), where, _p('call') if inst else _p('call').split(';')[0], inst)
     if t in ('call', 'instruction'):
-        return 'Vlož instruction %s %s: z task card Instructions (složku find hledáním názvu %s), přetáhni.' % (
+        return 'Insert the instruction %s %s: from the Instructions task card (find the folder by searching for %s), drag it in.' % (
             _c(p.get('name')), where, N)
-    how = {'and': _p('and'), 'or': _p('or'), 'assign': _p('assign')}.get(t) or (_p('empty_box') + ' (nebo ' + _p('instructions') + ')')
-    return 'Vlož box %s %s: %s.' % (_c(fbd.SYMBOL[t]), where, how)
+    how = {'and': _p('and'), 'or': _p('or'), 'assign': _p('assign')}.get(t) or (_p('empty_box') + ' (or ' + _p('instructions') + ')')
+    return 'Insert box %s %s: %s.' % (_c(fbd.SYMBOL[t]), where, how)
 
 
 def _neg_step(where, neg):
     if neg:
-        return '%s: neguj — %s.' % (where, _p('negate'))
-    return '%s: zruš negation — %s (týž command podruhé %s).' % (where, _p('negate'), N)
+        return '%s: negate — %s.' % (where, _p('negate'))
+    return '%s: remove the negation — %s (the same command again %s).' % (where, _p('negate'), N)
 
 
 def steps_fbd(u):
@@ -98,56 +100,56 @@ def steps_fbd(u):
     P = {p['id']: p for p in before['elements']}
     Q = {p['id']: p for p in after['elements']}
     steps = []
-    for i, p in P.items():                                                  # smazané
+    for i, p in P.items():                                                  # deleted
         if i not in Q:
-            steps.append('Select %s a smaž ho: %s.' % (_box(p, P), _p('delete')))
-    for i, q in Q.items():                                                  # změněné (i nahrazené)
+            steps.append('Select %s and delete it: %s.' % (_box(p, P), _p('delete')))
+    for i, q in Q.items():                                                  # changed (including replaced)
         p = P.get(i)
         if p is None or fbd._j(p) == fbd._j(q):
             continue
         nm = _capitalize(_box(p, P))
         if p['type'] != q['type']:
             if not any({p['type'], q['type']} <= s for s in REPLACEABLE):
-                steps.append('Select %s a smaž ho: %s.' % (_box(p, P), _p('delete')))
+                steps.append('Select %s and delete it: %s.' % (_box(p, P), _p('delete')))
                 continue
-            steps.append('Select %s, %s %s (**Replace**; inputs zůstanou).' % (_box(p, P), _p('replace'), _c(fbd.SYMBOL[q['type']])))
+            steps.append('Select %s, %s %s (**Replace**; the inputs are kept).' % (_box(p, P), _p('replace'), _c(fbd.SYMBOL[q['type']])))
         if (p.get('operand') or '') != (q.get('operand') or '') and q['type'] in fbd.WITH_OPERAND:
-            steps.append('%s: přepiš operand above box on %s.' % (nm, _c(q.get('operand'))))
+            steps.append('%s: change the operand above the box to %s.' % (nm, _c(q.get('operand'))))
         if q['type'] == 'call' and (p.get('instance') or '') != (q.get('instance') or ''):
-            steps.append('%s: změň instances on %s — %s.' % (nm, _c(q.get('instance')), _p('change_instance')))
+            steps.append('%s: change the instance to %s — %s.' % (nm, _c(q.get('instance')), _p('change_instance')))
         pv, qv = p['inputs'], q['inputs']
         for n in range(1, min(len(pv), len(qv)) + 1):
             a, b = pv[n - 1], qv[n - 1]
             where = '%s, input %d%s' % (nm, n, ' (' + b['pin'] + ')' if q['type'] not in fbd.COMMUTATIVE and b['pin'] else '')
             if (a['operand'], a.get('signal')) != (b['operand'], b.get('signal')):
                 if b.get('signal') and b['signal'] not in P:
-                    pass                                                    # nový box se vloží níže přímo na vstup
+                    pass                                                    # the new box is inserted directly on the input below
                 elif b.get('signal'):
-                    steps.append('%s connect on %s — connect tažením od výstupu ke input %s.' % (where, _source(b, Q), N))
+                    steps.append('%s: connect to %s — drag from the output to the input %s.' % (where, _source(b, Q), N))
                 else:
-                    steps.append('%s: napiš %s (místo %s).' % (where, _c(b['operand']), _source(a, P)))
+                    steps.append('%s: type %s (instead of %s).' % (where, _c(b['operand']), _source(a, P)))
             if bool(a.get('neg')) != bool(b.get('neg')):
                 steps.append(_neg_step(where, b.get('neg')))
         for n in range(len(pv), len(qv)):
             b = qv[n]
             new_value = b.get('signal') and b['signal'] not in P
-            steps.append('%s: %s. Do nového input %d %s.' % (
-                nm, _p('insert_input'), n + 1, 'zatím nothing nepiš — vloží se do něj nový box (další step)' if new_value
-                else 'napiš %s' % _source(b, Q) if not b.get('signal') else 'connect %s %s' % (_source(b, Q), N)))
+            steps.append('%s: %s. In the new input %d %s.' % (
+                nm, _p('insert_input'), n + 1, 'type nothing yet — a new box is inserted on it (next step)' if new_value
+                else 'type %s' % _source(b, Q) if not b.get('signal') else 'connect %s %s' % (_source(b, Q), N)))
             if b.get('neg'):
-                steps.append(_neg_step('%s, nový input %d' % (nm, n + 1), True))
+                steps.append(_neg_step('%s, new input %d' % (nm, n + 1), True))
         for a in pv[len(qv):]:
-            steps.append('%s: remove input %s — %s.' % (nm, _source(a, P), _p('delete_input')))
+            steps.append('%s: remove the input %s — %s.' % (nm, _source(a, P), _p('delete_input')))
         pw = {v['pin']: v for v in p.get('outputs', [])}
         for b in q.get('outputs', []):
             a = pw.get(b['pin'], {})
             if a.get('operand', '') != b['operand']:
-                steps.append('%s: on výstup %s napiš %s.' % (nm, _c(b['pin']), _c(b['operand'])))
+                steps.append('%s: at output %s type %s.' % (nm, _c(b['pin']), _c(b['operand'])))
             if bool(a.get('neg')) != bool(b.get('neg')):
-                steps.append(_neg_step('%s, výstup %s' % (nm, b['pin']), b.get('neg')))
+                steps.append(_neg_step('%s, output %s' % (nm, b['pin']), b.get('neg')))
         if bool(p.get('neg_output')) != bool(q.get('neg_output')):
-            steps.append(_neg_step('%s, hlavní výstup' % nm, q.get('neg_output')))
-    # přidané: od spotřebiče k zdrojům (box se pokládá na vstup, který bude napájet)
+            steps.append(_neg_step('%s, main output' % nm, q.get('neg_output')))
+    # added: from the consumer to the sources (a box is placed on the input it will feed)
     consumers = {}
     for q in after['elements']:
         for v in q['inputs']:
@@ -159,36 +161,36 @@ def steps_fbd(u):
         c = consumers.get(q['id'])
         taken = None
         if c is None:
-            where = 'as novou logic path (%s)' % _p('logic_path')
+            where = 'as a new logic path (%s)' % _p('logic_path')
         else:
             ci, cv = c
-            where = 'on input %d%s %s' % (cv['n'], ' (' + cv['pin'] + ')' if ci['type'] not in fbd.COMMUTATIVE and cv['pin'] else '',
-                                        _box(P.get(ci['id'], ci), P if ci['id'] in P else Q).replace('box ', 'box ', 1))
+            where = 'on input %d%s of %s' % (cv['n'], ' (' + cv['pin'] + ')' if ci['type'] not in fbd.COMMUTATIVE and cv['pin'] else '',
+                                             _box(P.get(ci['id'], ci), P if ci['id'] in P else Q).replace('box ', 'box ', 1))
             if q['inputs'] and ci['id'] in P:
                 orig = next((v for v in P[ci['id']]['inputs'] if v['n'] == cv['n']), None)
                 if orig and (orig['operand'] or orig.get('signal')):
-                    where += ' (box převezme dosavadní %s on svůj 1. input %s)' % (_source(orig, P), N)
+                    where += ' (the box takes over %s on its input 1 %s)' % (_source(orig, P), N)
                     taken = (orig['operand'], orig.get('signal'), bool(orig.get('neg')))
         steps.append(_insertion(q, where))
-        nm = 'Nový box %s' % _c(fbd.SYMBOL.get(q['type']) or q.get('name'))
+        nm = 'New box %s' % _c(fbd.SYMBOL.get(q['type']) or q.get('name'))
         if q['type'] in fbd.WITH_OPERAND:
-            steps.append('%s: above box napiš operand %s.' % (nm, _c(q.get('operand'))))
+            steps.append('%s: type the operand %s above the box.' % (nm, _c(q.get('operand'))))
         for v in q['inputs']:
             if v['pin'] == 'EN' and not v['operand'] and not v.get('signal'):
                 continue
             if v['n'] == 1 and taken == (v['operand'], v.get('signal'), bool(v.get('neg'))):
-                continue                                                    # převzato při vložení
+                continue                                                    # taken over on insertion
             where = '%s, input %d%s' % (nm, v['n'], ' (' + v['pin'] + ')' if q['type'] not in fbd.COMMUTATIVE else '')
             if v.get('signal'):
                 if v['signal'] in P:
-                    steps.append('%s connect on %s %s.' % (where, _source(v, Q), N))
+                    steps.append('%s: connect to %s %s.' % (where, _source(v, Q), N))
             elif v['operand']:
-                steps.append('%s: napiš %s.' % (where, _c(v['operand'])))
+                steps.append('%s: type %s.' % (where, _c(v['operand'])))
             if v.get('neg'):
                 steps.append(_neg_step(where, True))
         for v in q.get('outputs', []):
             if v['operand']:
-                steps.append('%s: on výstup %s napiš %s.' % (nm, _c(v['pin']), _c(v['operand'])))
+                steps.append('%s: at output %s type %s.' % (nm, _c(v['pin']), _c(v['operand'])))
     return steps
 
 
@@ -199,7 +201,7 @@ def steps_lad(u):
     changes, deleted = diff.compare(before, after)
     P = {p['id']: p for p in before['elements']}
     Q = {p['id']: p for p in after['elements']}
-    steps = ['Select element %s a smaž ho (`Delete`) %s.' % (_c(model._display_name(P[i])), N) for i in deleted]
+    steps = ['Select the element %s and delete it (`Delete`) %s.' % (_c(model._display_name(P[i])), N) for i in deleted]
     for i, z in changes.items():
         q = Q[i]
         if z == 'changed':
@@ -209,33 +211,33 @@ def steps_lad(u):
             pw = {x['pin']: x['operand'] for x in p.get('inputs', []) + p.get('outputs', [])}
             chg += ['pin %s → %s' % (x['pin'], _c(x['operand'])) for x in q.get('inputs', []) + q.get('outputs', [])
                    if pw.get(x['pin']) != x['operand']]
-            steps.append('U element %s změň: %s.' % (_c(model._display_name(p)), ', '.join(chg)))
+            steps.append('On the element %s change: %s.' % (_c(model._display_name(p)), ', '.join(chg)))
             continue
-        where = 'on end rung'
+        where = 'at the end of the rung'
         for ri, r in enumerate(after['rungs']):
             if i in r['path']:
                 before_it = [x for x in r['path'][:r['path'].index(i)] if not x.startswith('wire#')]
-                where = ('after element %s' % _c(model._display_name(Q[before_it[-1]]))) if before_it else 'on začátek rung %d' % (ri + 1)
+                where = ('after the element %s' % _c(model._display_name(Q[before_it[-1]]))) if before_it else 'at the start of rung %d' % (ri + 1)
                 if r['to'] is not None:
-                    where += ' v paralelní větvi'
+                    where += ' in a parallel branch'
                 break
-        steps.append('Vlož %s %s: z task card Instructions přetáhni on vodič %s.' % (_c(model._display_name(q)), where, N))
+        steps.append('Insert %s %s: drag it from the Instructions task card onto the wire %s.' % (_c(model._display_name(q)), where, N))
     return steps
 
 
 def procedure(u):
-    """-> {hlavicka, kroky, markdown} pro úpravu (LAD i FBD)."""
+    """-> {header, steps, markdown} for an edit (LAD and FBD)."""
     hl = header(u)
     inner = steps_fbd(u) if fbd.is_fbd(u['after']) else steps_lad(u)
-    steps = ['Otevři block %s a find network **NW %s: %s**.' % (
+    steps = ['Open the block %s and find network **NW %s: %s**.' % (
         _c('%s%s "%s"' % (u.get('kind') or '', u.get('block_number') or '', u['block'])), u['nw'], u.get('title') or '')]
-    steps += inner or ['Návrh se od export neliší — v TIA není co měnit.']
+    steps += inner or ['The proposal does not differ from the export — nothing to change in TIA.']
     if u.get('f') and inner:
-        steps.append('Přelož safety program a zkontroluj F-signaturu; změny safety chrání heslo F-CPU / '
-                     '**Safety Administration** (přesný název příkazu kompilace %s).' % N)
-    steps.append('Ulož project, vyexportuj block Readerem a spusť `python check.py --edit %s` '
-                 '(nebo tlačítko „Zkontrolovat export").' % u.get('id', ''))
-    md = '### Procedure for TIA — %s\n' % hl + ''.join('%d. %s\n' % (i + 1, k) for i, k in enumerate(steps))
+        steps.append('Compile the safety program and check the F-signature; safety changes are protected by the F-CPU password / '
+                     '**Safety Administration** (exact name of the compile command %s).' % N)
+    steps.append('Save the project, export the block with the Reader and run `python check.py --edit %s` '
+                 '(or the "Check export" button).' % u.get('id', ''))
+    md = '### TIA steps — %s\n' % hl + ''.join('%d. %s\n' % (i + 1, k) for i, k in enumerate(steps))
     if any(N in k for k in steps):
-        md += '\n%s = v nápovědě TIA V21 neověřeno, ověř v editor.\n' % N
+        md += '\n%s = not verified in the TIA V21 help, check it in the editor.\n' % N
     return {'header': hl, 'steps': steps, 'markdown': md, 'sources': {k: v[1] for k, v in COMMANDS.items()}}

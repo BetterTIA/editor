@@ -15,7 +15,7 @@ import screenshot
 class TestApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.srv = server.create_server(0, SAMPLES, '')          # volný port
+        cls.srv = server.create_server(0, SAMPLES, '')          # free port
         cls.port = cls.srv.server_address[1]
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -38,7 +38,7 @@ class TestApi(unittest.TestCase):
         p = json.loads(b)['projects'][0]
         self.assertEqual(p['project'], PROJECT)
         self.assertIn({'block': 'FB_Conveyor', 'ts': '20261012-140000'}, p['blocks'])
-        self.assertIn({'block': 'FB_Belt', 'ts': '20261012-120000'}, p['blocks'])     # dílčí export
+        self.assertIn({'block': 'FB_Belt', 'ts': '20261012-120000'}, p['blocks'])     # partial export
 
     def test_block(self):
         s, _, b = self.get('/api/block?project=%s&block=FB_Conveyor' % PROJECT)
@@ -61,11 +61,11 @@ class TestApi(unittest.TestCase):
         self.assertIsNone(j['drawing'])
         self.assertIn('list of rungs', j['warnings'][0])
         _, _, b = self.get('/api/network?project=%s&block=FC_Branches&nw=3' % PROJECT)
-        j = json.loads(b)                                   # od F1 se FBD kreslí (vlastní model)
+        j = json.loads(b)                                   # since F1 FBD is drawn (own model)
         self.assertEqual((j['language'], j['drawing']['fbd'], j['warnings']), ('FBD', True, []))
 
     def test_errors(self):
-        self.assertEqual(self.get('/api/block?project=%s&block=Neni' % PROJECT)[0], 404)
+        self.assertEqual(self.get('/api/block?project=%s&block=Missing' % PROJECT)[0], 404)
         self.assertEqual(self.get('/api/block?project=%s&block=%s' % (PROJECT, quote('../../server')))[0], 404)
         self.assertEqual(self.get('/api/block?project=%s&block=x' % quote('..'))[0], 404)
         self.assertEqual(self.get('/api/network?project=%s&block=FB_Conveyor&nw=99' % PROJECT)[0], 404)
@@ -78,7 +78,7 @@ class TestApi(unittest.TestCase):
         self.assertIn('text/html', t)
         self.assertIn(b'TIAC_Editor', b)
 
-    @unittest.skipUnless(any(os.path.exists(p) for p in screenshot.BROWSERS), 'chybí Chrome/Edge')
+    @unittest.skipUnless(any(os.path.exists(p) for p in screenshot.BROWSERS), 'Chrome/Edge missing')
     def test_screenshot(self):
         d = tempfile.mkdtemp()
         try:

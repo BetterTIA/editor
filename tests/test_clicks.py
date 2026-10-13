@@ -1,6 +1,6 @@
-"""Skutečné kliky myší v editoru (LAD i FBD): headless Chrome přes DevTools protokol, `Input.dispatchMouseEvent`
-= důvěryhodná sekvence mouseMoved → mousePressed → mouseReleased (prohlížeč z ní sám udělá pointerdown, mousedown,
-pointerup, mouseup, click). Žádná instalace: minimální WebSocket klient nad `socket` (stdlib)."""
+"""Real mouse clicks in the editor (LAD and FBD): headless Chrome via the DevTools protocol, `Input.dispatchMouseEvent`
+= trusted sequence mouseMoved → mousePressed → mouseReleased (the browser itself turns it into pointerdown, mousedown,
+pointerup, mouseup, click). Nothing to install: a minimal WebSocket client on top of `socket` (stdlib)."""
 import base64
 import json
 import os
@@ -22,7 +22,7 @@ CHROME = next((p for p in screenshot.BROWSERS if os.path.exists(p)), None)
 
 
 class WS:
-    """Jen to, co potřebuje CDP: textové rámce, maskované od klienta, bez rozšíření."""
+    """Only what CDP needs: text frames, masked by the client, no extensions."""
 
     def __init__(self, url):
         host, _, path = url[len('ws://'):].partition('/')
@@ -72,7 +72,7 @@ class WS:
                 return m['result']
 
 
-@unittest.skipUnless(CHROME, 'chybí Chrome/Edge')
+@unittest.skipUnless(CHROME, 'Chrome/Edge missing')
 class TestClicks(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -122,14 +122,14 @@ class TestClicks(unittest.TestCase):
             if self.js(expr):
                 return True
             time.sleep(0.1)
-        self.fail('nesplněno: ' + expr)
+        self.fail('condition not met: ' + expr)
 
     def open_page(self, fpath):
         self.ws.call('Page.navigate', url=self.url + fpath)
         self.wait_for("document.body && document.body.dataset.done === '1' && !!document.querySelector('#ed-canvas svg')")
 
     def click(self, selector_js):
-        """Skutečný klik doprostřed prvku (selektor_js = JS výraz vracející element)."""
+        """Real click in the middle of an element (selector_js = JS expression returning the element)."""
         x, y = self.js('(() => { const r = (%s).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()'
                        % selector_js)
         for etype in ('mouseMoved', 'mousePressed', 'mouseReleased'):
@@ -143,11 +143,11 @@ class TestClicks(unittest.TestCase):
         box = "[...document.querySelectorAll('#ed-canvas g[data-id]')].find(g => g.querySelector('text.symbol').textContent === '&').querySelector('rect.hit')"
         self.click(box)
         self.wait_for("ed.select === 'b2'")
-        self.assertEqual(self.js('__u'), ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'])   # vše isTrusted
+        self.assertEqual(self.js('__u'), ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'])   # all isTrusted
         self.wait_for("!document.getElementById('ed-plus').disabled")
         self.click("document.getElementById('ed-plus')")
         self.wait_for("ed.after.elements.find(p => p.id === 'b2').inputs.length === 4 && !document.getElementById('ed-undo').disabled")
-        # paleta -> místo vložení (nový vstup &) -> nový box n1
+        # palette -> insert place (new input of &) -> new box n1
         self.click("document.querySelector('#palette .item[data-key=\"OR\"]')")
         self.wait_for("document.querySelectorAll('#ed-canvas .place').length > 0")
         self.click("[...document.querySelectorAll('#ed-canvas .place')].find(c => c.querySelector('title').textContent === 'box b2, input 4')")

@@ -1,4 +1,4 @@
-"""M5: MCP klient (stdio JSON-RPC) proti falešnému Writeru / Readeru — bez TIA."""
+"""M5: MCP client (stdio JSON-RPC) against the fake Writer / Reader — without TIA."""
 import json
 import os
 import shutil
@@ -37,14 +37,14 @@ class TestClient(unittest.TestCase):
                                                       'regexName': '^FB_Conveyor$', 'preservePath': False})
                 self.assertTrue(os.path.exists(os.path.join(work, 'FB_Conveyor.s7res')))
                 with open(os.path.join(work, 'FB_Conveyor.s7dcl'), 'a', encoding='utf-8') as f:
-                    f.write('// změna\n')
+                    f.write('// change\n')
                 k.call('ImportFromDocuments', {'softwarePath': 'PLC_1', 'groupPath': 'Conveyor', 'importPath': work,
                                                   'fileNameWithoutExtension': 'FB_Conveyor', 'importOption': 'Override'})
             with open(os.path.join(self.state, 'imports.jsonl'), encoding='utf-8') as f:
                 imp = json.loads(f.readline())
             self.assertEqual(imp['importOption'], 'Override')
             with open(imp['file'], encoding='utf-8') as f:
-                self.assertTrue(f.read().endswith('// změna\n'))
+                self.assertTrue(f.read().endswith('// change\n'))
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -55,28 +55,28 @@ class TestClient(unittest.TestCase):
                                                           'include': ['blocks'], 'formats': ['documents']}))
             r2 = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor']}))
         self.assertTrue(r['complete'])
-        self.assertNotEqual(r['exportFolder'], r2['exportFolder'])          # druhý export = nové razítko
+        self.assertNotEqual(r['exportFolder'], r2['exportFolder'])          # second export = new timestamp
         self.assertTrue(os.path.exists(os.path.join(r['exportFolder'], 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')))
 
     def test_errors(self):
         with self.assertRaises(mcp_client.MCPError) as e:
             mcp_client.Client([os.path.join(self.root, 'not.exe')]).start()
-        self.assertIn('fails spustit', str(e.exception))
+        self.assertIn('cannot be started', str(e.exception))
         with mcp_client.Client(self.writer('--multi-instances'), timeout=20) as k:
             with self.assertRaises(mcp_client.MCPError) as e:
                 k.call('Connect', {})
             self.assertIn('More than one', str(e.exception))
             with self.assertRaises(mcp_client.MCPError):
-                k.call('ExportBlocksAsDocuments', {})                     # isError: chybí softwarePath
+                k.call('ExportBlocksAsDocuments', {})                     # isError: softwarePath missing
         t = time.time()
         with mcp_client.Client(self.writer('--slow', '10'), timeout=20) as k:
             with self.assertRaises(mcp_client.MCPError) as e:
                 k.call('Connect', {}, timeout=1)
         self.assertIn('timeout', str(e.exception))
         self.assertLess(time.time() - t, 8)
-        with self.assertRaises(mcp_client.MCPError) as e:                    # proces skončí hned (špatné argumenty)
+        with self.assertRaises(mcp_client.MCPError) as e:                    # the process exits immediately (bad arguments)
             mcp_client.Client([sys.executable, FAKE, 'nothing'], timeout=20).start()
-        self.assertIn('skončil', str(e.exception))
+        self.assertIn('exited', str(e.exception))
 
     def test_commands(self):
         self.assertEqual(mcp_client.command_from_text(r'python "C:\a b\f.py" writer'), ['python', r'C:\a b\f.py', 'writer'])

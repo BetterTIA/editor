@@ -26,7 +26,7 @@ class TestParser(unittest.TestCase):
         self.assertEqual((b['kind'], b['name'], b['number']), ('FB', 'FB_Conveyor', 10))
         self.assertEqual(len(b['networks']), 8)
         self.assertEqual(b['networks'][0]['title'], 'Připravenost dopravníku')
-        self.assertEqual(b['networks'][3]['title'], 'Belt call (instance DB_Belt1)')   # hodnota v '...'
+        self.assertEqual(b['networks'][3]['title'], 'Belt call (instance DB_Belt1)')   # value in '...'
         self.assertEqual(b['networks'][1]['comment'], 'Start or service start, Stop opens the circuit.\nHolding branch through Motor.')
         self.assertEqual(b['networks'][7]['title'], '')
 
@@ -59,7 +59,7 @@ class TestParser(unittest.TestCase):
         self.assertEqual((p['call'], p['instance'], p['name']), ('fb', '"DB_Belt1"', 'FB_Belt'))
         self.assertEqual([x['pin'] for x in p['inputs']], ['Enable', 'Direction', 'Speed', 'Reset'])
         self.assertEqual(p['inputs'][0]['operand'], 'wire#w1')
-        self.assertEqual(p['inputs'][3]['operand'], '')             # prázdný pin
+        self.assertEqual(p['inputs'][3]['operand'], '')             # empty pin
         self.assertEqual(p['outputs'][2], {'pin': 'State', 'operand': ''})
         self.assertIn({'from': 'w1', 'to': 'p2.Enable'}, s7dcl.wires(n))
 
@@ -84,7 +84,7 @@ class TestParser(unittest.TestCase):
     def test_fbd_own_model(self):
         n = nw('FC_Branches', 3)
         self.assertEqual(n['language'], 'FBD')
-        self.assertNotIn('rungs', n)                                     # FBD nemá LAD rungy, ale boxy (F1)
+        self.assertNotIn('rungs', n)                                     # FBD has no LAD rungs but boxes (F1)
         self.assertEqual([p['type'] for p in n['elements']], ['or', 'assign'])
 
     def test_commas_in_quotes(self):
@@ -94,7 +94,7 @@ class TestParser(unittest.TestCase):
         with tempfile.NamedTemporaryFile('w', suffix='.s7res', delete=False, encoding='utf-8') as f:
             f.write("MultiLingualTexts:\n  - id: MLC_a\n    en-US: 'It''s'\n"
                     "  - id: MLC_b\n    en-US: |+\n      line 1\n      line 2\n"
-                    "  - id: MLC_c\n    cs-CZ: česky\n    en-US: anglicky\n")
+                    "  - id: MLC_c\n    cs-CZ: česky\n    en-US: English\n")
         try:
             t = s7dcl.load_s7res(f.name)
         finally:

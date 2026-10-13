@@ -1,7 +1,8 @@
-"""M5: Upload (TIAC_Writer) a Check (TIAC_Reader) přes API s falešnými MCP servery — bez TIA.
+"""M5: Upload (TIAC_Writer) and Check (TIAC_Reader) through the API with fake MCP servers — without TIA.
 
-Export root i „projekt TIA" falešných serverů jsou v temp: Writer exportuje blok z vzorku (nebo z --stav po importu),
-import zapíše do --stav; Reader exportuje z --stav do nové složky export rootu serveru."""
+The export root and the "TIA project" of the fake servers are in temp: the Writer exports the block from the sample (or
+from --state after an import), the import writes to --state; the Reader exports from --state to a new folder in the
+server's export root."""
 import contextlib
 import http.client
 import io
@@ -89,11 +90,11 @@ class TestUploadCheck(unittest.TestCase):
         s, e = self.req('POST', '/api/edits/%s/upload' % uid_f)
         self.assertEqual(s, 409)
         self.assertIn('F-block', e['error'])
-        s, e = self.req('POST', '/api/edits/%s/check' % uid)                 # Check jen u Signed
+        s, e = self.req('POST', '/api/edits/%s/check' % uid)                 # Check only for Signed
         self.assertEqual(s, 409)
         uid_p = self.proposal(state='Proposal')
         self.assertEqual(self.req('POST', '/api/edits/%s/upload' % uid_p)[0], 409)
-        self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nic se nezapsalo
+        self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
         _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
         st['tia'] = {'softwarePath': 1}
         self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 400)
@@ -112,11 +113,11 @@ class TestUploadCheck(unittest.TestCase):
         imp = self.imports()
         self.assertEqual((len(imp), imp[0]['groupPath'], imp[0]['importOption'], imp[0]['fileNameWithoutExtension']),
                          (1, 'Conveyor', 'Override', 'FB_Conveyor'))
-        b = s7dcl.load_block(imp[0]['file'])                                  # importovaný .s7dcl má network „po"
+        b = s7dcl.load_block(imp[0]['file'])                                  # the imported .s7dcl has the "after" network
         self.assertEqual([p.get('operand') for p in b['networks'][0]['elements']],
                          ['"Start_Povoleno"', '"DB_Machine".Safety_OK', '"DB_Machine".Mode_Auto', '"Fuse_OK"', '#Ready'])
         self.assertEqual(len(b['networks']), 8)
-        # Check: Reader exportuje to, co Writer importoval -> shoda -> Checked
+        # Check: the Reader exports what the Writer imported -> match -> Checked
         s, c = self.req('POST', '/api/edits/%s/check' % uid)
         self.assertEqual(s, 200, c)
         self.assertTrue(c['match'], c)
@@ -129,7 +130,7 @@ class TestUploadCheck(unittest.TestCase):
         self.set_tia()
         uid = self.proposal(ops=self.OPS)
         self.assertTrue(self.req('POST', '/api/edits/%s/upload' % uid)[1]['ok'])
-        file = self.imports()[0]['file']                                    # „někdo" v TIA změnil operand
+        file = self.imports()[0]['file']                                    # "someone" changed the operand in TIA
         with open(file, encoding='utf-8') as f:
             t = f.read()
         with open(file, 'w', encoding='utf-8') as f:
@@ -139,12 +140,12 @@ class TestUploadCheck(unittest.TestCase):
         self.assertIn('Fuse_XX', c['message'])
         self.assertIs(c['edit']['checks'][-1]['match'], False)
         s, e = self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked', 'by': 'user'})
-        self.assertEqual(s, 409)                                                 # Checked bez poslední shody
-        out = io.StringIO()                                                      # CLI --check: neshoda = exit 1
+        self.assertEqual(s, 409)                                                 # Checked without a latest match
+        out = io.StringIO()                                                      # CLI --check: mismatch = exit 1
         with contextlib.redirect_stdout(out):
             self.assertEqual(check.main(['--server', self.url, '--check', uid]), 1)
         self.assertTrue(out.getvalue().startswith('MISMATCH %s · state Signed' % uid))
-        with open(file, 'w', encoding='utf-8') as f:                           # oprava v TIA -> Check projde
+        with open(file, 'w', encoding='utf-8') as f:                           # fix in TIA -> Check passes
             f.write(t)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -161,12 +162,12 @@ class TestUploadCheck(unittest.TestCase):
         self.assertTrue(r['message'].startswith('TIA is busy or the Writer/Reader cannot be started: '))
         self.assertIn('More than one', r['message'])
         self.assertEqual(r['edit']['writes'][0]['steps'][0]['ok'], False)
-        self.stop()                                                            # nespustitelný Writer
+        self.stop()                                                            # Writer that cannot be started
         self.srv = server.create_server(0, self.root, self.data, mcp={'writer': ([os.path.join(self.tia, 'not.exe')], None)})
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertEqual((s, r['ok']), (200, False))
-        self.assertIn('fails spustit', r['message'])
+        self.assertIn('cannot be started', r['message'])
         s, r = self.req('GET', '/api/edits/%s' % uid)
         self.assertEqual((r['tia'], len(r['edit']['writes'])), (TIA, 2))
 
@@ -182,7 +183,7 @@ class TestUploadCheck(unittest.TestCase):
         self.assertIn('another Upload', e['error'])
 
     def test_upload_fbd_non_safety(self):
-        """FBD network v ne-F bloku (FC_Branches NW3: O + Coil) — upload, import obsahuje nový vstup, Check shoda."""
+        """FBD network in a non-F block (FC_Branches NW3: O + Coil) — upload, the import contains the new input, Check match."""
         self.set_tia()
         uid = self.proposal('FC_Branches', 3, ops=[{'type': 'add_input', 'id': 'b1', 'operand': '"Sensor_C"'}])
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)

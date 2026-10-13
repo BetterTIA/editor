@@ -1,23 +1,23 @@
-"""Serializace modelu networku („po", LAD z model.py / FBD z fbd.py) zpět do gramatiky `.s7dcl` (TIA V21)
-a náhrada textu jednoho networku v souboru bloku (M5, Upload přes TIAC_Writer).
+"""Serialization of the network model ("after", LAD from model.py / FBD from fbd.py) back into the `.s7dcl` grammar (TIA V21)
+and replacement of one network's text in the block file (M5, Upload via TIAC_Writer).
 
-Tvar textu kopíruje exporty V21 ve vzorcích (odsazení 4 mezery, RUNG/END_RUNG, `wire#wN`, `Contact( x )`,
-volání s `:=` / `=>`, `{ S7_Templates := … }`, FBD `A( in2 := … )`, `NOT` před prvkem). Ověřené je jen to, že
-vlastní parser (`s7dcl.py`, `fbd.py`) text přečte na shodný obsah — ne že ho TIA importuje (viz docs/reference.cs.md, M5).
+The text shape copies the V21 exports in the samples (4-space indent, RUNG/END_RUNG, `wire#wN`, `Contact( x )`,
+calls with `:=` / `=>`, `{ S7_Templates := … }`, FBD `A( in2 := … )`, `NOT` before an element). It is only verified that
+our own parser (`s7dcl.py`, `fbd.py`) reads the text back to the same content — not that TIA imports it (see docs/reference.md, M5).
 """
 import re
 
 import s7dcl
 
-IND = ' ' * 8                                   # RUNG v těle networku
-IND_P = ' ' * 12                                # prvek v rungu
-IND_A = ' ' * 16                                # argument prvku
+IND = ' ' * 8                                   # RUNG in the network body
+IND_P = ' ' * 12                                # element in a rung
+IND_A = ' ' * 16                                # element argument
 
-# zobrazovaný název instrukce -> jméno v exportu (inverze s7dcl.NAZVY)
+# displayed instruction name -> name in the export (inverse of s7dcl.NAMES)
 EXPORT_NAME = {v: k for k, v in s7dcl.NAMES.items()}
 COILS = {v: k for k, v in s7dcl.COILS.items()}
 COMPARISONS = {v: k for k, v in s7dcl.COMPARISONS.items()}
-# systémové instrukce: piny v exportu malými písmeny (parser je zvětšuje); F-instrukce / FB piny ponechá
+# system instructions: pins in lower case in the export (the parser upper-cases them); F-instruction / FB pins are kept
 SYSTEM = set(s7dcl.NAMES.values()) | set(s7dcl.POWER_PINS) | {'MOVE'}
 
 
@@ -25,11 +25,11 @@ class WriteError(ValueError):
     pass
 
 
-# ---------- společné ----------
+# ---------- common ----------
 
 def _template(name, tmpl):
-    """'Int' / 'Int to DInt' -> text atributu `{ S7_Templates := "…" }`.
-    shortcut: klíče šablon odhadnuté (SrcType, time_type, DestType), ověřené jen porovnání a TON — doplnit z exportu"""
+    """'Int' / 'Int to DInt' -> attribute text `{ S7_Templates := "…" }`.
+    shortcut: template keys are guessed (SrcType, time_type, DestType), only comparison and TON verified — complete from an export"""
     if not tmpl:
         return None
     parts = [x.strip() for x in str(tmpl).split(' to ')]
@@ -51,7 +51,7 @@ def _attributes(a):
 
 
 def _call(target, args):
-    """cil( a, b ) — jeden argument na řádku, jeden argument na jednom řádku (jako export)."""
+    """target( a, b ) — one argument per line, a single argument on one line (like the export)."""
     if not args:
         return [IND_P + target + '(  )']
     if len(args) == 1 and '\n' not in args[0]:
@@ -62,11 +62,11 @@ def _call(target, args):
 
 def _pin(pin, direction, value, neg=False, lower=False):
     h = (('NOT ' if neg else '') + (value or '').strip()).strip()
-    return '%s %s %s' % (pin.lower() if lower else pin, direction, h) if h else '%s %s  ' % (pin.lower() if lower else pin, direction)   # prázdný pin jako export: `pin :=  ,`
+    return '%s %s %s' % (pin.lower() if lower else pin, direction, h) if h else '%s %s  ' % (pin.lower() if lower else pin, direction)   # empty pin like the export: `pin :=  ,`
 
 
 def _target_box(p):
-    """-> (text cíle volání, piny malými?)"""
+    """-> (call target text, lower-case pins?)"""
     name, inst = p.get('name'), p.get('instance')
     if p.get('call') == 'fc' or (p.get('call') == 'fb' and not inst):
         return '"%s"' % (name or '').strip('"'), False
@@ -84,7 +84,7 @@ def _lad_element(p):
     if t in ('contact', 'contact_nc'):
         return [IND_P + '%s( %s )' % ('Contact' if t == 'contact' else 'I_Contact', p.get('operand', ''))]
     if t in ('contact_p', 'contact_n'):
-        # shortcut: tvar P_Contact v exportu V21 neověřen (ve vzorcích není) — parser čte pojmenované i poziční
+        # shortcut: the P_Contact shape in a V21 export is unverified (not in the samples) — the parser reads named and positional
         return _call('P_Contact' if t == 'contact_p' else 'N_Contact',
                        ['operand := %s' % p.get('operand', ''), 'bit := %s' % p.get('bit', '')])
     if t == 'comparison':
@@ -100,7 +100,7 @@ def _lad_element(p):
     if t == 'not':
         return [IND_P + 'NOT']
     if t != 'box':
-        raise WriteError('neznámý type element %r (%s)' % (t, p.get('id')))
+        raise WriteError('unknown element type %r (%s)' % (t, p.get('id')))
     target, lower = _target_box(p)
     if p.get('name') in ('P_TRIG', 'N_TRIG') and not p.get('instance'):
         rows = [IND_P + '%s( %s )' % (target, p.get('below', ''))]
@@ -122,7 +122,7 @@ def _node(u):
 
 
 def lad_text(m):
-    """LAD model {prvky, rungy} -> text těla networku (řádky mezi NETWORK a END_NETWORK)."""
+    """LAD model {elements, rungs} -> network body text (lines between NETWORK and END_NETWORK)."""
     P = {p['id']: p for p in m['elements']}
     rows = []
     for r in m.get('rungs') or [{'from': 'powerrail', 'path': [], 'to': None}]:
@@ -133,7 +133,7 @@ def lad_text(m):
             elif it in P:
                 rows += _lad_element(P[it])
             else:
-                raise WriteError('rung odkazuje on neexistující element %r' % it)
+                raise WriteError('rung refers to a non-existent element %r' % it)
         rows.append(IND + 'END_RUNG' + (' wire#' + r['to'] if r.get('to') else ''))
     return '\n'.join(rows) + '\n'
 
@@ -141,12 +141,12 @@ def lad_text(m):
 # ---------- FBD ----------
 
 def _has_chain(p):
-    """Má box vstup řetězu (1. vstup = výstup předchozího / operand RUNG)? Volání v F-bloku EN nemá."""
+    """Does the box have a chain input (input 1 = output of the previous one / RUNG operand)? A call in an F-block has no EN."""
     return bool(p['inputs']) and (p['type'] not in ('call', 'instruction') or p['inputs'][0]['pin'] == 'EN')
 
 
 def _fbd_box(p, wire_of):
-    t, before = p['type'], []                             # pred = atributy / šablona nad prvkem
+    t, before = p['type'], []                             # before = attributes / template above the element
     inp = p['inputs'][1:] if _has_chain(p) else p['inputs']
 
     def value(v):
@@ -173,9 +173,9 @@ def _fbd_box(p, wire_of):
 
 
 def fbd_text(m):
-    """FBD model {prvky} -> text těla networku. Řetěz = box, jehož 1. vstup je hlavní výstup předchozího;
-    další spotřebiče výstupu dostanou `wire#wN` (odbočka v rungu / END_RUNG wire#wN). Negace hlavního výstupu
-    (`neg_vystup`, jen z editoru) se zapíše jako negace vstupů spotřebičů."""
+    """FBD model {elements} -> network body text. Chain = a box whose input 1 is the main output of the previous one;
+    other consumers of the output get `wire#wN` (tap in the rung / END_RUNG wire#wN). Negation of the main output
+    (`neg_output`, editor only) is written as negation of the consumers' inputs."""
     elements = [dict(p, inputs=[dict(v) for v in p['inputs']]) for p in m['elements']]
     P = {p['id']: p for p in elements}
     consumers = {p['id']: [] for p in elements}
@@ -183,7 +183,7 @@ def fbd_text(m):
         for v in c['inputs']:
             if v.get('signal'):
                 if v['signal'] not in P:
-                    raise WriteError('signál z neexistujícího box %s' % v['signal'])
+                    raise WriteError('signal from a non-existent box %s' % v['signal'])
                 consumers[v['signal']].append((c, v))
     for p in elements:
         if p.get('neg_output'):
@@ -223,29 +223,29 @@ def fbd_text(m):
             p = following
         rows.append(IND + 'END_RUNG' + (' wire#' + wire_of[p['id']] if p['id'] in wire_of else ''))
     if len(done) != len(elements):
-        raise WriteError('FBD zapojení má cycle (%s)' % ', '.join(sorted(set(P) - done)))
+        raise WriteError('FBD wiring has a cycle (%s)' % ', '.join(sorted(set(P) - done)))
     if not elements:
         rows = [IND + 'RUNG', IND + 'END_RUNG']
     return '\n'.join(rows) + '\n'
 
 
 def network_text(m):
-    """Model „po" (LAD nebo FBD) -> text těla networku pro `.s7dcl`."""
+    """"After" model (LAD or FBD) -> network body text for `.s7dcl`."""
     if m.get('language') == 'FBD':
         return fbd_text(m)
     return lad_text(m)
 
 
-# ---------- náhrada networku v souboru bloku ----------
+# ---------- replacing a network in the block file ----------
 
 def replace_network(text_s7dcl, nw_number, new_text):
-    """Nahradí tělo N-tého NETWORK … END_NETWORK (1 = první) textem `novy_text`; hlavička bloku, atributy networku
-    (titulek, komentář, jazyk) a ostatní networky zůstanou beze změny. Konce řádků CRLF se zachovají."""
+    """Replaces the body of the N-th NETWORK … END_NETWORK (1 = first) with `new_text`; the block header, network attributes
+    (title, comment, language) and other networks stay unchanged. CRLF line endings are preserved."""
     crlf = '\r\n' in text_s7dcl
     t = text_s7dcl.replace('\r\n', '\n')
     starts = list(re.finditer(r'^[ \t]*NETWORK[ \t]*\n', t, re.M))
     if not 1 <= nw_number <= len(starts):
-        raise WriteError('network %d v block není (bloků networků %d)' % (nw_number, len(starts)))
+        raise WriteError('network %d is not in the block (networks in block: %d)' % (nw_number, len(starts)))
     z = starts[nw_number - 1].end()
     k = re.compile(r'^[ \t]*END_NETWORK[ \t]*$', re.M).search(t, z)
     if not k:

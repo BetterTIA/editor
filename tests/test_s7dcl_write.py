@@ -1,5 +1,5 @@
-"""M5: serializace modelu do .s7dcl — roundtrip parse(serialize(parse(x))) na všech networcích vzorků,
-náhrada networku v souboru bloku, modely z editoru (LAD/FBD operace)."""
+"""M5: model serialization to .s7dcl — roundtrip parse(serialize(parse(x))) on all sample networks,
+replacing a network in the block file, models from the editor (LAD/FBD operations)."""
 import copy
 import glob
 import os
@@ -19,7 +19,7 @@ def match(a, b):
 
 
 def reparse(nw):
-    """model networku -> text -> model (stejný jazyk)"""
+    """network model -> text -> model (same language)"""
     content = z.network_text(nw)
     if nw.get('language') == 'FBD':
         return {'language': 'FBD', 'elements': fbd.parse(content)}
@@ -38,7 +38,7 @@ class TestRoundtrip(unittest.TestCase):
                     continue
                 with self.subTest(block=os.path.basename(f), nw=nw['nw']):
                     self.assertEqual(match(nw, reparse(nw)), (True, []))
-                    # nahrazení networku sám sebou: celý blok se čte stejně (ostatní networky i atributy beze změny)
+                    # replacing a network with itself: the whole block reads the same (other networks and attributes unchanged)
                     b2 = s7dcl.parse_block(z.replace_network(text, nw['nw'], z.network_text(nw)))
                     self.assertEqual(len(b2['networks']), len(b['networks']))
                     for x, y in zip(b['networks'], b2['networks']):
@@ -54,7 +54,7 @@ class TestRoundtrip(unittest.TestCase):
         f = os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')
         text = s7dcl.read(f)
         nw4 = s7dcl.parse_block(text)['networks'][3]
-        self.assertEqual(z.replace_network(text, 4, z.network_text(nw4)), text)    # NW4 znak po znaku jako export
+        self.assertEqual(z.replace_network(text, 4, z.network_text(nw4)), text)    # NW4 character for character as exported
 
     def test_crlf_and_errors(self):
         text = s7dcl.read(os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FC_Branches.s7dcl'))
@@ -92,19 +92,19 @@ class TestModelsFromEditor(unittest.TestCase):
         self.assertIn('"FC_Branches"(  )', t)
         self.assertIn('Convert(\n                in := #A,\n                out => #B', t)
         r = reparse(m)
-        self.assertEqual(r['elements'][0]['instance'], '"FC_Branches"')          # parser: volání; server ho dohledá jako FC
+        self.assertEqual(r['elements'][0]['instance'], '"FC_Branches"')          # parser: a call; the server resolves it as an FC
         self.assertEqual(diff.content_match({'elements': m['elements'][1:], 'rungs': []},
                                              {'elements': r['elements'][1:], 'rungs': []}), (True, []))
 
     def test_fbd_operation(self):
         n = self.nw('FB_Safety', 3)
         m = {'language': 'FBD', 'elements': n['elements']}
-        for op in ({'type': 'add_input', 'id': 'b1', 'operand': '#Novy'},
+        for op in ({'type': 'add_input', 'id': 'b1', 'operand': '#New'},
                    {'type': 'negate', 'id': 'b1', 'input': 3},
                    {'type': 'insert_box', 'element': 'OR', 'to': {'id': 'b1', 'input': 2}},
                    {'type': 'change_operand', 'id': 'n1', 'input': 2, 'operand': '#Service'},
                    {'type': 'insert_box', 'element': 'SR'},
-                   {'type': 'change_operand', 'id': 'n2', 'operand': '#Pamet'},
+                   {'type': 'change_operand', 'id': 'n2', 'operand': '#Mem'},
                    {'type': 'change_operand', 'id': 'n2', 'input': 1, 'operand': '#Set'},
                    {'type': 'change_operand', 'id': 'n2', 'input': 2, 'operand': '#Reset'}):
             m = fbd.apply(m, op)[0]
@@ -114,7 +114,7 @@ class TestModelsFromEditor(unittest.TestCase):
         n = self.nw('FB_Safety', 2)                     # O -> wire#w1 -> A in2
         m = fbd.apply({'language': 'FBD', 'elements': n['elements']}, {'type': 'negate', 'id': 'b3', 'output': 'main'})[0]
         r = reparse(m)
-        self.assertIn('in2 := NOT wire#w1', z.fbd_text(m))   # zapíše se jako negace vstupu spotřebiče
+        self.assertIn('in2 := NOT wire#w1', z.fbd_text(m))   # written as a negation of the consumer's input
         a = next(p for p in r['elements'] if p['type'] == 'and')
         self.assertTrue(a['inputs'][1]['neg'])
 

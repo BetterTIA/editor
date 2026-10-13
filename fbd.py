@@ -1,19 +1,19 @@
-"""FBD network (`S7_Language := "FBD"` v .s7dcl) -> vlastní model boxů a signálů, rozložení jako v TIA, operace.
+"""FBD network (`S7_Language := "FBD"` in .s7dcl) -> own model of boxes and signals, TIA-like layout, operations.
 
-Gramatika (exporty V21, 12. 10. 2026): `RUNG [<operand>|wire#wN|true]` = vstup řetězu; prvky jdou za sebou a výstup
-předchozího je 1. vstup dalšího: `A( in2 := …, in3 := … )` (&), `O(…)` (>=1), `X(…)` (x), `Coil(x)` (=),
-`S_Coil` / `R_Coil`, `S_SR` / `S_RS`, `P_Trig(pamet)` / `N_Trig`, instrukce `Move(…)` (EN), volání `#inst.TYP(…)`,
-`"Inst"(…)`, `#inst(…)` s atributy `{ f_user_card := "1"; … }`. `NOT` před prvkem = negovaný 1. vstup,
-`pin := NOT x` = negovaný vstup. `wire#wN` uvnitř rungu = odbočka za boxem, `END_RUNG wire#wN` = výstup rungu,
-`in2 := wire#wN` / `RUNG wire#wN` = vstup napájený odbočkou / výstupem jiného rungu.
+Grammar (V21 exports): `RUNG [<operand>|wire#wN|true]` = chain input; elements follow one another and the output of
+the previous one is the 1st input of the next: `A( in2 := …, in3 := … )` (&), `O(…)` (>=1), `X(…)` (x), `Coil(x)` (=),
+`S_Coil` / `R_Coil`, `S_SR` / `S_RS`, `P_Trig(mem)` / `N_Trig`, instruction `Move(…)` (EN), calls `#inst.TYPE(…)`,
+`"Inst"(…)`, `#inst(…)` with attributes `{ f_user_card := "1"; … }`. `NOT` before an element = negated 1st input,
+`pin := NOT x` = negated input. `wire#wN` inside a rung = tap after a box, `END_RUNG wire#wN` = rung output,
+`in2 := wire#wN` / `RUNG wire#wN` = input fed by a tap / by the output of another rung.
 
-Model: {jazyk: 'FBD', prvky: [box], signaly: [{z, do, vstup}]} ; box = {id (b1…, nové n1…), typ, vstupy, vystupy, …}
-  typ: and | or | xor | assign | s | r | sr | rs | ptrig | ntrig | volani | instrukce
-  vstupy: [{n, pin, operand, signal, neg}] — signal = id boxu, jehož hlavní výstup vstup napájí (operand je pak '')
-  vystupy: [{pin, operand, neg}] (piny volání / instrukcí)
-  operand: přiřazení / S / R / SR / RS / bit paměti hrany ; volani: volani fb|fc|instrukce, nazev, instance, atributy
-První vstup je vstup řetězu (in1, EN, CLK, S …); volání bez napájení (F-blok) EN nemá.
-`signaly` jsou odvozené ze vstupů (server je dopočítá) — Claude posílá jen `prvky`.
+Model: {language: 'FBD', elements: [box], signals: [{from, to, input}]} ; box = {id (b1…, new n1…), type, inputs, outputs, …}
+  type: and | or | xor | assign | s | r | sr | rs | ptrig | ntrig | call | instruction
+  inputs: [{n, pin, operand, signal, neg}] — signal = id of the box whose main output feeds the input (operand is then '')
+  outputs: [{pin, operand, neg}] (pins of calls / instructions)
+  operand: assignment / S / R / SR / RS / edge memory bit ; call: call fb|fc|instruction, name, instance, attributes
+The first input is the chain input (in1, EN, CLK, S …); a call without power (F-block) has no EN.
+`signals` are derived from the inputs (the server computes them) — the client sends only `elements`.
 """
 import copy
 import json
@@ -27,8 +27,8 @@ EDGES = {'P_Trig': 'ptrig', 'N_Trig': 'ntrig'}
 TYPES = {'and', 'or', 'xor', 'assign', 's', 'r', 'sr', 'rs', 'ptrig', 'ntrig', 'call', 'instruction'}
 SYMBOL = {'and': '&', 'or': '>=1', 'xor': 'x', 'assign': '=', 's': 'S', 'r': 'R', 'sr': 'SR', 'rs': 'RS',
          'ptrig': 'P_TRIG', 'ntrig': 'N_TRIG'}
-WITH_OPERAND = {'assign', 's', 'r', 'sr', 'rs', 'ptrig', 'ntrig'}      # operand nad boxem
-PINS_VISIBLE = {'sr', 'rs', 'ptrig', 'ntrig', 'call', 'instruction'}   # u & / >=1 / = TIA jména pinů nepíše
+WITH_OPERAND = {'assign', 's', 'r', 'sr', 'rs', 'ptrig', 'ntrig'}      # operand above the box
+PINS_VISIBLE = {'sr', 'rs', 'ptrig', 'ntrig', 'call', 'instruction'}   # TIA does not show pin names on & / >=1 / =
 
 
 class LayoutError(Exception):
@@ -42,7 +42,7 @@ def _attrs(t):
 
 
 def _value(s):
-    """'NOT "x"' -> ('x', neg); 'wire#w1' -> ('wire', 'w1') v operandu jako značka."""
+    """'NOT "x"' -> ('x', neg); 'wire#w1' stays in the operand as a marker."""
     s = (s or '').strip()
     neg = False
     if s.startswith('NOT '):
@@ -51,7 +51,7 @@ def _value(s):
 
 
 def _rungs(content):
-    """-> [{'z': text|None, 'polozky': [('box', cil, args, attrs) | ('wire', 'wN')], 'do': 'wN'|None}]"""
+    """-> [{'from': text|None, 'items': [('box', target, args, attrs) | ('wire', 'wN')], 'to': 'wN'|None}]"""
     rungs, active, attrs, i, t = [], None, {}, 0, content
     while i < len(t):
         if t[i].isspace():
@@ -62,7 +62,7 @@ def _rungs(content):
         line = t[i:row_k].strip()
         if re.match(r'RUNG\b', line):
             if active is not None:
-                raise s7dcl.SourceParseError('RUNG uvnitř RUNG')
+                raise s7dcl.SourceParseError('RUNG inside RUNG')
             active = {'from': line[4:].strip() or None, 'items': [], 'to': None}
             i = row_k
         elif re.match(r'END_RUNG\b', line):
@@ -70,7 +70,7 @@ def _rungs(content):
                 raise s7dcl.SourceParseError('END_RUNG without RUNG')
             d = line[8:].strip()
             if d and not d.startswith('wire#'):
-                raise s7dcl.SourceParseError('END_RUNG s operand')
+                raise s7dcl.SourceParseError('END_RUNG with an operand')
             active['to'] = d[5:] if d else None
             rungs.append(active)
             active = None
@@ -81,17 +81,17 @@ def _rungs(content):
             i = k
         elif re.match(r'wire#\w+$', line):
             if active is None:
-                raise s7dcl.SourceParseError('wire mimo RUNG')
+                raise s7dcl.SourceParseError('wire outside RUNG')
             active['items'].append(('wire', line[5:]))
             i = row_k
         else:
             if active is None:
-                raise s7dcl.SourceParseError('element mimo RUNG: ' + line[:40])
+                raise s7dcl.SourceParseError('element outside RUNG: ' + line[:40])
             j = i
             while j < len(t) and t[j] not in '(\n':
                 j = s7dcl._string_end(t, j) if t[j] in '"\'' else j + 1
             if j >= len(t) or t[j] != '(':
-                raise s7dcl.SourceParseError('FBD element without závorek: ' + line[:40])
+                raise s7dcl.SourceParseError('FBD element without parentheses: ' + line[:40])
             k = s7dcl._paired(t, j, '(', ')')
             active['items'].append(('box', t[i:j].strip(), t[j + 1:k - 1], attrs))
             attrs = {}
@@ -107,7 +107,7 @@ def _input(pin, value):
 
 
 def _box(target, args, attrs):
-    """-> (box bez id a bez vstupu řetězu, pin vstupu řetězu | None, negace vstupu řetězu)"""
+    """-> (box without id and without chain input, chain input pin | None, chain input negation)"""
     neg = target.startswith('NOT ')
     if neg:
         target = target[4:].strip()
@@ -124,7 +124,7 @@ def _box(target, args, attrs):
         b = {'type': 'sr' if target == 'S_SR' else 'rs', 'operand': op, 'outputs': [],
              'inputs': [_input(p['pin'].upper(), p['operand']) for p in pins if p['pin'] != 'operand' and p['direction'] == 'in']}
         return b, 'S' if target == 'S_SR' else 'R', neg
-    # instrukce / volání bloku: tvar z LAD parseru (název, instance, piny), jen jiný typ
+    # instruction / block call: shape from the LAD parser (name, instance, pins), only the type differs
     p = s7dcl.element(target, args, attrs)
     b = {'type': 'instruction' if p['call'] == 'instruction' and not p.get('instance') else 'call',
          'call': p['call'], 'name': p['name'], 'instance': p.get('instance'), 'template': tmpl,
@@ -137,7 +137,7 @@ def _box(target, args, attrs):
 
 
 def parse(content):
-    """FBD network -> prvky (signály ve vstupech). Vyhodí ChybaParseru."""
+    """FBD network -> elements (signals in the inputs). Raises SourceParseError."""
     elements, wire, waiting = [], {}, []     # wire: wN -> ('box', id) | ('op', operand, neg) | ('wire', wM)
 
     def source(z):
@@ -153,7 +153,7 @@ def parse(content):
         for item in r['items']:
             if item[0] == 'wire':
                 if before is None:
-                    raise s7dcl.SourceParseError('odbočka wire#%s without sources' % item[1])
+                    raise s7dcl.SourceParseError('tap wire#%s without a source' % item[1])
                 wire[item[1]] = before
                 continue
             b, pin, neg = _box(*item[1:])
@@ -162,7 +162,7 @@ def parse(content):
                 if v['operand'].startswith('wire#'):
                     waiting.append((v, ('wire', v['operand'][5:])))
                     v['operand'] = ''
-            if before is not None or b['type'] not in ('call', 'instruction'):   # vstup řetězu (F-blok bez EN nemá)
+            if before is not None or b['type'] not in ('call', 'instruction'):   # chain input (an F-block without EN has none)
                 v = {'n': 0, 'pin': pin, 'operand': '', 'signal': None, 'neg': neg}
                 b['inputs'].insert(0, v)
                 if before is not None:
@@ -173,13 +173,13 @@ def parse(content):
             before = ('box', b['id'])
         if r['to']:
             if before is None:
-                raise s7dcl.SourceParseError('END_RUNG wire#%s without sources' % r['to'])
+                raise s7dcl.SourceParseError('END_RUNG wire#%s without a source' % r['to'])
             wire[r['to']] = before
     for v, z in waiting:
         seen = set()
         while z[0] == 'wire':
             if z[1] in seen or z[1] not in wire:
-                raise s7dcl.SourceParseError('nezapojený vodič wire#%s' % z[1])
+                raise s7dcl.SourceParseError('unconnected wire wire#%s' % z[1])
             seen.add(z[1])
             z = wire[z[1]]
         if z[0] == 'box':
@@ -190,7 +190,7 @@ def parse(content):
 
 
 def signals(elements):
-    """Hrany výstup boxu -> vstup boxu: [{z, do, vstup}]"""
+    """Edges box output -> box input: [{from, to, input}]"""
     return [{'from': v['signal'], 'to': p['id'], 'input': v['n']} for p in elements for v in p.get('inputs', [])
             if v.get('signal')]
 
@@ -203,37 +203,37 @@ def is_fbd(m):
     return isinstance(m, dict) and m.get('language') == 'FBD'
 
 
-# ---------- kontrola modelu z API (hranice důvěry) ----------
+# ---------- checking the model from the API (trust boundary) ----------
 
 def verify_model(after):
-    """Vyhodí ValueError, když model není FBD tvar; čísla vstupů `n` přečísluje."""
+    """Raises ValueError when the model is not FBD-shaped; renumbers the input numbers `n`."""
     if not isinstance(after, dict) or not isinstance(after.get('elements'), list):
-        raise ValueError('FBD after musí být {language: "FBD", elements: [{id, type, inputs, outputs, …}]}')
+        raise ValueError('FBD after must be {language: "FBD", elements: [{id, type, inputs, outputs, …}]}')
     ids = set()
     for p in after['elements']:
         if not isinstance(p, dict) or not isinstance(p.get('id'), str) or p['id'] in ids or p['id'].startswith('x:'):
-            raise ValueError('FBD element without jedinečného id: %r' % (p if not isinstance(p, dict) else p.get('id'),))
+            raise ValueError('FBD element without a unique id: %r' % (p if not isinstance(p, dict) else p.get('id'),))
         if p.get('type') not in TYPES:
-            raise ValueError('FBD element %s: type musí být jeden z %s' % (p['id'], sorted(TYPES)))
+            raise ValueError('FBD element %s: type must be one of %s' % (p['id'], sorted(TYPES)))
         for k, field in (('inputs', ('pin', 'operand')), ('outputs', ('pin', 'operand'))):
             if not isinstance(p.get(k), list) or not all(isinstance(x, dict) and all(isinstance(x.get(f), str) for f in field)
                                                          for x in p[k]):
-                raise ValueError('FBD element %s: %s musí být [{pin, operand, …}]' % (p['id'], k))
+                raise ValueError('FBD element %s: %s must be [{pin, operand, …}]' % (p['id'], k))
         for f in ('operand', 'name', 'instance', 'template'):
             if p.get(f) is not None and not isinstance(p[f], str):
-                raise ValueError('FBD element %s: %s musí být text' % (p['id'], f))
+                raise ValueError('FBD element %s: %s must be text' % (p['id'], f))
         ids.add(p['id'])
     for p in after['elements']:
         for i, v in enumerate(p['inputs']):
             v['n'] = i + 1
             v['neg'] = bool(v.get('neg'))
             if v.get('signal') is not None and v['signal'] not in ids:
-                raise ValueError('FBD element %s: input %d napájí neexistující box %r' % (p['id'], i + 1, v['signal']))
+                raise ValueError('FBD element %s: input %d is fed by non-existent box %r' % (p['id'], i + 1, v['signal']))
             v.setdefault('signal', None)
         for v in p['outputs']:
             v['neg'] = bool(v.get('neg'))
     if _cycle(after['elements']):
-        raise ValueError('FBD: signály tvoří cycle')
+        raise ValueError('FBD: signals form a cycle')
 
 
 def _cycle(elements):
@@ -251,7 +251,7 @@ def _cycle(elements):
     return any(i not in state and dfs(i) for i in P)
 
 
-# ---------- operace (API i editor) ----------
+# ---------- operations (API and editor) ----------
 
 class OperationError(ValueError):
     pass
@@ -261,21 +261,21 @@ def _find(m, pid):
     for p in m['elements']:
         if p['id'] == pid:
             return p
-    raise OperationError('element %s neexistuje' % pid)
+    raise OperationError('element %s does not exist' % pid)
 
 
 def _pin(p, op):
-    """op.vstup = n (1…) / op.vystup = jméno pinu -> dict pinu, nebo None (box sám)."""
+    """op.input = n (1…) / op.output = pin name -> pin dict, or None (the box itself)."""
     if op.get('input') is not None:
         try:
             return p['inputs'][int(op['input']) - 1]
         except (ValueError, TypeError, IndexError):
-            raise OperationError('box %s nemá input %r' % (p['id'], op['input']))
+            raise OperationError('box %s has no input %r' % (p['id'], op['input']))
     if op.get('output') is not None:
         for v in p['outputs']:
             if v['pin'] == op['output']:
                 return v
-        raise OperationError('box %s nemá výstup %r' % (p['id'], op['output']))
+        raise OperationError('box %s has no output %r' % (p['id'], op['output']))
     return None
 
 
@@ -289,26 +289,26 @@ def _palette():
     def add(key, name, group, element, description=''):
         P.append({'key': key, 'name': name, 'group': group, 'description': description,
                   'element': dict(element, outputs=[])})
-    add('AND', '&', 'Bitová logic', {'type': 'and', 'inputs': _inputs('in1', 'in2')}, 'AND (F9)')
-    add('OR', '>=1', 'Bitová logic', {'type': 'or', 'inputs': _inputs('in1', 'in2')}, 'OR (F10)')
-    add('XOR', 'x', 'Bitová logic', {'type': 'xor', 'inputs': _inputs('in1', 'in2')}, 'XOR')
-    add('ASSIGN', '=', 'Přiřazení', {'type': 'assign', 'operand': '', 'inputs': _inputs('in1')}, 'přiřazení (Shift+F7)')
-    add('S', 'S', 'Přiřazení', {'type': 's', 'operand': '', 'inputs': _inputs('in1')}, 'nastavit')
-    add('R', 'R', 'Přiřazení', {'type': 'r', 'operand': '', 'inputs': _inputs('in1')}, 'nulovat')
-    add('SR', 'SR', 'Paměti', {'type': 'sr', 'operand': '', 'inputs': _inputs('S', 'R1')}, 'přednost reset')
-    add('RS', 'RS', 'Paměti', {'type': 'rs', 'operand': '', 'inputs': _inputs('R', 'S1')}, 'přednost set')
-    add('P_TRIG', 'P_TRIG', 'Edges', {'type': 'ptrig', 'operand': '', 'inputs': _inputs('CLK')}, 'náběžná edge, bit paměti above box')
-    add('N_TRIG', 'N_TRIG', 'Edges', {'type': 'ntrig', 'operand': '', 'inputs': _inputs('CLK')}, 'sestupná edge')
+    add('AND', '&', 'Bit logic', {'type': 'and', 'inputs': _inputs('in1', 'in2')}, 'AND (F9)')
+    add('OR', '>=1', 'Bit logic', {'type': 'or', 'inputs': _inputs('in1', 'in2')}, 'OR (F10)')
+    add('XOR', 'x', 'Bit logic', {'type': 'xor', 'inputs': _inputs('in1', 'in2')}, 'XOR')
+    add('ASSIGN', '=', 'Assignment', {'type': 'assign', 'operand': '', 'inputs': _inputs('in1')}, 'assignment (Shift+F7)')
+    add('S', 'S', 'Assignment', {'type': 's', 'operand': '', 'inputs': _inputs('in1')}, 'set')
+    add('R', 'R', 'Assignment', {'type': 'r', 'operand': '', 'inputs': _inputs('in1')}, 'reset')
+    add('SR', 'SR', 'Memory', {'type': 'sr', 'operand': '', 'inputs': _inputs('S', 'R1')}, 'reset priority')
+    add('RS', 'RS', 'Memory', {'type': 'rs', 'operand': '', 'inputs': _inputs('R', 'S1')}, 'set priority')
+    add('P_TRIG', 'P_TRIG', 'Edges', {'type': 'ptrig', 'operand': '', 'inputs': _inputs('CLK')}, 'rising edge, memory bit above the box')
+    add('N_TRIG', 'N_TRIG', 'Edges', {'type': 'ntrig', 'operand': '', 'inputs': _inputs('CLK')}, 'falling edge')
     return P
 
 
 PALETTE = _palette()
-LAD_INSTRUCTIONS = {'MOVE', 'SWAP', 'CONV', 'ADD', 'SUB', 'MUL', 'DIV', 'TON', 'TOF', 'TP', 'CTU', 'CTD'}  # z katalogu LAD
+LAD_INSTRUCTIONS = {'MOVE', 'SWAP', 'CONV', 'ADD', 'SUB', 'MUL', 'DIV', 'TON', 'TOF', 'TP', 'CTU', 'CTD'}  # from the LAD catalog
 
 
 def from_lad(box, f=False):
-    """Šablona boxu z katalogu LAD (instrukce / FB / FC) -> FBD box; v F-bloku bez EN (nezapojitelný).
-    shortcut: časovače a čítače dostanou EN/ENO místo IN/Q (TIA FBD je kreslí s IN/Q) — opravit, až budou v F-blocích potřeba"""
+    """Box template from the LAD catalog (instruction / FB / FC) -> FBD box; in an F-block without EN (not connectable).
+    shortcut: timers and counters get EN/ENO instead of IN/Q (TIA FBD draws them with IN/Q) — fix once they are needed in F-blocks"""
     call = box.get('call') in ('fb', 'fc') or bool(box.get('instance'))
     res = {'type': 'call' if call else 'instruction', 'call': box.get('call') or 'instruction', 'name': box.get('name'),
            'instance': box.get('instance'), 'template': box.get('template'),
@@ -321,12 +321,12 @@ def from_lad(box, f=False):
 
 
 def template(key, catalog_element=None, f=False):
-    """Klíč palety FBD ('AND', 'P_TRIG') / katalogu ('MOVE', 'fb:FB_Pas') -> FBD box bez id."""
+    """FBD palette key ('AND', 'P_TRIG') / catalog key ('MOVE', 'fb:FB_Belt') -> FBD box without id."""
     for x in PALETTE:
         if x['key'] == key:
             return copy.deepcopy(x['element'])
     if catalog_element is None:
-        raise OperationError('element palette %s neexistuje' % key)
+        raise OperationError('palette element %s does not exist' % key)
     return from_lad(catalog_element(key), f)
 
 
@@ -336,7 +336,7 @@ def _new_id(m):
 
 
 def _take_over(target, source, neg=False):
-    """Vstup `cil` dostane zdroj vstupu `zdroj` (signál nebo operand, negace se skládá)."""
+    """Input `target` takes the source of input `source` (signal or operand; negations combine)."""
     target.update(operand=source['operand'], signal=source.get('signal'), neg=bool(source.get('neg')) != neg)
 
 
@@ -348,10 +348,10 @@ def _renumber(p):
 
 
 def insert_box(m, element, dst=None):
-    """Nový box (id n…). do = {id, vstup: n}: box se vloží do toho vstupu (převezme jeho signál / operand na svůj
-    1. vstup a výstupem ho napájí); vstup len+1 u &/>=1/x = nový vstup. Bez `do` = nová logická cesta."""
+    """New box (id n…). dst = {id, input: n}: the box is inserted into that input (takes over its signal / operand on
+    its 1st input and feeds it with its output); input len+1 on &/>=1/x = new input. Without `dst` = new logic path."""
     if not isinstance(element, dict) or element.get('type') not in TYPES:
-        raise OperationError('element musí být FBD box {type: %s, …}' % '|'.join(sorted(TYPES)))
+        raise OperationError('element must be an FBD box {type: %s, …}' % '|'.join(sorted(TYPES)))
     p = copy.deepcopy(element)
     p['id'] = _new_id(m)
     p.setdefault('outputs', [])
@@ -362,11 +362,11 @@ def insert_box(m, element, dst=None):
         try:
             n = int(dst.get('input'))
         except (TypeError, ValueError):
-            raise OperationError('vložení: do = {id, input: n}')
+            raise OperationError('insert: to = {id, input: n}')
         if n == len(c['inputs']) + 1 and c['type'] in ('and', 'or', 'xor'):
             c['inputs'].append({'n': n, 'pin': 'in%d' % n, 'operand': '', 'signal': None, 'neg': False})
         if not 1 <= n <= len(c['inputs']):
-            raise OperationError('box %s nemá input %r' % (c['id'], n))
+            raise OperationError('box %s has no input %r' % (c['id'], n))
         v = c['inputs'][n - 1]
         if p['inputs']:
             _take_over(p['inputs'][0], v)
@@ -376,7 +376,7 @@ def insert_box(m, element, dst=None):
 
 
 def delete(m, pid):
-    """Smaže box; vstupy, které napájel, převezmou jeho 1. vstup (řetěz); volání / instrukce bez EN nechá vstupy otevřené."""
+    """Deletes a box; inputs it fed take over its 1st input (chain); a call / instruction without EN leaves them open."""
     p = _find(m, pid)
     m['elements'].remove(p)
     first = p['inputs'][0] if p['inputs'] and (p['type'] not in ('call', 'instruction') or p['inputs'][0]['pin'] == 'EN') \
@@ -391,12 +391,12 @@ def delete(m, pid):
 
 
 def apply(m, op, catalog_element=None, f=False):
-    """Operace FBD z API -> (model, id dotčeného / nového boxu | None):
-    pridej_vstup {id, operand?, neg?} · odeber_vstup {id, vstup} · negace {id, vstup | vystup: pin | "hlavni"} ·
-    zmen_operand {id, vstup? | vystup?, operand} · zmen_pin {id, pin, operand?, neg?} · smaz {id} ·
-    vloz_box {prvek: klíč | box, do?: {id, vstup}} · vloz_volani {prvek: 'fb:X' | 'MOVE' …, instance?, do?}"""
+    """FBD operation from the API -> (model, id of the affected / new box | None):
+    add_input {id, operand?, neg?} · remove_input {id, input} · negate {id, input | output: pin | "main"} ·
+    change_operand {id, input? | output?, operand} · change_pin {id, pin, operand?, neg?} · delete {id} ·
+    insert_box {element: key | box, to?: {id, input}} · insert_call {element: 'fb:X' | 'MOVE' …, instance?, to?}"""
     if not isinstance(op, dict):
-        raise OperationError('operation musí být object')
+        raise OperationError('operation must be an object')
     m = copy.deepcopy(m)
     t = op.get('type')
     if t in ('insert_box', 'insert_call'):
@@ -408,7 +408,7 @@ def apply(m, op, catalog_element=None, f=False):
                 raise OperationError(str(e).strip("'"))
         if t == 'insert_call':
             if not isinstance(element, dict) or element.get('type') not in ('call', 'instruction'):
-                raise OperationError('insert_call: element musí být block project (fb:X / fc:X) nebo instruction')
+                raise OperationError('insert_call: element must be a project block (fb:X / fc:X) or an instruction')
             if op.get('instance') is not None:
                 element['instance'] = str(op['instance']).strip()
         pid = insert_box(m, element, op.get('to'))
@@ -417,18 +417,18 @@ def apply(m, op, catalog_element=None, f=False):
     p = _find(m, op.get('id'))
     if t == 'add_input':
         if p['type'] not in ('and', 'or', 'xor'):
-            raise OperationError('input lze přidat only box &, >=1, x')
+            raise OperationError('an input can only be added to a &, >=1 or x box')
         n = len(p['inputs']) + 1
         p['inputs'].append({'n': n, 'pin': 'in%d' % n, 'operand': str(op.get('operand') or '').strip(),
                             'signal': None, 'neg': bool(op.get('neg'))})
     elif t == 'remove_input':
         if p['type'] not in ('and', 'or', 'xor') or len(p['inputs']) <= 2:
-            raise OperationError('odebrat lze only input box &, >=1, x, který má víc než 2 inputs')
+            raise OperationError('only an input of a &, >=1 or x box with more than 2 inputs can be removed')
         p['inputs'].remove(_pin(p, {'input': op.get('input')}))
         _renumber(p)
     elif t == 'change_operand':
         if not isinstance(op.get('operand'), str):
-            raise OperationError('operand musí být text')
+            raise OperationError('operand must be text')
         pin = _pin(p, op)
         if pin is None:
             if p['type'] in WITH_OPERAND:
@@ -436,7 +436,7 @@ def apply(m, op, catalog_element=None, f=False):
             elif p['type'] == 'call':
                 p['instance'] = op['operand'].strip()
             else:
-                raise OperationError('box %s nemá operand — zadej input' % p['id'])
+                raise OperationError('box %s has no operand — specify an input' % p['id'])
         else:
             pin['operand'] = op['operand'].strip()
             if 'signal' in pin:
@@ -444,10 +444,10 @@ def apply(m, op, catalog_element=None, f=False):
     elif t == 'change_pin':
         pin = next((v for v in p['inputs'] + p['outputs'] if v['pin'] == op.get('pin')), None)
         if pin is None:
-            raise OperationError('box %s nemá pin %r' % (p['id'], op.get('pin')))
+            raise OperationError('box %s has no pin %r' % (p['id'], op.get('pin')))
         if op.get('operand') is not None:
             if not isinstance(op['operand'], str):
-                raise OperationError('operand musí být text')
+                raise OperationError('operand must be text')
             pin['operand'] = op['operand'].strip()
             if 'signal' in pin:
                 pin['signal'] = None
@@ -459,20 +459,20 @@ def apply(m, op, catalog_element=None, f=False):
         else:
             pin = _pin(p, op)
             if pin is None:
-                raise OperationError('negate: zadej input (n) nebo output (pin | "main")')
+                raise OperationError('negate: specify input (n) or output (pin | "main")')
             pin['neg'] = not pin.get('neg')
     elif t == 'delete':
         delete(m, p['id'])
         m['signals'] = signals(m['elements'])
         return m, None
     else:
-        raise OperationError('neznámá FBD operation %r (add_input, remove_input, negate, change_operand, change_pin, delete, '
+        raise OperationError('unknown FBD operation %r (add_input, remove_input, negate, change_operand, change_pin, delete, '
                            'insert_box, insert_call)' % t)
     m['signals'] = signals(m['elements'])
     return m, p['id']
 
 
-# ---------- pravidla ----------
+# ---------- rules ----------
 
 def display_name(p):
     if p['type'] in ('call', 'instruction'):
@@ -481,38 +481,38 @@ def display_name(p):
 
 
 def validate(m, f_block=False, non_f=()):
-    """-> [{id, chyba, varovani?}]. f_blok: upravovaný blok je F-blok; ne_f: jména bloků projektu, které F nejsou."""
+    """-> [{id, error, warnings?}]. f_block: the edited block is an F-block; non_f: names of project blocks that are not F."""
     ch = []
     consumers = {v['signal'] for p in m['elements'] for v in p['inputs'] if v.get('signal')}
     for p in m['elements']:
         if p['type'] in WITH_OPERAND and not (p.get('operand') or '').strip():
-            ch.append({'id': p['id'], 'error': 'Chybí operand: %s' % display_name(p)})
+            ch.append({'id': p['id'], 'error': 'Missing operand: %s' % display_name(p)})
         if p['type'] == 'call' and p.get('instance') is not None and not p['instance'].strip():
-            ch.append({'id': p['id'], 'error': 'Chybí instance: %s' % display_name(p)})
+            ch.append({'id': p['id'], 'error': 'Missing instance: %s' % display_name(p)})
         if p['type'] not in ('call', 'instruction'):
             for v in p['inputs']:
-                # shortcut: export V21 má `RUNG` + `Coil(x)` (= bez vstupu, nejspíš „vždy 1“) — u boxů z exportu se
-                # 1. vstup =/S/R nehlásí; až se v TIA ověří, jak to editor kreslí, pravidlo upřesnit
+                # shortcut: V21 export has `RUNG` + `Coil(x)` (= without input, probably "always 1") — for boxes from the
+                # export the 1st input of =/S/R is not reported; refine once it is verified in TIA how the editor draws it
                 if p['type'] in ('assign', 's', 'r') and v['n'] == 1 and not p['id'].startswith('n'):
                     continue
                 if not v.get('signal') and not v['operand'].strip():
-                    ch.append({'id': p['id'], 'error': 'Nezapojený input %d box %s — doplň operand nebo signál'
+                    ch.append({'id': p['id'], 'error': 'Unconnected input %d of box %s — add an operand or a signal'
                                                        % (v['n'], display_name(p))})
         if p['type'] in ('and', 'or', 'xor', 'ptrig', 'ntrig') and p['id'] not in consumers:
-            ch.append({'id': p['id'], 'warnings': True,
-                       'error': 'Box %s nevede nikam — výstup without přiřazení (varování)' % display_name(p)})
+            ch.append({'id': p['id'], 'warning': True,
+                       'error': 'Box %s leads nowhere — output without assignment (warning)' % display_name(p)})
         if f_block and p['type'] == 'call' and p.get('name') in set(non_f):
-            ch.append({'id': p['id'], 'error': 'V F-block smí být only F-instruction a F-blocks — %s není F-block' % display_name(p)})
+            ch.append({'id': p['id'], 'error': 'An F-block may contain only F-instructions and F-blocks — %s is not an F-block' % display_name(p)})
         if f_block and p['type'] in ('call', 'instruction') and p['inputs'] and p['inputs'][0]['pin'] == 'EN' \
                 and (p['inputs'][0]['operand'] or p['inputs'][0].get('signal')):
-            ch.append({'id': p['id'], 'error': 'V F-block fails EN connect: %s' % display_name(p)})
+            ch.append({'id': p['id'], 'error': 'EN cannot be connected in an F-block: %s' % display_name(p)})
     return ch
 
 
-# ---------- místa vložení (editor) ----------
+# ---------- insertion points (editor) ----------
 
 def places(m, drawing):
-    """Na každém vstupu boxu (do = {id, vstup}), pod posledním vstupem &/>=1/x (nový vstup) a nová logická cesta."""
+    """On every box input (to = {id, input}), below the last input of &/>=1/x (new input), and a new logic path."""
     if not drawing:
         return []
     P = {p['id']: p for p in m['elements']}
@@ -530,7 +530,7 @@ def places(m, drawing):
     return res
 
 
-# ---------- kontrola exportem (shoda podle obsahu) ----------
+# ---------- export check (match by content) ----------
 
 COMMUTATIVE = {'and', 'or', 'xor'}
 
@@ -540,8 +540,8 @@ def _j(x):
 
 
 def _content(p, source):
-    """Obsah boxu bez id; vstup = [pin, neg, operand | zdroj(signal)]; u &/>=1/x bez pinu a seřazené;
-    prázdné piny volání se ignorují."""
+    """Box content without id; input = [pin, neg, operand | source(signal)]; for &/>=1/x without pin and sorted;
+    empty call pins are ignored."""
     d = {k: p[k].strip() for k in ('operand', 'name', 'instance', 'template') if isinstance(p.get(k), str) and p[k].strip()}
     d['type'] = p['type']
     if p.get('neg_output'):
@@ -558,7 +558,7 @@ def _content(p, source):
 
 
 def canon(elements):
-    """Zapojení jako seřazený seznam stromů od výstupů (boxů bez spotřebiče); sdílený zdroj se opakuje."""
+    """Wiring as a sorted list of trees from the outputs (boxes without a consumer); a shared source is repeated."""
     P = {p['id']: p for p in elements}
     consumers = {v['signal'] for p in elements for v in p['inputs'] if v.get('signal')}
 
@@ -568,17 +568,17 @@ def canon(elements):
 
 
 def description(p):
-    inp = ', '.join(('NOT ' if v.get('neg') else '') + ('(signál)' if v.get('signal') else v['operand'] or '…')
+    inp = ', '.join(('NOT ' if v.get('neg') else '') + ('(signal)' if v.get('signal') else v['operand'] or '…')
                     for v in p['inputs'] if not (p['type'] in ('call', 'instruction') and not v['operand'] and not v.get('signal')))
     return '%s (%s)' % (display_name(p), inp)
 
 
 def content_match(proposal, export):
-    """-> (shoda, [rozdíly čitelně]) — boxy podle obsahu (u &, >=1, x bez ohledu na pořadí vstupů), pak zapojení."""
+    """-> (match, [readable differences]) — boxes by content (for &, >=1, x regardless of input order), then wiring."""
     def multiset(elements):
         d = {}
         for p in elements:
-            d.setdefault(_j(_content(p, lambda s: 'signál')), []).append(p)
+            d.setdefault(_j(_content(p, lambda s: 'signal')), []).append(p)
         return d
     a, b = multiset(proposal['elements']), multiset(export['elements'])
     missing = [p for k, v in a.items() for p in v[len(b.get(k, [])):]]
@@ -589,19 +589,19 @@ def content_match(proposal, export):
         if q is not None:
             missing.remove(p)
             extra.remove(q)
-            res.append('jiný box %s: návrh %s, export %s' % (SYMBOL.get(p['type']) or p.get('name'), description(p), description(q)))
-    res += ['chybí v export: %s' % description(p) for p in missing]
-    res += ['navíc v export: %s' % description(p) for p in extra]
+            res.append('different box %s: proposal %s, export %s' % (SYMBOL.get(p['type']) or p.get('name'), description(p), description(q)))
+    res += ['missing in export: %s' % description(p) for p in missing]
+    res += ['extra in export: %s' % description(p) for p in extra]
     if not res and canon(proposal['elements']) != canon(export['elements']):
-        res.append('boxes sedí, ale liší se zapojení signálů')
+        res.append('boxes match, but signal wiring differs')
     return not res, res
 
 
-# ---------- „zobrazit jako LAD" (jen ke čtení) ----------
+# ---------- "show as LAD" (read-only) ----------
 
 def as_lad(elements):
-    """Network jen z &, >=1, negací a = -> (rungy, prvky) LAD modelu; jinak None. Každé přiřazení = vlastní rung
-    od lišty (sdílené části se opakují), & = série, >=1 = paralelní větve, negace = rozpínací kontakt / NOT."""
+    """Network of only &, >=1, negations and = -> (rungs, elements) of a LAD model; otherwise None. Each assignment = own
+    rung from the power rail (shared parts repeat), & = series, >=1 = parallel branches, negation = NC contact / NOT."""
     if not elements or any(p['type'] not in ('and', 'or', 'assign') or p.get('neg_output') for p in elements):
         return None
     P = {p['id']: p for p in elements}
@@ -630,7 +630,7 @@ def as_lad(elements):
         return e
 
     def series(e, fpath, node):
-        """Přidá výraz do cesty rungu; uzel = pojmenovaný uzel na aktuální pozici (nebo None) -> uzel za výrazem."""
+        """Appends an expression to the rung path; node = named node at the current position (or None) -> node after it."""
         e = unwrap(e)
         if e[0] == 'op':
             fpath.append(new_value({'type': 'contact', 'operand': e[1]}))
@@ -668,11 +668,11 @@ def as_lad(elements):
     return (rungs, lad) if lad else None
 
 
-# ---------- rozdíl: smazané boxy jako přízraky ----------
+# ---------- diff: deleted boxes as ghosts ----------
 
 def merge(before, after, deleted):
-    """Model po + smazané boxy (id 'x:<id>') jako samostatné stromy; signály ze smazaných boxů přejmenované,
-    ze zaniklých zdrojů -> prázdný operand."""
+    """Model after + deleted boxes (id 'x:<id>') as separate trees; signals from deleted boxes renamed,
+    from vanished sources -> empty operand."""
     elements = copy.deepcopy(after['elements'])
     live = {p['id'] for p in elements}
     sm = set(deleted)
@@ -692,7 +692,7 @@ def merge(before, after, deleted):
 
 
 def pin_changes(before, after, changed):
-    """U změněných boxů: které vstupy (n), výstupy (pin) a zda operand / instance -> {id: {vstupy, vystupy, nad}}"""
+    """For changed boxes: which inputs (n), outputs (pin) and whether operand / instance -> {id: {inputs, outputs, above}}"""
     P = {p['id']: p for p in before['elements']}
     res = {}
     for q in after['elements']:
@@ -708,12 +708,12 @@ def pin_changes(before, after, changed):
     return res
 
 
-# ---------- rozložení ----------
+# ---------- layout ----------
 
 L = 18
 CHAR_W = 7.2
 MAX_CHARS = 30
-CHANNEL = 14       # volný pruh vlevo ve sloupci pro svislé vodiče signálů
+CHANNEL = 14       # free strip on the left of a column for vertical signal wires
 UP = 8
 
 
@@ -722,7 +722,7 @@ def _tw(s):
 
 
 def _right(p):
-    """Piny vpravo: [{pin, operand|None, neg, hlavni}] — hlavní výstup (řetěz) první."""
+    """Right-side pins: [{pin, operand|None, neg, main}] — main output (chain) first."""
     if p['type'] in ('call', 'instruction'):
         hl = [{'pin': 'ENO', 'operand': None, 'neg': bool(p.get('neg_output')), 'main': True}] \
             if p['inputs'] and p['inputs'][0]['pin'] == 'EN' else []
@@ -731,32 +731,32 @@ def _right(p):
 
 
 def _header(p):
-    """(řádky nad prvním pinem: titulek + šablona + popisek nad boxem, text nad boxem)"""
+    """(rows above the first pin: title + template + label above the box, text above the box)"""
     above = p.get('operand') if p['type'] in WITH_OPERAND else p.get('instance')
     return 1 + (1 if p.get('template') else 0) + (1 if above is not None else 0), above
 
 
 def layout(elements, min_width=0):
-    """-> (rozlozeni {id: {r, c}}, kresba) ; vyhodí Nerozlozitelne."""
+    """-> (layout {id: {r, c}}, drawing) ; raises LayoutError."""
     P = {p['id']: p for p in elements}
     if not elements:
         return {}, {'fbd': True, 'width': 260, 'height': 3 * L, 'boxes': [], 'lines': [], 'nodes': [], 'empty': True}
-    consumers = {}                                          # zdroj -> [(spotřebič, index vstupu)]
+    consumers = {}                                          # source -> [(consumer, input index)]
     for p in elements:
         for i, v in enumerate(p['inputs']):
             s = v.get('signal')
             if s:
                 if s not in P:
-                    raise LayoutError('signál z neexistujícího box %s' % s)
+                    raise LayoutError('signal from non-existent box %s' % s)
                 consumers.setdefault(s, []).append((p['id'], i))
     if _cycle(elements):
-        raise LayoutError('signály tvoří cycle')
-    parent = {s: sp[0] for s, sp in consumers.items()}       # hlavní spotřebič = první v pořadí exportu
+        raise LayoutError('signals form a cycle')
+    parent = {s: sp[0] for s, sp in consumers.items()}       # main consumer = first in export order
     tree_roots = [p['id'] for p in elements if p['id'] not in consumers]
     if not tree_roots:
-        raise LayoutError('network nemá výstup')
+        raise LayoutError('network has no output')
 
-    # 1) míra podstromu: řádky pinů vlevo (relativně k 1. pinu), výška a kotva (řádek výstupu od vrchu)
+    # 1) subtree measure: left pin rows (relative to the 1st pin), height and anchor (output row from the top)
     ratio = {}
 
     def mer(b):
@@ -771,10 +771,10 @@ def layout(elements, min_width=0):
             if s and parent.get(s) == (b, i):
                 hc, ac = mer(s)
                 if down_y is not None:
-                    r = max(r, down_y + 2 + ac)                   # volný řádek mezi sousedními podstromy
+                    r = max(r, down_y + 2 + ac)                   # free row between neighbouring subtrees
                 down_y = r - ac + hc - 1
                 top = min(top, r - ac)
-            elif s:                                     # signál odjinud: řádek vlevo musí být volný
+            elif s:                                     # signal from elsewhere: the row on the left must be free
                 if down_y is not None:
                     r = max(r, down_y + 1)
                 down_y = r
@@ -783,7 +783,7 @@ def layout(elements, min_width=0):
         ratio[b] = {'rows': rows, 'right': right, 'hdr': hdr}
         return bottom - top + 1, -top
 
-    # 2) stromy, pořadí (zdroje signálů odjinud dřív), sloupce a řádky
+    # 2) trees, order (sources of signals from elsewhere first), columns and rows
     box_tree = {}
 
     def mark(b, k, relc, rel):
@@ -838,7 +838,7 @@ def layout(elements, min_width=0):
         place(k, r0 + a)
         r0 += h + 1
 
-    # 3) pixely: sloupec = [kanál | popisky vstupů | box | popisky výstupů]
+    # 3) pixels: column = [channel | input labels | box | output labels]
     ncol = max(column.values()) + 1
     lw, bw, rw, above_w = [0.0] * ncol, [0.0] * ncol, [0.0] * ncol, [0.0] * ncol
     geo = {}

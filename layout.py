@@ -1,23 +1,23 @@
-"""Rozložení LAD networku z grafu `.s7dcl` (rungy + pojmenované vodiče) do mřížky.
+"""Layout of a LAD network from the `.s7dcl` graph (rungs + named wires) into a grid.
 
-Postup:
-1. rungy -> úseky (hrany) mezi uzly powerrail / wN / otevřený konec,
-2. sériově-paralelní redukce grafu na strom: S (série), P (zavřená větev: začátek i konec na rungu),
-   PO (otevřený vějíř: výstupní větve / víc rungů od lišty),
-   vodič, který je hodnotou pinu boxu (`pin := wire#wN`), = přívod k pinu (feeder) od lišty,
-3. měření (sloupce, řádky nad/pod rungem), umístění, cívky na konci otevřené série k pravému okraji,
-4. pixely: šířka sloupce podle nejširšího prvku (operand), čáry vodičů.
-Co se nedá redukovat (můstek, přívod pinu odjinud než z lišty, FBD), vrací varování -> stránka ukáže seznam rungů.
+Steps:
+1. rungs -> segments (edges) between the nodes powerrail / wN / open end,
+2. series-parallel reduction of the graph to a tree: S (series), P (closed branch: starts and ends on the rung),
+   PO (open fan: output branches / several rungs from the rail),
+   a wire that is the value of a box pin (`pin := wire#wN`) = feed to the pin (feeder) from the rail,
+3. measuring (columns, lines above/below the rung), placement, coils at the end of an open series to the right edge,
+4. pixels: column width by the widest element (operand), wire lines.
+What cannot be reduced (bridge, pin feed from somewhere other than the rail, FBD) returns a warning -> the page shows the rung list.
 """
 import re
 from collections import defaultdict
 
-L = 18           # výška linky (px); prvky zabírají celé linky nad/pod rungem
-GAP = 2       # volné linky mezi větvemi pod sebou
-CHAR_W = 7.2         # šířka znaku monospace 12 px
-MAX_CHARS = 30       # delší operand se zkrátí (…), plný je v title
+L = 18           # line height (px); elements occupy whole lines above/below the rung
+GAP = 2       # free lines between stacked branches
+CHAR_W = 7.2         # character width of 12 px monospace
+MAX_CHARS = 30       # a longer operand is truncated (…), the full one is in the title
 RAIL_X = 16
-UP = 10      # okraj nad první linkou
+UP = 10      # margin above the first line
 
 COILS = {'coil', 'coil_s', 'coil_r', 'coil_neg', 'coil_p', 'coil_n', 'ret'}
 
@@ -31,10 +31,10 @@ def _tw(s):
     return min(len(s), MAX_CHARS) * CHAR_W
 
 
-# ---------- 1+2: graf -> strom ----------
+# ---------- 1+2: graph -> tree ----------
 
 def tree(rungs, elements):
-    """-> (koren, privody) ; privody = {(id_boxu, pin): strom}"""
+    """-> (root, feeds); feeds = {(box_id, pin): tree}"""
     byid = {p['id']: p for p in elements}
     pins_wire = {}
     for p in elements:
@@ -52,7 +52,7 @@ def tree(rungs, elements):
 
     for ri, r in enumerate(rungs):
         if r['from'].startswith('op:'):
-            raise LayoutError('rung začíná operand (FBD shape)')
+            raise LayoutError('rung starts with an operand (FBD shape)')
         node, el = r['from'], []
         for it in r['path']:
             if it.startswith('wire#'):
@@ -63,7 +63,7 @@ def tree(rungs, elements):
                 el.append(it)
         end = r['to'] if r['to'] else sink()
         if end.startswith('op:'):
-            raise LayoutError('rung končí operand')
+            raise LayoutError('rung ends with an operand')
         edges.append([node, end, {'k': 'S', 'children': [{'k': 'E', 'id': x} for x in el]}, por])
         por += 1
 
@@ -81,7 +81,7 @@ def tree(rungs, elements):
         sk = defaultdict(list)
         for h in edges:
             sk[(h[0], h[1])].append(h)
-        for (a, b), g in sk.items():          # zavřená paralelní větev
+        for (a, b), g in sk.items():          # closed parallel branch
             if len(g) > 1 and not b.startswith('#'):
                 g.sort(key=lambda h: h[3])
                 for h in g:
@@ -92,7 +92,7 @@ def tree(rungs, elements):
         if modification:
             continue
         nodes = {h[0] for h in edges} | {h[1] for h in edges}
-        for n in sorted(nodes):                # série přes uzel s 1 vstupem a 1 výstupem
+        for n in sorted(nodes):                # series through a node with 1 input and 1 output
             if n in protected or n.startswith('#'):
                 continue
             inp = [h for h in edges if h[1] == n]
@@ -105,7 +105,7 @@ def tree(rungs, elements):
                 break
         if modification:
             continue
-        for n in sorted(nodes):                # otevřený vějíř (výstupní větve / rungy od lišty)
+        for n in sorted(nodes):                # open fan (output branches / rungs from the rail)
             opened = sorted([h for h in edges if h[0] == n and h[1].startswith('#')], key=lambda h: h[3])
             if len(opened) >= 2:
                 for h in opened:
@@ -120,22 +120,22 @@ def tree(rungs, elements):
     tree_root, feeds = None, {}
     for a, b, t, _ in edges:
         if a != 'powerrail':
-            raise LayoutError('zapojení není sériově-paralelní (node %s)' % a)
+            raise LayoutError('wiring is not series-parallel (node %s)' % a)
         if b.startswith('#'):
             if tree_root is not None:
-                raise LayoutError('víc kořenů')
+                raise LayoutError('more than one root')
             tree_root = t
         elif b in pins_wire:
             feeds[pins_wire[b]] = t
         else:
-            raise LayoutError('zapojení není sériově-paralelní (node %s)' % b)
+            raise LayoutError('wiring is not series-parallel (node %s)' % b)
     if tree_root is None:
-        raise LayoutError('network nemá otevřený rung')
+        raise LayoutError('network has no open rung')
     if tree_root['k'] != 'S':
         tree_root = {'k': 'S', 'children': [tree_root]}
     for (bid, pin) in feeds:
         if bid not in byid:
-            raise LayoutError('přívod k neznámému box')
+            raise LayoutError('feed to an unknown box')
     _mark_open(tree_root, True)
     return tree_root, feeds
 
@@ -153,23 +153,23 @@ def _mark_open(t, open):
             _mark_open(v, True)
 
 
-# ---------- 3: měření a umístění ----------
+# ---------- 3: measuring and placement ----------
 
 class Layout:
     def __init__(self, rungs, elements):
         self.p = {p['id']: p for p in elements}
         self.tree_root, self.feeds = tree(rungs, elements)
-        self.boxpins = defaultdict(dict)       # id boxu -> {pin: strom přívodu}
+        self.boxpins = defaultdict(dict)       # box id -> {pin: feed tree}
         for (bid, pin), t in self.feeds.items():
             _mark_open(t, False)
             self.boxpins[bid][pin] = t
-        self.lines = []                         # ('h', linka, xa, xb) / ('v', x, l1, l2); x = ('c', sloupec) | ('bo', id)
+        self.lines = []                         # ('h', line, xa, xb) / ('v', x, l1, l2); x = ('c', column) | ('bo', id)
         self.position = {}                       # id -> {'c', 'r'}
-        self.meř(self.tree_root)
-        self.last_col = self.tree_root['w'] + 1        # cívky u pravého okraje; sloupec koren.w = mezera (roztahuje se)
+        self.measure(self.tree_root)
+        self.last_col = self.tree_root['w'] + 1        # coils at the right edge; column root.w = gap (stretches)
         self.place(self.tree_root, 0, 0, None)
 
-    # rozměry prvku: (nad, pod) v linkách
+    # element size: (above, below) in lines
     def _element(self, e):
         p = self.p[e['id']]
         t = p['type']
@@ -188,7 +188,7 @@ class Layout:
         else:
             e['up'], e['down'] = 1, 0
 
-    def meř(self, t, bottom_left=0):
+    def measure(self, t, bottom_left=0):
         k = t['k']
         if k == 'E':
             self._element(t)
@@ -200,7 +200,7 @@ class Layout:
                     wf = self._feeds(d, down)
                     col = max(cur, wf)
                 else:
-                    self.meř(d)
+                    self.measure(d)
                     col = cur
                 d['c_rel'] = col
                 d['right'] = (t.get('open') and i == len(t['children']) - 1 and d['k'] == 'E'
@@ -212,7 +212,7 @@ class Layout:
         else:  # P / PO
             off, w = [], 0
             for i, v in enumerate(t['branches']):
-                self.meř(v)
+                self.measure(v)
                 w = max(w, v['w'])
                 if i == 0:
                     off.append(0)
@@ -224,7 +224,7 @@ class Layout:
             t['down'] = off[-1] + t['branches'][-1]['down']
 
     def _feeds(self, e, bottom):
-        """Rozmístí piny boxu tak, aby přívody (od lišty) byly pod vším vlevo. -> šířka přívodů."""
+        """Places the box pins so that the feeds (from the rail) are below everything on the left. -> width of the feeds."""
         p = self.p[e['id']]
         fed = self.boxpins[e['id']]
         tracks, last_col, wf = [0], 0, 0
@@ -233,7 +233,7 @@ class Layout:
             if f is None:
                 last_col += 1
             else:
-                self.meř(f)
+                self.measure(f)
                 last_col = max(last_col + 1, bottom + GAP + f['up'])
                 bottom = last_col + f['down']
                 wf = max(wf, f['w'])
@@ -266,7 +266,7 @@ class Layout:
             else:
                 last = t['children'][-1]
                 if last.get('right'):
-                    end = ('ce', last['id'])   # vodič končí na cívce (TIA nemá pravou lištu)
+                    end = ('ce', last['id'])   # the wire ends at the coil (TIA has no right rail)
                 elif last['k'] == 'E' and self.p[last['id']]['type'] == 'box':
                     end = ('bo', last['id'])
                 elif last['k'] == 'PO':
@@ -283,7 +283,7 @@ class Layout:
                 self.lines.append(('v', ('c', c0 + t['w']), r, r + t['off'][-1]))
 
 
-# ---------- 4: pixely ----------
+# ---------- 4: pixels ----------
 
 def _element_width(p, e):
     t = p['type']
@@ -303,11 +303,11 @@ def _element_width(p, e):
 
 
 def layout(rungs, elements, min_width=0):
-    """-> (rozlozeni {id: {r, c}}, kresba dict) ; vyhodí Nerozlozitelne.
-    min_sirka (px): cívky se odsunou k pravému okraji této šířky (jako v TIA)."""
+    """-> (layout {id: {r, c}}, drawing dict); raises LayoutError.
+    min_width (px): coils are pushed to the right edge of this width (as in TIA)."""
     R = Layout(rungs, elements)
     if not R.position:
-        # prázdný network: jen lišta
+        # empty network: rail only
         return {}, {'width': 260, 'height': 3 * L, 'rail': {'x': RAIL_X, 'y1': 4, 'y2': 3 * L}, 'lines': [], 'elements': [],
                     'empty': True}
     nodes = {}

@@ -1,4 +1,4 @@
-"""Rozdíl modelu networku před / po: párování prvků podle id, smazané prvky jako přízraky ve sloučeném modelu."""
+"""Network model difference before / after: elements are paired by id, deleted elements become ghosts in the merged model."""
 import copy
 import json
 
@@ -10,7 +10,7 @@ def _key(p):
 
 
 def compare(before, after):
-    """-> (rozdil {id: 'pridany'|'zmeneny'}, smazane [id v pred])"""
+    """-> (diff {id: 'added'|'changed'}, deleted [ids in before])"""
     P = {p['id']: p for p in before.get('elements', [])}
     diff, deleted = {}, []
     Q = {q['id']: q for q in after.get('elements', [])}
@@ -37,7 +37,7 @@ def _nodes(rungs):
 
 
 def _find(rungs, anchor):
-    """Pozice kotvy (id prvku / 'wire#wN') v rungech po: -> (rung, index) ; index -1 = začátek rungu z uzlu."""
+    """Position of an anchor (element id / 'wire#wN') in the after rungs: -> (rung, index); index -1 = rung start at the node."""
     for r in rungs:
         if anchor in r['path']:
             return r, r['path'].index(anchor)
@@ -49,8 +49,8 @@ def _find(rungs, anchor):
 
 
 def merge(before, after, deleted):
-    """Model po + smazané prvky (id 'x:<id>') vložené za nejbližšího zachovaného souseda z modelu před.
-    -> (prvky, rungy, nevlozene [id])"""
+    """After model + deleted elements (id 'x:<id>') inserted after the nearest kept neighbour from the before model.
+    -> (elements, rungs, unplaced [ids])"""
     elements = copy.deepcopy(after.get('elements', []))
     rungs = copy.deepcopy(after.get('rungs', []))
     P = {p['id']: p for p in before.get('elements', [])}
@@ -69,14 +69,14 @@ def merge(before, after, deleted):
         if not any(it in sm for it in items):
             continue
         if all(it in sm or it.startswith('wire#') for it in items) and pr['from'] in nodes and (pr['to'] is None or pr['to'] in nodes):
-            # celý rung smazán a jeho uzly v po existují: vrátí se jako přízrak
+            # whole rung deleted and its nodes exist in after: it comes back as a ghost
             rungs.append({'from': pr['from'], 'path': ['x:' + it if it in sm else it for it in items], 'to': pr['to']})
             continue
         for k, it in enumerate(items):
             if it not in sm:
                 continue
             inserted = False
-            for anchor in reversed(items[:k]):          # nejbližší zachovaný vlevo
+            for anchor in reversed(items[:k]):          # nearest kept one to the left
                 if anchor in kept or (anchor.startswith('wire#') and anchor[5:] in nodes):
                     r, idx = _find(rungs, anchor)
                     if r is not None:
@@ -87,7 +87,7 @@ def merge(before, after, deleted):
                         inserted = True
                     break
             if not inserted:
-                for anchor in items[k + 1:]:              # jinak před nejbližší zachovaný vpravo
+                for anchor in items[k + 1:]:              # otherwise before the nearest kept one to the right
                     if anchor in kept:
                         r, idx = _find(rungs, anchor)
                         if r is not None:
@@ -100,10 +100,10 @@ def merge(before, after, deleted):
     return elements, rungs, unplaced
 
 
-# ---------- M4: shoda podle obsahu (export po zápisu vs. návrh) ----------
+# ---------- M4: match by content (export after writing vs. proposal) ----------
 
 def _norm(p):
-    """Obsah prvku bez id a odvozených polí; prázdné hodnoty pryč, operand wire#wN -> 'wire#' (jména uzlů se liší)."""
+    """Element content without id and derived fields; empty values dropped, operand wire#wN -> 'wire#' (node names differ)."""
     q = {}
     for k, v in p.items():
         if k in ('id', 'call', 'power'):
@@ -123,8 +123,8 @@ def _j(x):
 
 
 def canon(model):
-    """Topologie networku jako strom série (S) / zavřené větve (P) / výstupní větve (PO) s obsahem prvků;
-    pořadí větví nehraje roli, id ani jména uzlů také ne. None = nejde rozložit."""
+    """Network topology as a tree of series (S) / closed branches (P) / output branches (PO) with element content;
+    branch order does not matter, nor do ids or node names. None = cannot be laid out."""
     P = {p['id']: p for p in model['elements']}
     try:
         tree_root, feeds = layout.tree(model['rungs'], model['elements'])
@@ -158,7 +158,7 @@ def _description(p):
 
 
 def content_match(proposal, export):
-    """-> (shoda, [rozdíly čitelně]) — prvky podle obsahu (typ + operand/piny) a topologie sérií a větví."""
+    """-> (match, [readable differences]) — elements by content (type + operand/pins) and the series/branch topology."""
     a = {}
     for p in proposal['elements']:
         a.setdefault(_j(_norm(p)), []).append(p)
@@ -168,7 +168,7 @@ def content_match(proposal, export):
     missing = [p for k, v in a.items() for p in v[len(b.get(k, [])):]]
     surplus = [p for k, v in b.items() for p in v[len(a.get(k, [])):]]
     res = []
-    for p in list(missing):                           # stejný typ (a box stejného jména) = jiný operand / piny
+    for p in list(missing):                           # same type (and box of the same name) = different operand / pins
         q = next((x for x in surplus if x['type'] == p['type'] and x.get('name') == p.get('name')), None)
         if q is None:
             continue
@@ -177,21 +177,21 @@ def content_match(proposal, export):
         if p['type'] == 'box':
             pa, pb = dict(_norm(p).get('inputs', []) + _norm(p).get('outputs', [])), \
                 dict(_norm(q).get('inputs', []) + _norm(q).get('outputs', []))
-            pins = ['%s %s → %s' % (pin, pa.get(pin, '(prázdný)'), pb.get(pin, '(prázdný)'))
+            pins = ['%s %s → %s' % (pin, pa.get(pin, '(empty)'), pb.get(pin, '(empty)'))
                     for pin in sorted(set(pa) | set(pb)) if pa.get(pin) != pb.get(pin)]
             rest = [k for k in set(_norm(p)) | set(_norm(q)) if k not in ('inputs', 'outputs')
                    and _norm(p).get(k) != _norm(q).get(k)]
-            res.append('jiné pins %s: %s' % (_description(p), ', '.join(pins + ['%s %s → %s' % (k, p.get(k) or '—', q.get(k) or '—')
+            res.append('different pins %s: %s' % (_description(p), ', '.join(pins + ['%s %s → %s' % (k, p.get(k) or '—', q.get(k) or '—')
                                                                           for k in rest])))
         else:
-            res.append('jiný operand: návrh %s, export %s' % (_description(p), _description(q)))
-    res += ['chybí v export: %s' % _description(p) for p in missing]
-    res += ['navíc v export: %s' % _description(p) for p in surplus]
+            res.append('different operand: proposal %s, export %s' % (_description(p), _description(q)))
+    res += ['missing in export: %s' % _description(p) for p in missing]
+    res += ['extra in export: %s' % _description(p) for p in surplus]
     if not res:
         ka, kb = canon(proposal), canon(export)
         if ka is None or kb is None:
             if _j(sorted(_j(r['path']) for r in proposal['rungs'])) != _j(sorted(_j(r['path']) for r in export['rungs'])):
-                res.append('zapojení fails rozložit a rungs se liší')
+                res.append('the wiring cannot be laid out and the rungs differ')
         elif _j(ka) != _j(kb):
-            res.append('elements sedí, ale liší se zapojení (série / větve)')
+            res.append('elements match, but the wiring differs (series / branches)')
     return not res, res

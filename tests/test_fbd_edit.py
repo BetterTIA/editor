@@ -1,4 +1,4 @@
-"""F2 — FBD: operace editoru, pravidla, místa vložení, kontrola exportem, postup pro TIA, „jako LAD"."""
+"""F2 — FBD: editor operations, rules, insert places, export check, TIA steps, "as LAD"."""
 import contextlib
 import copy
 import http.client
@@ -43,12 +43,12 @@ def P(model):
 class TestOperations(unittest.TestCase):
     def test_insert_box_into_signal_and_new_input(self):
         x = op(m(1), {'type': 'insert_box', 'element': 'P_TRIG', 'to': {'id': 'b2', 'input': 1}})
-        self.assertEqual(P(x)['n1']['inputs'][0]['signal'], 'b1')          # P_TRIG převzal výstup >=1
+        self.assertEqual(P(x)['n1']['inputs'][0]['signal'], 'b1')          # P_TRIG took over the output of >=1
         self.assertEqual(P(x)['b2']['inputs'][0]['signal'], 'n1')
         x = op(x, {'type': 'insert_box', 'element': 'OR', 'to': {'id': 'b2', 'input': 4}})
         self.assertEqual([v['pin'] for v in P(x)['b2']['inputs']], ['in1', 'in2', 'in3', 'in4'])
         self.assertEqual((P(x)['b2']['inputs'][3]['signal'], P(x)['n2']['inputs'][0]['operand']), ('n2', ''))
-        x = op(x, {'type': 'insert_box', 'element': 'ASSIGN'})                      # nová logická cesta
+        x = op(x, {'type': 'insert_box', 'element': 'ASSIGN'})                      # new logic path
         self.assertEqual(P(x)['n3']['inputs'][0]['signal'], None)
         fbd.layout(x['elements'])
 
@@ -56,7 +56,7 @@ class TestOperations(unittest.TestCase):
         x = op(m(1), {'type': 'add_input', 'id': 'b2', 'operand': '#A'}, {'type': 'remove_input', 'id': 'b2', 'input': 2})
         self.assertEqual([(v['pin'], v['operand']) for v in P(x)['b2']['inputs'][1:]], [('in2', '"DB_Machine".Safety_OK'), ('in3', '#A')])
         with self.assertRaises(fbd.OperationError):
-            op(m(1), {'type': 'remove_input', 'id': 'b1', 'input': 1})       # >=1 má jen 2 vstupy
+            op(m(1), {'type': 'remove_input', 'id': 'b1', 'input': 1})       # >=1 has only 2 inputs
         x = op(m(1), {'type': 'negate', 'id': 'b1', 'output': 'main'})
         self.assertTrue(P(x)['b1']['neg_output'])
         _, k = fbd.layout(x['elements'])
@@ -68,16 +68,16 @@ class TestOperations(unittest.TestCase):
 
     def test_delete_reconnects_chain(self):
         x = op(m(1), {'type': 'delete', 'id': 'b2'})
-        self.assertEqual(P(x)['b3']['inputs'][0]['signal'], 'b1')           # = dostal 1. vstup smazaného &
-        x = op(m(4), {'type': 'delete', 'id': 'b2'})                            # P_TRIG napájel pin ACK F-bloku
-        self.assertEqual((P(x)['b1']['inputs'][2]['signal'], P(x)['b1']['inputs'][2]['operand']), (None, '#Ack'))   # ACK dostal CLK hrany
+        self.assertEqual(P(x)['b3']['inputs'][0]['signal'], 'b1')           # = got the 1st input of the deleted &
+        x = op(m(4), {'type': 'delete', 'id': 'b2'})                            # P_TRIG fed the ACK pin of the F-block
+        self.assertEqual((P(x)['b1']['inputs'][2]['signal'], P(x)['b1']['inputs'][2]['operand']), (None, '#Ack'))   # ACK got the CLK of the edge
 
     def test_insert_call_from_catalog(self):
         x, i = fbd.apply(m(1), {'type': 'insert_call', 'element': 'fb:FB_Belt', 'instance': '"DB_Belt1"'},
                           lambda k: catalog.element(CAT, k), True)
         p = P(x)[i]
         self.assertEqual((p['type'], p['name'], p['instance']), ('call', 'FB_Belt', '"DB_Belt1"'))
-        self.assertNotIn('EN', [v['pin'] for v in p['inputs']])               # v F-bloku EN není
+        self.assertNotIn('EN', [v['pin'] for v in p['inputs']])               # no EN in an F-block
         x, i = fbd.apply(m(1), {'type': 'insert_box', 'element': 'MOVE'}, lambda k: catalog.element(CAT, k))
         self.assertEqual([v['pin'] for v in P(x)[i]['inputs']], ['EN', 'IN'])
         with self.assertRaises(fbd.OperationError):
@@ -87,9 +87,9 @@ class TestOperations(unittest.TestCase):
         x = m(1)
         mi = fbd.places(x, fbd.layout(x['elements'])[1])
         dst = [tuple(sorted(z['to'].items())) if z['to'] else None for z in mi]
-        self.assertIn((('id', 'b2'), ('input', 4)), dst)                      # nový vstup &
+        self.assertIn((('id', 'b2'), ('input', 4)), dst)                      # new input of &
         self.assertIn((('id', 'b3'), ('input', 1)), dst)
-        self.assertEqual(dst[-1], None)                                        # nová logická cesta
+        self.assertEqual(dst[-1], None)                                        # new logic path
         self.assertEqual(len(mi), 2 + 1 + 3 + 1 + 1 + 1)
 
 
@@ -97,18 +97,18 @@ class TestRules(unittest.TestCase):
     def test_rules(self):
         x = op(m(1), {'type': 'insert_box', 'element': 'ASSIGN'}, {'type': 'insert_box', 'element': 'AND'})
         ch = fbd.validate(x)
-        self.assertEqual([(c['id'], bool(c.get('warnings'))) for c in ch],
+        self.assertEqual([(c['id'], bool(c.get('warning'))) for c in ch],
                          [('n1', False), ('n1', False), ('n2', False), ('n2', False), ('n2', True)])
-        self.assertIn('Chybí operand', ch[0]['error'])
-        self.assertIn('Nezapojený input 1', ch[1]['error'])
-        self.assertIn('nevede nikam', ch[4]['error'])
+        self.assertIn('Missing operand', ch[0]['error'])
+        self.assertIn('Unconnected input 1', ch[1]['error'])
+        self.assertIn('leads nowhere', ch[4]['error'])
 
     def test_f_block(self):
         x = op(m(1), {'type': 'insert_call', 'element': 'fb:FB_Belt', 'instance': '"DB_Belt1"'})
         ch = fbd.validate(x, True, {'FB_Belt'})
         self.assertTrue(any('only F-instruction' in c['error'] for c in ch))
         x = op(m(7), {'type': 'change_operand', 'id': 'b2', 'input': 1, 'operand': 'TRUE'})
-        self.assertTrue(any('EN connect' in c['error'] for c in fbd.validate(x, True)))
+        self.assertTrue(any('EN cannot be connected' in c['error'] for c in fbd.validate(x, True)))
         self.assertFalse(any('EN' in c['error'] for c in fbd.validate(x, False)))
 
 
@@ -122,26 +122,26 @@ class TestCheckFBD(unittest.TestCase):
         match, r = fbd.content_match(m(1), nw(1, TS2))
         self.assertFalse(match)
         self.assertEqual(len(r), 2)
-        self.assertTrue(r[0].startswith('jiný box &') or r[0].startswith('jiný box ='))
+        self.assertTrue(r[0].startswith('different box &') or r[0].startswith('different box ='))
 
     def test_commutative_order(self):
         e = copy.deepcopy(nw(1, TS2))
         b2 = e['elements'][1]
         b2['inputs'] = [b2['inputs'][3], b2['inputs'][0], b2['inputs'][2], b2['inputs'][1]]
         fbd._renumber(b2)
-        self.assertEqual(fbd.content_match(self.proposal(), e), (True, []))       # & — pořadí vstupů nevadí
+        self.assertEqual(fbd.content_match(self.proposal(), e), (True, []))       # & — input order does not matter
         s = m(6)
         e = copy.deepcopy(s)
         sr = P(e)['b3']
         sr['inputs'][0]['operand'], sr['inputs'][1]['operand'] = sr['inputs'][1]['operand'], sr['inputs'][0]['operand']
-        self.assertFalse(fbd.content_match(s, e)[0])                           # SR — S a R1 prohozené = neshoda
+        self.assertFalse(fbd.content_match(s, e)[0])                           # SR — S and R1 swapped = mismatch
 
     def test_wiring(self):
         a = m(3)
         b = copy.deepcopy(a)
-        P(b)['b4']['inputs'][0]['signal'] = 'b2'                               # odbočka za = místo za &
+        P(b)['b4']['inputs'][0]['signal'] = 'b2'                               # tap after = instead of after &
         match, r = fbd.content_match(a, b)
-        self.assertEqual((match, r), (False, ['boxes sedí, ale liší se zapojení signálů']))
+        self.assertEqual((match, r), (False, ['boxes match, but signal wiring differs']))
 
 
 class TestProcedure(unittest.TestCase):
@@ -150,20 +150,20 @@ class TestProcedure(unittest.TestCase):
         after = op(before, {'type': 'add_input', 'id': 'b2', 'operand': '#Lock_OK'}, {'type': 'negate', 'id': 'b2', 'input': 4},
                 {'type': 'change_operand', 'id': 'b3', 'operand': '#Enable_Drive'},
                 {'type': 'insert_box', 'element': 'P_TRIG', 'to': {'id': 'b2', 'input': 1}},
-                {'type': 'change_operand', 'id': 'n1', 'operand': '#Pamet'})
+                {'type': 'change_operand', 'id': 'n1', 'operand': '#Mem'})
         u = {'id': 'U009', 'kind': 'FB', 'block_number': 30, 'block': BLOCK, 'nw': 1, 'title': nw(1)['title'], 'f': True,
              'before': before, 'after': after}
         p = procedure.procedure(u)
         self.assertEqual(p['header'], 'FB30 "FB_Safety" · NW 1: Enable — >=1, & with negation, assignment')
-        self.assertTrue(p['markdown'].startswith('### Procedure for TIA — FB30 "FB_Safety" · NW 1: '))
+        self.assertTrue(p['markdown'].startswith('### TIA steps — FB30 "FB_Safety" · NW 1: '))
         t = '\n'.join(p['steps'])
-        for s in ('**Insert input** (`Ctrl+Shift+3`)', 'napiš `#Lock_OK`', '**Create a ones complement** (`Ctrl+Shift+4`)',
-                  'přepiš operand above box on `#Enable_Drive`', 'Vlož box `P_TRIG` on input 1 box `&`',
-                  'above box napiš operand `#Pamet`', 'Přelož safety program', 'check.py --edit U009'):
+        for s in ('**Insert input** (`Ctrl+Shift+3`)', 'type `#Lock_OK`', '**Create a ones complement** (`Ctrl+Shift+4`)',
+                  'change the operand above the box to `#Enable_Drive`', 'Insert box `P_TRIG` on input 1 of box `&`',
+                  'type the operand `#Mem` above the box', 'Compile the safety program', 'check.py --edit U009'):
             self.assertIn(s, t)
         self.assertNotIn('Ctrl+Shift+5', t)
         u['after'] = op(before, {'type': 'delete', 'id': 'b1'})
-        self.assertIn('Select box `>=1` (inputs `#Start`, `#Service`) a smaž ho: pravý click → **Delete**', procedure.procedure(u)['markdown'])
+        self.assertIn('Select box `>=1` (inputs `#Start`, `#Service`) and delete it: right-click → **Delete**', procedure.procedure(u)['markdown'])
 
     def test_lad(self):
         _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)
@@ -173,9 +173,9 @@ class TestProcedure(unittest.TestCase):
         p = procedure.procedure(u)
         self.assertEqual(p['header'], 'FB10 "FB_Conveyor" · NW 2: Motor latch')
         t = '\n'.join(p['steps'])
-        self.assertIn('Vlož `-| |- "Fuse_OK"`', t)
-        self.assertIn('⟦neověřeno⟧', t)
-        self.assertNotIn('Přelož safety', t)
+        self.assertIn('Insert `-| |- "Fuse_OK"`', t)
+        self.assertIn('⟦unverified⟧', t)
+        self.assertNotIn('Compile the safety', t)
 
 
 class TestAsLad(unittest.TestCase):
@@ -184,11 +184,11 @@ class TestAsLad(unittest.TestCase):
         self.assertEqual([p['type'] for p in elements], ['contact', 'contact', 'contact_nc', 'contact', 'coil'])
         layout.layout(rungs, elements)
         rungs, elements = fbd.as_lad(nw(3)['elements'])
-        self.assertEqual(len([r for r in rungs if r['from'] == 'powerrail']), 3)   # 3 přiřazení = 3 rungy
+        self.assertEqual(len([r for r in rungs if r['from'] == 'powerrail']), 3)   # 3 assignments = 3 rungs
         self.assertIn('not', [p['type'] for p in elements])
         layout.layout(rungs, elements)
-        self.assertIsNone(fbd.as_lad(nw(4)['elements']))                       # volání F-bloku
-        self.assertIsNone(fbd.as_lad(nw(8)['elements']))                       # x a N_TRIG
+        self.assertIsNone(fbd.as_lad(nw(4)['elements']))                       # F-block call
+        self.assertIsNone(fbd.as_lad(nw(8)['elements']))                       # x and N_TRIG
 
 
 class TestApiFbdEdit(unittest.TestCase):
@@ -224,7 +224,7 @@ class TestApiFbdEdit(unittest.TestCase):
         self.assertTrue(any(x['to'] == {'id': 'b2', 'input': 5} for x in r['places']))
         s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'F2', 'block': BLOCK, 'nw': 1, 'after': r['after']})
         self.assertEqual(s, 201)
-        # pred = nejnovější export (TS2 už úpravu má) -> přepni pred na TS0 přes PUT stavu jako v reálu (návrh před zápisem)
+        # before = newest export (TS2 already has the edit) -> switch before to TS0 via a state PUT as in practice (proposal before the write)
         s, st = self.req('GET', '/api/state?project=%s' % PROJECT)
         st['edits'][0]['before'] = dict(server._model(server.api_network(SAMPLES, PROJECT, BLOCK, 1, TS0)), export_ts=TS0)
         self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 200)
@@ -237,10 +237,10 @@ class TestApiFbdEdit(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             code = check.main(['--server', 'http://127.0.0.1:%d' % self.port, '--edit', uid, '--export-ts', TS0])
-        self.assertEqual(code, 1)                                               # starý export = neshoda
+        self.assertEqual(code, 1)                                               # old export = mismatch
         with contextlib.redirect_stdout(out):
             code = check.main(['--server', 'http://127.0.0.1:%d' % self.port, '--edit', uid])
-        self.assertEqual(code, 0, out.getvalue())                               # export po zápisu (TS2) = shoda
+        self.assertEqual(code, 0, out.getvalue())                               # export after the write (TS2) = match
         s, x = self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Signed', 'by': 'test'})
         self.assertEqual((s, x['state']), (200, 'Signed'))
         s, x = self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked', 'by': 'test'})
@@ -248,7 +248,7 @@ class TestApiFbdEdit(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(check.main(['--server', 'http://127.0.0.1:%d' % self.port, '--procedure', uid]), 0)
-        self.assertTrue(out.getvalue().startswith('### Procedure for TIA — FB30'))
+        self.assertTrue(out.getvalue().startswith('### TIA steps — FB30'))
 
     def test_network_as_lad_and_f(self):
         s, n = self.req('GET', '/api/network?project=%s&block=%s&nw=1&ts=%s' % (PROJECT, BLOCK, TS0))

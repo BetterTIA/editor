@@ -7,17 +7,17 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 SAMPLES = os.path.join(ROOT, 'tests', 'samples')
 PROJECT = 'Demo_Line'
-TS0 = '20261012-120000'      # původní export (20261012-140000 = export po zápisu úpravy NW1)
+TS0 = '20261012-120000'      # original export (20261012-140000 = export after writing the NW1 edit)
 TS1 = '20261012-140000'
-TS2 = '20261012-150000'     # export po zápisu FBD úpravy (jen FB_Safety, NW1: & + in4, = #Enable_Drive)
+TS2 = '20261012-150000'     # export after writing the FBD edit (FB_Safety only, NW1: & + in4, = #Enable_Drive)
 
 
 def after_nw2(net):
-    """Ukázková úprava NW2 FB_Conveyor: přidaný kontakt před cívku, změněný operand, smazaný NC ve 3. větvi."""
+    """Sample edit of FB_Conveyor NW2: contact added before the coil, operand changed, NC contact in the 3rd branch deleted."""
     after = {'elements': copy.deepcopy(net['elements']), 'rungs': copy.deepcopy(net['rungs'])}
     for p in after['elements']:
         if p['id'] == 'p3':
-            p['operand'] = '#Pripraven_Auto'
+            p['operand'] = '#Ready_Auto'
     after['elements'] = [p for p in after['elements'] if p['id'] != 'p7']
     after['elements'].append({'id': 'n1', 'type': 'contact', 'operand': '"Fuse_OK"'})
     for r in after['rungs']:

@@ -1,9 +1,9 @@
-"""Katalog prvků pro paletu editoru (M3).
+"""Element catalog for the editor palette (M3).
 
-- pevné instrukce LAD s piny (šablony prvků ve tvaru modelu networku, bez `id`),
-- bloky projektu z exportu: FB/FC s piny z rozhraní `.s7dcl`, instanční DB (`DATA_BLOCK "X" : "FB"`),
-- operandy pro našeptávání: tagy z tag tabulek (`<PLC>\\Tags\\**\\*.xml`, SimaticML) a členy globálních DB.
-Čte se jen nejnovější export každého bloku / tabulky; rozhraní se čte jen po první NETWORK/BEGIN.
+- fixed LAD instructions with pins (element templates shaped like the network model, without `id`),
+- project blocks from the export: FB/FC with pins from the `.s7dcl` interface, instance DBs (`DATA_BLOCK "X" : "FB"`),
+- operands for autocomplete: tags from tag tables (`<PLC>\\Tags\\**\\*.xml`, SimaticML) and members of global DBs.
+Only the newest export of each block / table is read; the interface is read only up to the first NETWORK/BEGIN.
 """
 import copy
 import os
@@ -26,29 +26,29 @@ def _instruction():
 
     def add(key, name, group, element, description=''):
         I.append({'key': key, 'name': name, 'group': group, 'element': element, 'description': description})
-    add('NO', '-| |-', 'Contacts', {'type': 'contact', 'operand': ''}, 'spínací contact')
-    add('NC', '-|/|-', 'Contacts', {'type': 'contact_nc', 'operand': ''}, 'rozpínací contact')
-    add('P', '-|P|-', 'Contacts', {'type': 'contact_p', 'operand': '', 'bit': ''}, 'náběžná edge')
-    add('N', '-|N|-', 'Contacts', {'type': 'contact_n', 'operand': '', 'bit': ''}, 'sestupná edge')
-    add('C', '-( )-', 'Cívky', {'type': 'coil', 'operand': ''}, 'cívka')
-    add('S', '-(S)-', 'Cívky', {'type': 'coil_s', 'operand': ''}, 'nastavit')
-    add('R', '-(R)-', 'Cívky', {'type': 'coil_r', 'operand': ''}, 'nulovat')
-    add('NEG', '-(/)-', 'Cívky', {'type': 'coil_neg', 'operand': ''}, 'negovaná cívka')
-    add('RET', 'RET', 'Cívky', {'type': 'ret', 'operand': ''}, 'návrat z block')
+    add('NO', '-| |-', 'Contacts', {'type': 'contact', 'operand': ''}, 'NO contact')
+    add('NC', '-|/|-', 'Contacts', {'type': 'contact_nc', 'operand': ''}, 'NC contact')
+    add('P', '-|P|-', 'Contacts', {'type': 'contact_p', 'operand': '', 'bit': ''}, 'rising edge')
+    add('N', '-|N|-', 'Contacts', {'type': 'contact_n', 'operand': '', 'bit': ''}, 'falling edge')
+    add('C', '-( )-', 'Coils', {'type': 'coil', 'operand': ''}, 'coil')
+    add('S', '-(S)-', 'Coils', {'type': 'coil_s', 'operand': ''}, 'set')
+    add('R', '-(R)-', 'Coils', {'type': 'coil_r', 'operand': ''}, 'reset')
+    add('NEG', '-(/)-', 'Coils', {'type': 'coil_neg', 'operand': ''}, 'negated coil')
+    add('RET', 'RET', 'Coils', {'type': 'ret', 'operand': ''}, 'return from block')
     for k, op in s7dcl.COMPARISONS.items():
-        add(k, 'CMP ' + op, 'Porovnání', {'type': 'comparison', 'op': op, 'in1': '', 'in2': '', 'template': 'Int'},
+        add(k, 'CMP ' + op, 'Comparison', {'type': 'comparison', 'op': op, 'in1': '', 'in2': '', 'template': 'Int'},
             k + '_Contact, S7_Templates SrcType')
     for k in ('TON', 'TOF', 'TP'):
-        add(k, k, 'Časovače', _box(k, ('IN', 'Q'), ['PT'], ['ET'], 'Time', ''), 'instance: #multi nebo "DB"')
-    add('CTU', 'CTU', 'Čítače', _box('CTU', ('CU', 'Q'), ['R', 'PV'], ['CV'], 'Int', ''))
-    add('CTD', 'CTD', 'Čítače', _box('CTD', ('CD', 'QD'), ['LD', 'PV'], ['CV'], 'Int', ''))
-    add('MOVE', 'MOVE', 'Přesun', _box('MOVE', inputs=['IN'], outputs=['OUT1']))
-    add('SWAP', 'SWAP', 'Přesun', _box('SWAP', inputs=['IN'], outputs=['OUT'], template='Word'))
-    add('CONV', 'CONV', 'Přesun', _box('CONV', inputs=['IN'], outputs=['OUT'], template='Int to DInt'))
+        add(k, k, 'Timers', _box(k, ('IN', 'Q'), ['PT'], ['ET'], 'Time', ''), 'instance: #multi or "DB"')
+    add('CTU', 'CTU', 'Counters', _box('CTU', ('CU', 'Q'), ['R', 'PV'], ['CV'], 'Int', ''))
+    add('CTD', 'CTD', 'Counters', _box('CTD', ('CD', 'QD'), ['LD', 'PV'], ['CV'], 'Int', ''))
+    add('MOVE', 'MOVE', 'Move', _box('MOVE', inputs=['IN'], outputs=['OUT1']))
+    add('SWAP', 'SWAP', 'Move', _box('SWAP', inputs=['IN'], outputs=['OUT'], template='Word'))
+    add('CONV', 'CONV', 'Move', _box('CONV', inputs=['IN'], outputs=['OUT'], template='Int to DInt'))
     for k in ('ADD', 'SUB', 'MUL', 'DIV'):
         add(k, k, 'Math', _box(k, inputs=['IN1', 'IN2'], outputs=['OUT'], template='Int'))
-    add('IN_RANGE', 'IN_RANGE', 'Porovnání', _box('IN_RANGE', ('', ''), ['MIN', 'VAL', 'MAX'], [], 'Int'))
-    add('P_TRIG', 'P_TRIG', 'Edges', _box('P_TRIG', ('CLK', 'Q'), below=''), 'bit paměti edges below box')
+    add('IN_RANGE', 'IN_RANGE', 'Comparison', _box('IN_RANGE', ('', ''), ['MIN', 'VAL', 'MAX'], [], 'Int'))
+    add('P_TRIG', 'P_TRIG', 'Edges', _box('P_TRIG', ('CLK', 'Q'), below=''), 'edge memory bit below the box')
     add('N_TRIG', 'N_TRIG', 'Edges', _box('N_TRIG', ('CLK', 'Q'), below=''))
     return I
 
@@ -56,15 +56,15 @@ def _instruction():
 INSTRUCTIONS = _instruction()
 
 _SECTIONS = {'VAR_INPUT': 'inputs', 'VAR_OUTPUT': 'outputs', 'VAR_IN_OUT': 'inout', 'VAR_TEMP': 'temp'}
-_cache = {}   # cesta -> (mtime, výsledek)
+_cache = {}   # path -> (mtime, result)
 
 
 def interface(text):
-    """Hlavička + rozhraní bloku (.s7dcl) bez networků -> {druh, nazev, cislo, instance_typ, sekce: {..: [{jmeno, typ}]}}.
-    Členy jen nejvyšší úrovně (STRUCT = 'Struct', jeho obsah se přeskočí)."""
+    """Block header + interface (.s7dcl) without networks -> {kind, name, number, instance_type, section: {..: [{name, type}]}}.
+    Top-level members only (STRUCT = 'Struct', its content is skipped)."""
     m = re.search(r'^\s*(?:NETWORK|BEGIN)\s*$', text, re.M)
     head = text[:m.start()] if m else text
-    # shortcut: atributy `{…}` se mažou regexem bez ohledu na uvozovky — `}` uvnitř hodnoty atributu by to rozbilo
+    # shortcut: attributes `{…}` are removed by a regex that ignores quotes — a `}` inside an attribute value would break it
     head_rest = re.sub(r'\{[^{}]*\}', '', head)
     if not re.search(r'^(FUNCTION_BLOCK|FUNCTION|DATA_BLOCK)\b', head_rest, re.M):
         return None
@@ -121,7 +121,7 @@ def _read_cache(fpath, fn):
 
 
 def tag_table(fpath):
-    """SimaticML tag tabulka -> [{jmeno, typ, adresa, tabulka}]."""
+    """SimaticML tag table -> [{name, type, address, table}]."""
     tree_root = ET.parse(fpath).getroot()
     res = []
     for tab in tree_root.iter('SW.Tags.PlcTagTable'):
@@ -135,8 +135,8 @@ def tag_table(fpath):
 
 
 def _latest(root, project, suffix, subfolder=None):
-    """{klíč: plná cesta} z nejnovějšího exportu, který soubor obsahuje (klíč = jméno souboru,
-    s podsložkou relativní cesta pod ní)."""
+    """{key: full path} from the newest export that contains the file (key = file name,
+    with a subfolder the relative path below it)."""
     pd = os.path.join(root, project)
     res = {}
     if not os.path.isdir(pd):
@@ -151,12 +151,12 @@ def _latest(root, project, suffix, subfolder=None):
             for f in files:
                 if f.endswith(suffix):
                     k = os.path.join(*parts[parts.index(subfolder):], f) if subfolder else f
-                    res[k] = os.path.join(dp, f)            # novější export přepíše starší
+                    res[k] = os.path.join(dp, f)            # a newer export overrides an older one
     return res
 
 
 def block_template(b, instance=''):
-    """Šablona prvku palety pro volání FB/FC z rozhraní (IN_OUT jako vstupy vlevo)."""
+    """Palette element template for an FB/FC call from the interface (IN_OUT as inputs on the left)."""
     s = b['section']
     return {'type': 'box', 'call': 'fb' if b['kind'] == 'FB' else 'fc', 'name': b['name'],
             'instance': instance if b['kind'] == 'FB' else None, 'template': None,
@@ -186,7 +186,7 @@ def catalog(root, project):
     tags = []
     for fpath in _latest(root, project, '.xml', 'Tags').values():
         tags += _read_cache(fpath, tag_table) or []
-    import fbd                                       # líně: fbd importuje s7dcl
+    import fbd                                       # lazy: fbd imports s7dcl
     return {'project': project, 'instruction': INSTRUCTIONS, 'blocks': res_blocks, 'fbd': fbd.PALETTE,
             'db': [{'name': d['name'], 'number': d['number'], 'instance_type': d['instance_type'],
                     'members': [] if d['instance_type'] else [c for v in d['section'].values() for c in v]} for d in dbs],
@@ -194,8 +194,8 @@ def catalog(root, project):
 
 
 def element(cat, key):
-    """Šablona prvku podle klíče palety ('NO', 'TON', 'fb:FB_Pas', …) -> kopie ; KeyError když není."""
+    """Element template by palette key ('NO', 'TON', 'fb:FB_Belt', …) -> a copy; KeyError if it does not exist."""
     for x in cat['instruction'] + cat['blocks']:
         if x['key'] == key:
             return copy.deepcopy(x['element'])
-    raise KeyError('element palette %s neexistuje' % key)
+    raise KeyError('palette element %s does not exist' % key)

@@ -1,14 +1,14 @@
-"""Parser .s7dcl (export TIA V20+/Reader) -> model networku; titulky z .s7res.
+"""Parser for .s7dcl (TIA V20+/Reader export) -> network model; titles from .s7res.
 
-Gramatika je odvozená z exportů V21 (nedokumentovaná). Podporuje LAD:
-RUNG wire#<z> ... END_RUNG [wire#<do>], vložené `wire#wN`, atributy `{ ... }` před prvkem,
-prvky `Jmeno( args )`, `NOT Coil( .. )`, volání `"Inst"( .. )`, `#inst( .. )`, `#inst.TON( .. )`.
+The grammar is derived from V21 exports (undocumented). Supports LAD:
+RUNG wire#<from> ... END_RUNG [wire#<to>], inline `wire#wN`, attributes `{ ... }` before an element,
+elements `Name( args )`, `NOT Coil( .. )`, calls `"Inst"( .. )`, `#inst( .. )`, `#inst.TON( .. )`.
 """
 import os
 import re
 
 COMPARISONS = {'EQ': '==', 'NE': '<>', 'GT': '>', 'LT': '<', 'GE': '>=', 'LE': '<='}
-# zobrazované názvy instrukcí (export používá CamelCase, TIA velká písmena)
+# displayed instruction names (the export uses CamelCase, TIA uses upper case)
 NAMES = {
     'Move': 'MOVE', 'Add': 'ADD', 'Sub': 'SUB', 'Mul': 'MUL', 'Div': 'DIV', 'Mod': 'MOD',
     'Convert': 'CONV', 'InRange': 'IN_RANGE', 'OutRange': 'OUT_RANGE', 'Swap': 'SWAP',
@@ -17,7 +17,7 @@ NAMES = {
     'Trunc': 'TRUNC', 'Ceil': 'CEIL', 'Floor': 'FLOOR', 'P_Trig': 'P_TRIG', 'N_Trig': 'N_TRIG',
     'S_SR': 'SR', 'S_RS': 'RS', 'Scale_X': 'SCALE_X', 'Norm_X': 'NORM_X', 'Fill': 'FILL',
 }
-# výkonové piny (vstup, výstup) podle instrukce; ostatní boxy EN/ENO
+# power pins (input, output) per instruction; other boxes EN/ENO
 POWER_PINS = {
     'TON': ('IN', 'Q'), 'TOF': ('IN', 'Q'), 'TP': ('IN', 'Q'), 'TONR': ('IN', 'Q'),
     'CTU': ('CU', 'Q'), 'CTD': ('CD', 'QD'), 'CTUD': ('CU', 'QU'),
@@ -36,19 +36,19 @@ class SourceParseError(Exception):
     pass
 
 
-# ---------- nízká úroveň: čtení textu s ohledem na uvozovky ----------
+# ---------- low level: reading text with respect to quotes ----------
 
 def _string_end(t, i):
-    """t[i] je " nebo ' -> index za uzavírací uvozovkou."""
+    """t[i] is " or ' -> index after the closing quote."""
     q = t[i]
     j = t.find(q, i + 1)
     if j < 0:
-        raise SourceParseError('neuzavřený řetězec')
+        raise SourceParseError('unterminated string')
     return j + 1
 
 
 def _paired(t, i, opening, close):
-    """t[i] == otv -> index za párovou závorkou (uvozovky se přeskakují)."""
+    """t[i] == opening -> index after the matching bracket (quotes are skipped)."""
     d = 0
     while i < len(t):
         c = t[i]
@@ -62,11 +62,11 @@ def _paired(t, i, opening, close):
             if d == 0:
                 return i + 1
         i += 1
-    raise SourceParseError('neuzavřená závorka ' + opening)
+    raise SourceParseError('unclosed bracket ' + opening)
 
 
 def split_commas(t):
-    """Rozdělí text argumentů čárkami mimo uvozovky a závorky."""
+    """Splits argument text at commas outside quotes and brackets."""
     parts, d, z, i = [], 0, 0, 0
     while i < len(t):
         c = t[i]
@@ -93,7 +93,7 @@ def attributes(t):
 # ---------- .s7res ----------
 
 def load_s7res(fpath):
-    """MultiLingualTexts -> {id: {jazyk: text}}. Mini-YAML: prosté, '...' / "..." hodnoty a bloky |, |-, |+."""
+    """MultiLingualTexts -> {id: {language: text}}. Mini-YAML: plain, '...' / "..." values and blocks |, |-, |+."""
     if not os.path.exists(fpath):
         return {}
     rows = read(fpath).splitlines()
@@ -137,7 +137,7 @@ def text_mlc(texts, ident, languages=('cs-CZ', 'en-US')):
     return next(iter(t.values()), '')
 
 
-# ---------- blok ----------
+# ---------- block ----------
 
 def load_block(path_s7dcl):
     text = read(path_s7dcl)
@@ -154,7 +154,7 @@ def parse_block(text):
     m = re.search(r'^(FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK|DATA_BLOCK|TYPE)\s+("([^"]+)"|(\S+))(\s*:\s*("([^"]+)"|\S+))?',
                   text, re.M)
     if not m:
-        raise SourceParseError('nenalezena hlavička block')
+        raise SourceParseError('block header not found')
     kind = {'FUNCTION_BLOCK': 'FB', 'FUNCTION': 'FC', 'ORGANIZATION_BLOCK': 'OB',
             'DATA_BLOCK': 'DB', 'TYPE': 'UDT'}[m.group(1)]
     head = text[:m.start()]
@@ -174,17 +174,17 @@ def parse_block(text):
         if nw['language'] == 'LAD':
             nw['rungs'], nw['elements'] = parse_lad(content)
         elif nw['language'] == 'FBD':
-            import fbd                                   # líně: fbd importuje s7dcl
+            import fbd                                   # lazy: fbd imports s7dcl
             try:
                 nw['elements'] = fbd.parse(content)
-            except SourceParseError as e:                    # neznámá konstrukce FBD nesmí shodit celý blok
+            except SourceParseError as e:                    # an unknown FBD construct must not break the whole block
                 nw['error'] = str(e)
         block['networks'].append(nw)
     return block
 
 
 def variable_types(text):
-    """Deklarace rozhraní `jmeno : Typ;` -> {jmeno: Typ} (jen pro dohledání typu multiinstance)."""
+    """Interface declarations `name : Type;` -> {name: Type} (only for looking up the multi-instance type)."""
     res = {}
     for m in re.finditer(r'^\s*("[^"]+"|\w+)\s*(\{[^}]*\})?\s*:\s*([^;:=\n]+?)\s*(:=[^;\n]*)?;', text, re.M):
         nm = m.group(1).strip('"')
@@ -196,7 +196,7 @@ def variable_types(text):
 
 
 def _networks(body):
-    """Vrací [(atributy, obsah)] pro každý NETWORK ... END_NETWORK."""
+    """Returns [(attributes, content)] for each NETWORK ... END_NETWORK."""
     res, i, last_attr = [], 0, ''
     while True:
         m = re.search(r'^[ \t]*(\{|NETWORK[ \t]*$)', body[i:], re.M)
@@ -220,8 +220,8 @@ def _networks(body):
 # ---------- LAD network ----------
 
 def parse_lad(content):
-    """-> (rungy, prvky). rung = {'z': uzel, 'cesta': [id prvku | 'wire#wN'], 'do': uzel|None}.
-    Uzel = 'powerrail' | 'wN'; FBD-like start operandem je 'op:<text>'."""
+    """-> (rungs, elements). rung = {'from': node, 'path': [element id | 'wire#wN'], 'to': node|None}.
+    Node = 'powerrail' | 'wN'; an FBD-like start with an operand is 'op:<text>'."""
     rungs, elements = [], []
     active, attrs, i, t = None, {}, 0, content
     while i < len(t):
@@ -233,7 +233,7 @@ def parse_lad(content):
         line = t[i:row_k].strip()
         if re.match(r'RUNG\b', line):
             if active is not None:
-                raise SourceParseError('RUNG uvnitř RUNG')
+                raise SourceParseError('RUNG inside RUNG')
             z = line[4:].strip()
             active = {'from': _node(z) if z else 'powerrail', 'path': [], 'to': None}
             i = row_k
@@ -251,13 +251,13 @@ def parse_lad(content):
             i = k
         elif re.match(r'wire#\w+$', line):
             if active is None:
-                raise SourceParseError('wire mimo RUNG')
+                raise SourceParseError('wire outside RUNG')
             active['path'].append(line)
             i = row_k
         else:
             if active is None:
-                raise SourceParseError('element mimo RUNG: ' + line[:40])
-            # cíl volání = text před první '(' mimo uvozovky
+                raise SourceParseError('element outside RUNG: ' + line[:40])
+            # call target = text before the first '(' outside quotes
             j = i
             while j < len(t) and t[j] not in '(\n':
                 j = _string_end(t, j) if t[j] in '"\'' else j + 1
@@ -306,7 +306,7 @@ def _template(attrs):
 
 
 def element(target, args, attrs):
-    """Klasifikace prvku podle cíle volání."""
+    """Classifies an element by its call target."""
     neg = False
     if target.startswith('NOT '):
         neg, target = True, target[4:].strip()
@@ -339,7 +339,7 @@ def element(target, args, attrs):
         elif pos:
             pins = [{'pin': 'IN', 'direction': 'in', 'operand': pos[0]}] + pins
     else:
-        # volání: "Inst"(..), #inst(..), #inst.TON(..), "DB".PID_Temp(..)
+        # calls: "Inst"(..), #inst(..), #inst.TON(..), "DB".PID_Temp(..)
         m = re.fullmatch(r'(.+)\.([A-Za-z_]\w*)', target)
         if m:
             box = {'type': 'box', 'call': 'instruction', 'name': m.group(2), 'instance': m.group(1), 'template': tmpl}
@@ -359,10 +359,10 @@ def element(target, args, attrs):
 
 
 def fill_fb_types(block, find_db):
-    """Doplní název FB u volání: #inst -> typ z rozhraní bloku, "Inst" -> DATA_BLOCK "Inst" : "FB" (najdi_db)."""
+    """Fills in the FB name of calls: #inst -> type from the block interface, "Inst" -> DATA_BLOCK "Inst" : "FB" (find_db)."""
     for nw in block['networks']:
         for p in nw.get('elements', []):
-            if p.get('call') == 'fb' and not p['name']:          # LAD box i FBD volani
+            if p.get('call') == 'fb' and not p['name']:          # LAD box and FBD call
                 inst = p['instance']
                 if inst.startswith('#'):
                     p['name'] = block['variables'].get(inst[1:].strip('"'))
@@ -372,7 +372,7 @@ def fill_fb_types(block, find_db):
 
 
 def wires(nw):
-    """Spoje modelu: [{z, do}] mezi uzly (powerrail, wN, id prvku, '<id>.<pin>'); do=None = otevřený konec."""
+    """Model connections: [{from, to}] between nodes (powerrail, wN, element id, '<id>.<pin>'); to=None = open end."""
     res = []
     for r in nw.get('rungs', []):
         before = r['from']

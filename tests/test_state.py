@@ -40,13 +40,13 @@ class TestStateMachine(unittest.TestCase):
 
     def test_signed_free_checked_only_with_match(self):
         u = self.u('Approved')
-        state.change_state(u, 'Signed', 'user')                       # od 13. 10. Signed bez kontroly
+        state.change_state(u, 'Signed', 'user')                       # Signed without a check
         self.assertEqual(state.transitions(u), ('Checked', 'Approved'))
         with self.assertRaises(state.StateError) as e:
             state.change_state(u, 'Checked', 'user')
         self.assertEqual(e.exception.code, 409)
         u['checks'].append({'match': True})
-        u['checks'].append({'match': False})                     # rozhoduje poslední
+        u['checks'].append({'match': False})                     # the last one decides
         with self.assertRaises(state.StateError):
             state.change_state(u, 'Checked', 'user')
         u['checks'].append({'match': True})
@@ -55,7 +55,7 @@ class TestStateMachine(unittest.TestCase):
         self.assertEqual(state.transitions(u), ('Uploaded', 'Signed'))
         state.change_state(u, 'Uploaded', 'user')
         u['checks'].append({'match': False})
-        state.change_state(u, 'Checked', 'user')                      # krok zpět do Checked kontrola neblokuje
+        state.change_state(u, 'Checked', 'user')                      # a step back to Checked is not blocked by the check
 
     def test_old_state_with_five_states(self):
         d = tempfile.mkdtemp()
@@ -67,7 +67,7 @@ class TestStateMachine(unittest.TestCase):
                 json.dump(old, f)
             st = state.load(d, PROJECT)
             self.assertEqual(st, old)
-            state.save(d, PROJECT, st)                                  # projde kontrolou struktury i zápisem
+            state.save(d, PROJECT, st)                                  # passes the structure check and the write
             self.assertEqual(state.load(d, PROJECT), old)
             self.assertEqual(state.transitions(st['edits'][3]), ('Tested', 'Checked'))
         finally:
@@ -79,13 +79,13 @@ class TestStateMachine(unittest.TestCase):
             state.save(d, PROJECT, {'edits': [{'id': 'U001', 'state': 'Proposal'}]})
             c = os.path.join(d, PROJECT, 'state.json')
             original = s7dcl.read(c)
-            with mock.patch('state.json.dump', side_effect=OSError('disk plný')):
+            with mock.patch('state.json.dump', side_effect=OSError('disk full')):
                 with self.assertRaises(OSError):
                     state.save(d, PROJECT, {'edits': []})
-            self.assertEqual(s7dcl.read(c), original)                          # starý soubor nedotčen
-            self.assertEqual(os.listdir(os.path.dirname(c)), ['state.json'])   # žádný .tmp
+            self.assertEqual(s7dcl.read(c), original)                          # old file untouched
+            self.assertEqual(os.listdir(os.path.dirname(c)), ['state.json'])   # no .tmp
             with self.assertRaises(state.StateError):
-                state.save(d, PROJECT, {'edits': [{'id': 'U001'}]})           # bez stavu
+                state.save(d, PROJECT, {'edits': [{'id': 'U001'}]})           # without a state
             with self.assertRaises(state.StateError):
                 state.save(d, '..', {'edits': []})
         finally:
@@ -101,7 +101,7 @@ class TestStateMachine(unittest.TestCase):
         self.assertEqual(deleted, ['p7'])
         elements, rungs, unplaced = diff.merge(before, after, deleted)
         self.assertEqual(unplaced, [])
-        self.assertEqual(rungs[2]['path'], ['p6', 'x:p7'])                   # přízrak na původním místě
+        self.assertEqual(rungs[2]['path'], ['p6', 'x:p7'])                   # ghost in its original place
 
 
 class TestApiEdits(unittest.TestCase):
@@ -128,18 +128,18 @@ class TestApiEdits(unittest.TestCase):
     def create(self, **extra):
         _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=2' % PROJECT)
         body = {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Conveyor', 'nw': 2, 'after': after_nw2(net),
-                'note': 'Pojistka před cívkou'}
+                'note': 'Fuse before the coil'}
         body.update(extra)
         return self.req('POST', '/api/edits', body)
 
     def test_creation_fills_from_export(self):
-        s, u = self.create(title='ručně', block_number=999)
+        s, u = self.create(title='manual', block_number=999)
         self.assertEqual(s, 201)
         self.assertEqual((u['id'], u['state'], u['author']), ('U001', 'Proposal', 'editor'))
         self.assertEqual((u['kind'], u['block_number'], u['nw'], u['title']), ('FB', 10, 2, 'Motor latch'))
-        self.assertEqual(u['before']['export_ts'], TS1)                       # nejnovější export s blokem
+        self.assertEqual(u['before']['export_ts'], TS1)                       # newest export containing the block
         self.assertEqual(len(u['before']['elements']), 7)
-        self.assertIsNotNone(u['after']['layout'])                         # přepočteno serverem
+        self.assertIsNotNone(u['after']['layout'])                         # recomputed by the server
         self.assertIn({'from': 'n1', 'to': 'p4'}, u['after']['wires'])
         self.assertTrue(os.path.exists(os.path.join(self.data, PROJECT, 'state.json')))
         self.assertEqual(self.create()[1]['id'], 'U002')
@@ -153,7 +153,7 @@ class TestApiEdits(unittest.TestCase):
         self.assertEqual(s, 409)
         self.assertIn('check', e['error'])
         s, u = self.req('POST', '/api/check', {'edit_id': 'U001', 'match': True, 'export_ts': '20261012-130000',
-                                                   'note': 'export after zápisu = návrh'})
+                                                   'note': 'export after the write = proposal'})
         self.assertEqual((s, len(u['checks'])), (200, 1))
         self.assertEqual(self.req('POST', '/api/edits/U001/state', {'state': 'Checked'})[0], 200)
         self.assertEqual(self.req('POST', '/api/edits/U001/state', {'state': 'Tested'})[0], 409)
@@ -183,7 +183,7 @@ class TestApiEdits(unittest.TestCase):
         self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 200)
         self.assertEqual(self.req('GET', '/api/state?project=%s' % PROJECT)[1]['edits'][0]['note'], 'edited PUT')
         self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, {'x': 1})[0], 400)
-        self.assertEqual(self.req('PUT', '/api/state?project=Neni', st)[0], 404)
+        self.assertEqual(self.req('PUT', '/api/state?project=Missing', st)[0], 404)
 
     def test_invalid_input(self):
         self.assertEqual(self.create(after={'elements': 'x'})[0], 400)

@@ -1,6 +1,6 @@
-"""TIAC_Editor — lokální server (Python stdlib). M1 prohlížeč networků z exportu Readeru, M2 strom úprav a stavy.
+"""TIAC_Editor — local server (Python stdlib): network viewer for Reader exports, change tree and states.
 
-python server.py --port 8765 --export-root "C:\\TIA\\export" --data "<dir>"
+python server.py --port 8765 --export-root <folder> --data <folder>
 """
 import argparse
 import glob
@@ -31,7 +31,7 @@ WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
 
 
 def export_index(root):
-    """{projekt: {ts: {blok: cesta}}} — jen časové složky, které obsahují .s7dcl."""
+    """{project: {ts: {block: path}}} — only timestamp folders that contain .s7dcl files."""
     res = {}
     if not os.path.isdir(root):
         return res
@@ -53,8 +53,8 @@ def export_index(root):
 
 
 def find_block(root, project, block, ts=None):
-    """-> (ts, cesta, bloky) nejnovějšího exportu s blokem; bloky = nejnovější kopie všech bloků projektu do ts
-    (dílčí export pak dohledá instanční DB i FC ze staršího). Jména jen z indexu (žádné skládání cest z URL)."""
+    """-> (ts, path, blocks) of the newest export with the block; blocks = newest copies of all project blocks up to ts
+    (so a partial export finds instance DBs and FCs in an older one). Names come only from the index (no paths built from the URL)."""
     exp = export_index(root).get(project)
     if not exp:
         raise KeyError('unknown project')
@@ -85,7 +85,7 @@ def _load(root, project, block, ts=None):
                 fc.add(display_name)
             return x.get('instance_type')
     s7dcl.fill_fb_types(b, find_db)
-    for nw in b['networks']:                          # "FC"(…) je volání FC, ne instance FB
+    for nw in b['networks']:                          # "FC"(…) is an FC call, not an FB instance
         for p in nw.get('elements', []):
             if p.get('call') == 'fb' and (p['instance'] or '').strip('"') in fc:
                 p.update(call='fc', name=p['instance'].strip('"'), instance=None)
@@ -100,7 +100,7 @@ def api_exports(root):
             for block in exp[ts]:
                 latest[block] = ts
         res.append({'project': project,
-                    'exports': [{'ts': ts, 'block': len(b)} for ts, b in sorted(exp.items(), reverse=True)],
+                    'exports': [{'ts': ts, 'block_count': len(b)} for ts, b in sorted(exp.items(), reverse=True)],
                     'blocks': [{'block': k, 'ts': v} for k, v in sorted(latest.items())]})
     return {'export_root': root, 'projects': res}
 
@@ -130,7 +130,7 @@ def api_network(root, project, block, nw, ts=None, width=0):
         except fbd.LayoutError as e:
             res['warnings'].append('FBD layout failed (%s) — showing the text.' % e)
             res['text'] = textwrap.dedent(n['text']).strip(chr(10))
-        lad = fbd.as_lad(n['elements'])                  # jen ke čtení: čistá bitová logika
+        lad = fbd.as_lad(n['elements'])                  # read-only: pure bit logic
         if lad:
             try:
                 res['as_lad'] = {'elements': lad[1], 'rungs': lad[0], 'drawing': layout.layout(lad[0], lad[1], width)[1]}
@@ -149,7 +149,7 @@ def api_network(root, project, block, nw, ts=None, width=0):
     return res
 
 
-# ---------- M2: úpravy a stavy ----------
+# ---------- changes and states ----------
 
 def _model(net):
     if net['language'] == 'FBD':
@@ -158,7 +158,7 @@ def _model(net):
 
 
 def _fbd_after(after, width=0):
-    """FBD model z API -> {jazyk, prvky, signaly, rozlozeni}; chybný tvar = 400."""
+    """FBD model from the API -> {language, elements, signals, layout}; wrong shape = 400."""
     try:
         fbd.verify_model(after)
     except ValueError as e:
@@ -172,8 +172,8 @@ def _fbd_after(after, width=0):
 
 
 def verify_model(after):
-    """Model „po" z API (hranice důvěry): prvky s id/typ, boxy s piny, rungy jen z existujících id a wire#."""
-    error = state.StateError('after must be a network model {elements:[{id, type, …}], rungs:[{z, path, do}]}', 400)
+    """The "after" model from the API (trust boundary): elements with id/type, boxes with pins, rungs only of existing ids and wire#."""
+    error = state.StateError('after must be a network model {elements:[{id, type, …}], rungs:[{from, path, to}]}', 400)
     if not isinstance(after, dict) or not isinstance(after.get('elements'), list) or not isinstance(after.get('rungs'), list):
         raise error
     ids = set()
@@ -224,7 +224,7 @@ def api_edit_create(root, data, body):
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     project, block = str(body.get('project', '')), str(body.get('block', ''))
-    state._file(data, project)                      # kontrola --data a jména projektu
+    state._file(data, project)                      # checks --data and the project name
     net = api_network(root, project, block, int(body.get('nw', 0)))
     if net['language'] == 'FBD' and net.get('signals') is not None:
         if not isinstance(body.get('after'), dict):
@@ -274,14 +274,14 @@ def api_add_check(data, body):
 
 
 def _diff_drawing(before, after, width=0):
-    """Kresba modelu „po" se smazanými prvky jako přízraky a značkami rozdílu proti „pred"."""
+    """Drawing of the "after" model with deleted elements as ghosts and diff marks against "before"."""
     changes, deleted = diff.compare(before, after)
     if fbd.is_fbd(after):
         return _diff_drawing_fbd(before, after, changes, deleted, width)
     elements, rungs, unplaced = diff.merge(before, after, deleted)
     warnings = []
     lay, drawing = _layout({'elements': elements, 'rungs': rungs}, width)
-    if drawing is None:                                # přízraky rozbily rozložení -> jen „po"
+    if drawing is None:                                # ghosts broke the layout -> "after" only
         elements, rungs, unplaced = after['elements'], after['rungs'], list(deleted)
         lay, drawing = _layout(after, width)
         if drawing is None:
@@ -297,7 +297,7 @@ def _diff_drawing(before, after, width=0):
 
 
 def _diff_drawing_fbd(before, after, changes, deleted, width):
-    """FBD: smazané boxy jako přízraky (samostatné stromy; signály ze zachovaných boxů zůstanou)."""
+    """FBD: deleted boxes as ghosts (separate trees; signals from kept boxes stay)."""
     warnings, elements = [], fbd.merge(before, after, deleted)
     try:
         lay, drawing = fbd.layout(elements, width)
@@ -318,7 +318,7 @@ def _diff_drawing_fbd(before, after, changes, deleted, width):
 
 
 def _non_f(root, project):
-    """Jména bloků projektu, které nejsou F (pro pravidlo „v F-bloku jen F")."""
+    """Names of project blocks that are not F-blocks (for the rule "only F in an F-block")."""
     try:
         return {b['name'] for b in api_catalog(root, project)['blocks'] if not b.get('f')}
     except KeyError:
@@ -332,7 +332,7 @@ def _validate(after, f=False, root=None, project=None):
 
 
 def api_edit_detail(data, uid, width=0, root=None):
-    """Úprava + kresba „po" s rozdílem, chyby pravidel LAD, přechody stavů."""
+    """Change + "after" drawing with the diff, LAD rule errors, state transitions."""
     _, s, u = state.find(data, uid)
     res = _diff_drawing(u['before'], u['after'], width)
     res['tia'] = s.get('tia')
@@ -348,7 +348,7 @@ def api_edit_detail(data, uid, width=0, root=None):
 
 def api_procedure(data, uid, root=None):
     _, _, u = state.find(data, uid)
-    if 'f' not in u and root:                         # úpravy z doby před F2 příznak F-bloku nemají -> z exportu
+    if 'f' not in u and root:                         # older changes have no F-block flag -> take it from the export
         try:
             u = dict(u, f=_load(root, u['project'], u['block'])[1]['attributes'].get('S7_Safety') == 'TRUE')
         except KeyError:
@@ -356,7 +356,7 @@ def api_procedure(data, uid, root=None):
     return dict(procedure.procedure(u), edit=uid)
 
 
-# ---------- M3: katalog, editor ----------
+# ---------- catalog, editor ----------
 
 def api_catalog(root, project):
     if project not in export_index(root):
@@ -365,8 +365,8 @@ def api_catalog(root, project):
 
 
 def api_layout(root, body):
-    """Editor / zkouška Clauda: {po, pred?, ops?: [op], projekt?, sirka?} -> „po" po operacích, kresba s rozdílem
-    proti „pred", místa vložení, chyby pravidel LAD. Nic neukládá."""
+    """Editor / dry run: {after, before?, ops?: [op], project?, width?} -> "after" after the operations, drawing with
+    the diff against "before", insertion places, LAD rule errors. Saves nothing."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     if fbd.is_fbd(body.get('after')):
@@ -378,7 +378,7 @@ def api_layout(root, body):
         verify_model(before)
     cat = []
 
-    def template(key):                                # klíč palety ('NO', 'fb:FB_Pas') -> prvek z katalogu
+    def template(key):                                # palette key ('NO', 'fb:FB_Belt') -> element from the catalog
         if not cat:
             cat.append(api_catalog(root, str(body.get('project', ''))))
         try:
@@ -400,7 +400,7 @@ def api_layout(root, body):
 
 
 def _layout_fbd(body, root=None):
-    """FBD: operace (fbd.proved; klíče palety FBD i katalogu), kresba s rozdílem proti pred, místa vložení, pravidla."""
+    """FBD: operations (fbd.apply; FBD palette and catalog keys), drawing with the diff against before, insertion places, rules."""
     after = _fbd_after(body['after'])
     before = _fbd_after(dict(body['before'], language='FBD')) if isinstance(body.get('before'), dict) else None
     ops = body.get('ops') or []
@@ -426,8 +426,8 @@ def _layout_fbd(body, root=None):
 
 
 def api_check_export(root, data, uid, body):
-    """M4: porovná network úpravy v exportu (nejnovějším / zadaném) s modelem „po" podle obsahu
-    a zapíše výsledek jako kontrolu (POST /api/kontrola). Network se hledá podle titulku, pak podle čísla."""
+    """Compare the change's network in the export (newest / given) with the "after" model by content
+    and record the result as a check (POST /api/check). The network is found by title, then by number."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     _, _, u = state.find(data, uid)
@@ -439,7 +439,7 @@ def api_check_export(root, data, uid, body):
         if n['nw'] != u['nw']:
             notes.append('the network moved: NW %d → NW %d (by title "%s")' % (u['nw'], n['nw'], u['title']))
         if len(cand) > 1:
-            notes.append('the title is in the block %d×, compared NW %d' % (len(cand), n['nw']))
+            notes.append('the title occurs %d× in the block, compared NW %d' % (len(cand), n['nw']))
     else:
         n = b['networks'][u['nw'] - 1] if u['nw'] <= len(b['networks']) else None
         if u.get('title'):
@@ -465,7 +465,7 @@ def api_check_export(root, data, uid, body):
 
 
 def api_edit_after(data, uid, body):
-    """Uloží model „po" k úpravě (editor „Uložit návrh"). Jen ve stavu Proposal; chyby pravidel uložení nebrání."""
+    """Save the "after" model of a change (editor "Save proposal"). Only in state Proposal; rule errors do not block saving."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     if fbd.is_fbd(body.get('after')):
@@ -487,9 +487,9 @@ def api_edit_after(data, uid, body):
     return {'edit': u, 'errors': _validate(after, u.get('f'))}
 
 
-# ---------- M5: Upload (TIAC_Writer) a Check (TIAC_Reader) ----------
+# ---------- Upload (TIAC_Writer) and Check (TIAC_Reader) ----------
 
-TIA_LOCK = threading.Lock()          # jedna instance TIA = v jednu chvíli jeden Upload / Check
+TIA_LOCK = threading.Lock()          # one TIA instance = one Upload / Check at a time
 CONNECTION_ERROR = 'TIA is busy or the Writer/Reader cannot be started: '
 
 
@@ -509,7 +509,7 @@ def _client(mcp, role, timeout):
 
 
 def _without_call_names(m):
-    """Pro kontrolu serializace: volání FB/FC porovnat podle instance (parser bez exportu název FB nezná)."""
+    """For the serialization check: compare FB/FC calls by instance (without an export the parser does not know the FB name)."""
     m = json.loads(json.dumps(m))
     for p in m['elements']:
         if p.get('call') == 'fc' and not p.get('instance'):
@@ -521,8 +521,8 @@ def _without_call_names(m):
 
 
 def _replace_in_file(file, u):
-    """Nahradí network úpravy (podle titulku, jinak čísla) v exportovaném .s7dcl modelem „po" -> popis.
-    Pojistky: F-blok ani jiný jazyk networku se nepřepíše; text po náhradě se znovu přečte a musí odpovídat návrhu."""
+    """Replace the change's network (by title, otherwise by number) in the exported .s7dcl with the "after" model -> description.
+    Safeguards: no F-block and no network in another language is overwritten; the replaced text is parsed again and must match the proposal."""
     with open(file, 'rb') as f:
         raw = f.read()
     bom = raw.startswith(b'\xef\xbb\xbf')
@@ -553,7 +553,7 @@ def _replace_in_file(file, u):
 
 
 def _path_from_text(t):
-    """Odpověď ResolveObjectPath -> 'Skupina/Blok' (JSON s path/objectPath… nebo prostý text)."""
+    """ResolveObjectPath answer -> 'Group/Block' (JSON with path/objectPath… or plain text)."""
     try:
         j = json.loads(t)
         if isinstance(j, dict):
@@ -566,7 +566,7 @@ def _path_from_text(t):
 
 
 def _write(data, uid, write, new_state, by):
-    """Uloží záznam Upload/Check do u['zapisy'] a při úspěchu změní stav (když ho mezitím nikdo nezměnil)."""
+    """Store the Upload/Check record in u['writes'] and on success change the state (if nobody changed it meanwhile)."""
     with state.LOCK:
         project, s, u = state.find(data, uid)
         u.setdefault('writes', []).append(write)
@@ -582,15 +582,15 @@ def _write(data, uid, write, new_state, by):
 def _is_f_edit(root, u):
     if 'f' in u:
         return bool(u['f'])
-    try:                                              # úpravy před F2: příznak z exportu; neznámý = bereme jako F
+    try:                                              # older changes: flag from the export; unknown = treated as F
         return _load(root, u['project'], u['block'])[1]['attributes'].get('S7_Safety') == 'TRUE'
     except KeyError:
         return True
 
 
 def api_upload(root, data, uid, mcp, timeout=300):
-    """Approved ne-safety úprava -> TIAC_Writer: Connect, ResolveObjectPath, export bloku jako dokumenty,
-    náhrada networku, PreviewImport, ImportFromDocuments Override -> Signed (kdo TIAC_Writer)."""
+    """Approved non-safety change -> TIAC_Writer: Connect, ResolveObjectPath, export the block as documents,
+    replace the network, PreviewImport, ImportFromDocuments Override -> Signed (by TIAC_Writer)."""
     _, s, u = state.find(data, uid)
     if u['state'] != 'Approved':
         raise state.StateError('Upload only in state Approved (now %s)' % u['state'])
@@ -656,13 +656,13 @@ def _json_or_empty(t):
 
 
 def api_check(root, data, uid, mcp, timeout=300):
-    """Signed úprava -> TIAC_Reader export_to_folder (blok do nové složky export rootu) -> kontrola exportem
-    -> při shodě Checked (kdo TIAC_Reader); při neshodě zůstane Signed a kontrola se zapíše jako neshoda."""
+    """Signed change -> TIAC_Reader export_to_folder (block into a new export root folder) -> export check
+    -> on a match Checked (by TIAC_Reader); on a mismatch it stays Signed and the check is recorded as a mismatch."""
     project, s, u = state.find(data, uid)
     if u['state'] != 'Signed':
         raise state.StateError('Check only in state Signed (now %s)' % u['state'])
     tia = _tia(s, project)
-    try:                                              # PLC a skupina z dosavadního exportu bloku
+    try:                                              # PLC and group from the existing export of the block
         t0, fpath, _ = find_block(root, project, u['block'])
         parts = os.path.relpath(fpath, os.path.join(root, project, t0))[:-len('.s7dcl')].replace('\\', '/').split('/')
     except KeyError:
@@ -679,7 +679,7 @@ def api_check(root, data, uid, mcp, timeout=300):
                 arg = {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
                        'plcName': tia.get('plcName') or parts[0]}
                 texts = []
-                for _ in range(50):                   # complete:false -> pokračovat runId + nextOffset
+                for _ in range(50):                   # complete:false -> continue with runId + nextOffset
                     t = k.call('export_to_folder', arg)
                     texts.append(t)
                     j = _json_or_empty(t)
@@ -711,7 +711,7 @@ def api_check(root, data, uid, mcp, timeout=300):
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
-    mcp = None                       # {'writer': (příkaz, env) | None, 'reader': …}
+    mcp = None                       # {'writer': (command, env) | None, 'reader': …}
     mcp_timeout = 300
 
     def log_message(self, fmt, *args):
@@ -804,7 +804,7 @@ def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300)
 
 
 def mcp_config(mcp_json, writer_cmd=None, reader_cmd=None):
-    """Příkazy Writeru / Readeru: z .mcp.json (klíče TIAC_Writer, tia-portal), přebité --writer-cmd / --reader-cmd."""
+    """Writer / Reader commands: from .mcp.json (keys TIAC_Writer, tia-portal), overridden by --writer-cmd / --reader-cmd."""
     return {'writer': (mcp_client.command_from_text(writer_cmd), None) if writer_cmd
             else mcp_client.from_mcp_json(mcp_json, 'TIAC_Writer'),
             'reader': (mcp_client.command_from_text(reader_cmd), None) if reader_cmd
