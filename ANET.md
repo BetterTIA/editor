@@ -39,7 +39,7 @@ Prvek (`prvky[]`): `{id, typ, …}` — `typ` ∈ `kontakt`, `kontakt_nc`, `kont
 | PUT | `/api/stav?projekt=` | přepíše celý soubor (kontrola struktury, id, stavů) |
 | POST | `/api/uprava` | nová úprava `{projekt, kolo, blok, nw, po, poznamka}` → 201, stav Proposal, autor ANet |
 | GET | `/api/uprava/<id>[?sirka=]` | úprava + kresba „po" se značkami `rozdil` (`pridany`/`zmeneny`, přízraky `x:<id>` = `smazany`), `dalsi`, `predchozi`, `signed_povolen` |
-| POST | `/api/uprava/<id>/stav` | `{stav, kdo}` — jen o krok vpřed/zpět v Proposal → Approved → Signed → Uploaded → Tested; Signed jen s kontrolou `shoda: true`, jinak **409** s důvodem |
+| POST | `/api/uprava/<id>/stav` | `{stav, kdo}` — jen o krok vpřed/zpět v Proposal → Approved → Signed → **Checked** → Uploaded → Tested (od M5); Signed volný, **Checked** jen když poslední kontrola je `shoda: true`, jinak **409** s důvodem |
 | POST | `/api/kontrola` | `{uprava_id, shoda, export_ts, poznamka}` — výsledek porovnání exportu po zápisu s návrhem (ručně; automaticky viz M4) |
 
 Model `po` má stejný tvar jako `/api/network` (`prvky` + `rungy`; `vodice` a `rozlozeni` dopočítá server). **Prvky se párují podle `id`**: zachovaný prvek nech s původním id, nový dostane nové (např. `n1`), smazaný vyhoď z `prvky` i `rungy`. Změna operandu/pinů = oranžová, nový prvek = zelený, smazaný = červený čárkovaný přízrak na původním místě (když pro něj v „po" není místo, vypíše se jako varování).
@@ -74,14 +74,14 @@ Stránka `?uprava=U001`: vlevo strom `projekt → kolo → blok → NW → úpra
 
 **Scénář v URL** (snímky, headless nemá myš): `?uprava=<id>&upravit=1&ops=<URL-kódovaný JSON seznam operací>&vyber=<id>&paleta=<klíč>&vetev=<r>,<k>` — operace se provedou jako v UI (bez uložení). Snímky `tests\snimky\M3_a_paleta_mista.png` (`&paleta=fb:FB_Pas`), `M3_b_FB_Pas_vetev.png` (výstupní větev s FB_Pas a piny), `M3_c_box_ve_vetvi.png` (chyba „box v paralelní větvi").
 
-M3 změny M2: název kola se ve stromu slučuje bez ohledu na velikost písmen a okrajové mezery; Signed odemyká **poslední** kontrola (pozdější neshoda zamkne; u úpravy už Signed+ se ukáže varování, stav se nevrací).
+M3 změny M2: název kola se ve stromu slučuje bez ohledu na velikost písmen a okrajové mezery; Signed (od M5 **Checked**) odemyká **poslední** kontrola (pozdější neshoda zamkne; u úpravy už Checked+ se ukáže varování, stav se nevrací).
 
 ## M4 — kontrola „export po zápisu = návrh"
 Po zápisu úpravy do projektu (ručně nebo Writerem) a exportu Readerem do export rootu serveru:
 ```
 python kontrola.py --server http://localhost:8765 --uprava U003 [--export-ts 20261012-140000]
 ```
-Exit **0 = shoda, 1 = neshoda, 2 = chyba** (server neběží, úprava / export / blok nenalezen). Vypíše jeden řádek `SHODA|NESHODA <id> · export <ts> · NW <n> · <poznámka>`. Výsledek se vždy zapíše k úpravě jako kontrola (stejně jako `POST /api/kontrola`), takže poslední kontrola se shodou odemkne Signed.
+Exit **0 = shoda, 1 = neshoda, 2 = chyba** (server neběží, úprava / export / blok nenalezen). Vypíše jeden řádek `SHODA|NESHODA <id> · export <ts> · NW <n> · <poznámka>`. Výsledek se vždy zapíše k úpravě jako kontrola (stejně jako `POST /api/kontrola`), takže poslední kontrola se shodou odemkne Checked (do M5 Signed).
 
 **Honza z UI:** u úpravy ve stavu Approved a dál tlačítko **„Zkontrolovat exportem"** (bere nejnovější export); výsledek se objeví v „Kontroly exportem", neshoda i nahoře jako varování.
 
@@ -150,7 +150,7 @@ Odpověď `/api/rozlozeni` pro FBD nese i `mista` (`{x, y, do}` pro editor) a `c
 
 **Editor FBD v UI** (`?uprava=<id>&upravit=1`, stejný rámec jako LAD): paleta (bitová logika, přiřazení, paměti, hrany, instrukce, bloky projektu s `F-`), místa vložení (kroužek na každém vstupu, pod posledním vstupem &/>=1/x = nový vstup, vlevo dole = nová logická cesta), klik na box nebo na jeho vstup → vlastnosti (operand s našeptáváním, NOT u vstupu/výstupu, operand nad boxem, instance), tlačítka **+ vstup / − vstup / Negovat vstup**, Delete, Ctrl+Z/Y, Esc, Uložit návrh. Z prohlížení FBD networku „Navrhnout úpravu" jako u LAD. Scénář pro snímek: `&ops=…&vyber=n1&vstup=2&paleta=AND`.
 
-**Kontrola exportem FBD** (`fbd.shoda_obsahu`, tlačítko i `kontrola.py --uprava`): boxy podle obsahu (typ, operand, název, instance, vstupy operand/negace/„signál"; prázdné piny volání se ignorují), u **&, >=1, x pořadí vstupů nehraje roli**, u ostatních ano; když boxy sedí, porovná se zapojení (stromy od výstupů) → „boxy sedí, ale liší se zapojení signálů". Výstup jako u LAD (shoda / neshoda + poznámka, poslední shoda odemkne Signed).
+**Kontrola exportem FBD** (`fbd.shoda_obsahu`, tlačítko i `kontrola.py --uprava`): boxy podle obsahu (typ, operand, název, instance, vstupy operand/negace/„signál"; prázdné piny volání se ignorují), u **&, >=1, x pořadí vstupů nehraje roli**, u ostatních ano; když boxy sedí, porovná se zapojení (stromy od výstupů) → „boxy sedí, ale liší se zapojení signálů". Výstup jako u LAD (shoda / neshoda + poznámka, poslední shoda odemkne Checked).
 
 **Postup pro TIA** (`postup.py`, LAD i FBD): `GET /api/uprava/<id>/postup` → `{hlavicka, kroky, markdown, zdroje}`; hlavička `FB30 "FB_Bezpecnost" · NW 1: <titulek>`; kroky česky s povely ověřenými v nápovědě V21 (nota §5b, tabulka `postup.POVELY` se zdrojem): **Insert input** `Ctrl+Shift+3`, **Create a ones complement** `Ctrl+Shift+4`, **Delete**, Replace přes trojúhelník (`Alt+F2`), `F9`/`F10`/`Shift+F7`, Empty box `F8`, **Call options** Single/Multi-instance, **Change instance**; ostatní slovy s ⟦neověřeno⟧ (gesto pin→pin, převzetí signálu při vložení, zrušení negace, LAD gesta). U F-bloku na konci „Přelož safety program a zkontroluj F-signaturu" (heslo F-CPU / Safety Administration). V UI panel „Postup pro TIA" pod kontrolami s tlačítkem **kopírovat** (markdown).
 ```
@@ -165,6 +165,52 @@ curl -s http://localhost:8765/api/uprava/U003/postup
 **Skutečné kliky myší** (`tests	est_klikani.py`): headless Chrome přes DevTools protokol (mini WebSocket klient ze stdlib), `Input.dispatchMouseEvent` = důvěryhodná sekvence pointerdown/mousedown → pointerup/mouseup → click na `rect.hit` boxu, „+ vstup", položku palety a místo vložení — FBD i LAD editor. Pozor při živém testu přes rozšíření `claude-in-chrome`: když je karta skrytá (`document.visibilityState === "hidden"`, snímek obrazovky vyprší), **první** kliknutí po načtení stránky do stránky vůbec nedorazí (ověřeno i na prosté JSON stránce `/api/stav`) — druhé už ano. Není to chyba aplikace.
 
 **Neumí (F2):** tažení boxu po plátně / přepojení signálu myší (jen vložení na vstup a smazání); `pin → wire#` z výstupního pinu volání; časovače/čítače ve FBD mají EN/ENO místo IN/Q; negace hlavního výstupu se nekanonizuje proti negaci vstupu následníka (dva zápisy téže logiky = neshoda).
+
+## M5 — Upload (TIAC_Writer) a Check (TIAC_Reader), šest stavů
+**Stavy (rozhodnutí Honzy 13. 10. 2026):** `Proposal → Approved → Signed → Checked → Uploaded → Tested`. **Signed** = zapsáno v projektu TIA (Honza ručně, nebo **Upload**), volný přechod. **Checked** = Reader exportem ověřil export = návrh — jen když **poslední** kontrola je shoda, jinak 409 (pravidlo, které do M4 hlídalo Signed; `checked_povolen` v `GET /api/uprava/<id>`). Uploaded / Tested odklikává Honza. Starší `stav.json` (pět stavů) se načte beze změny. Varování „poslední kontrola je NESHODA" se ukazuje od Checked dál.
+
+**Upload** — `POST /api/uprava/<id>/upload` (jen **Approved** a ne-F úprava; F-blok, jiný stav, chybějící `tia`, běžící jiný Upload/Check → **409**). Server spustí TIAC_Writer (MCP přes stdio, `mcp_klient.py`) a provede:
+1. `Connect {}` (bez `portalId`; víc instancí TIA = chyba → „TIA zaneprázdněné…", nic dalšího se nedělá),
+2. `ResolveObjectPath {softwarePath, name: blok, kind: "block"}` → `groupPath` (přeskočí se, když je `tia.groupPath`),
+3. `ExportBlocksAsDocuments {softwarePath, exportPath: <temp>, regexName: "^blok$", preservePath: false}`,
+4. náhrada networku v `.s7dcl` (`s7dcl_zapis.py`): network podle **titulku** (jinak čísla), pojistky: blok s `S7_Safety` se nepřepíše, jazyk networku musí sedět, text po náhradě se znovu přečte a musí obsahem odpovídat návrhu (jinak stop před importem); `.s7res` se nemění, BOM a CRLF se zachovají,
+5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (text se uloží do záznamu `preview`),
+6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: blok, importOption: "Override"}`.
+
+Výsledek → `u['zapisy']` = `[{cas, nastroj: "TIAC_Writer", kroky: [{krok, ok, zprava}], ok, zprava, preview?}]`; při úspěchu Signed s `kdo: "TIAC_Writer"`. Odpověď `200 {ok, zprava, zapis, uprava}` — i při chybě spojení (`ok: false`, zpráva „TIA zaneprázdněné nebo Writer/Reader nejde spustit: …", stav se nemění). **SaveProject Writer nevolá** — změna je v otevřeném projektu TIA, uložení je na Honzovi.
+
+**Check** — `POST /api/uprava/<id>/check` (jen **Signed**, `tia` povinné, jinak 409). TIAC_Reader `export_to_folder {pathPrefixes: ["<PLC>/Blocks/<Skupina>/<blok>"], include: ["blocks"], formats: ["documents"], plcName}` (PLC a skupina z dosavadního exportu bloku v export rootu editoru, `tia.groupPath` je přebije; `complete: false` → opakuje s `runId` + `nextOffset`). Nová složka exportu = časové razítko z odpovědi, které v export rootu přibylo, jinak nejnovější nová složka projektu po volání. Pak dnešní kontrola exportem (`kontrola-exportem` nad tím exportem) → shoda = **Checked** (`kdo: "TIAC_Reader"`), neshoda = zůstane Signed, kontrola se zapíše jako neshoda. Záznam i do `u['zapisy']` (`nastroj: "TIAC_Reader"`). **Reader musí exportovat do stejného export rootu, nad kterým běží editor** (`--export-root` = `--export-root` Readeru).
+```
+python kontrola.py --check U003      # CHECKED|NESHODA|CHYBA <id> · stav … · export <ts> · zpráva ; exit 0 / 1 / 2
+```
+**Zámek:** v jednu chvíli jeden Upload / Check (druhý dostane 409). Timeout jednoho volání nástroje `--mcp-timeout` (300 s).
+
+**Nastavení TIA per projekt** (v `stav.json` vedle `upravy`): `"tia": {"softwarePath": "PLC_1", "plcName": "PLC_1", "groupPath": "Dopravnik"}` (`groupPath` volitelné — jinak ho dohledá Writer). Nastavuje se `PUT /api/stav?projekt=` nebo v UI rozbalovacím „Nastavení TIA projektu" u úpravy. Bez něj jsou tlačítka zašedlá a API vrací 409 s nápovědou.
+
+**Odkud server bere Writer a Reader:** `--mcp-json` (výchozí `.mcp.json`, jen se čte) — klíče `TIAC_Writer` a `tia-portal` (příkaz, argumenty, `env`); přebíjí `--writer-cmd "…"` / `--reader-cmd "…"` (celý příkaz jako text, cesty s mezerami v uvozovkách).
+
+**UI:** v hlavičce úpravy **Upload →** (Approved, ne-F; u F-bloku místo něj „F-blok: zapisuje Honza podle Postupu pro TIA"), **Check →** (Signed); během běhu jsou tlačítka zamčená a vedle je text průběhu; výsledek v panelu „Upload / Check (Writer, Reader)" s kroky (chybný krok červeně se zprávou), chyba nahoře jako varování (stránka nepadá). Řádek „Stavy: …" ukazuje šest stavů s aktuálním zvýrazněným.
+
+**Falešné servery (testy a ukázka, bez TIA):** `tests\falesny_mcp.py writer|reader` — MCP přes stdio, umí jen nástroje výše. „Projekt TIA" = složka `--stav` (výchozí `%TEMP%\tiac_falesny_tia`): Writer exportuje blok odtud (před prvním importem z `--vzorek`, výchozí vzorky `20261012-120000`), import zapíše dokumenty do `--stav` a řádek do `<stav>\importy.jsonl`; Reader `--export-root <root> --projekt <p>` vytvoří novou složku `<root>\<p>\<RRRRMMDD-HHMMSS>\<PLC>\Blocks\…` s blokem z `--stav`. `--vice-instanci` = Connect vrátí chybu, `--pomalu S` = zpoždění odpovědí.
+```
+rem ukázka: export root = KOPIE vzorků (falešný Reader do něj přidává složky exportu)
+robocopy tests\vzorky data\tiac-editor-export-demo /E
+python server.py --port 8765 --export-root "data\tiac-editor-export-demo" --data "data\tiac-editor" --writer-cmd "python tests\falesny_mcp.py writer" --reader-cmd "python tests\falesny_mcp.py reader --export-root data\tiac-editor-export-demo --projekt Demo_Linka"
+```
+⚠ Falešný Reader zapisuje nové složky exportu do svého `--export-root`; kdyby to byl `tests\vzorky`, přibyl by tam nejnovější export bloku a testy (`TS1`/`TS2` = nejnovější export) by padaly — proto kopie vzorků mimo repo.
+
+**Serializace** (`s7dcl_zapis.py`): `text_networku(model)` → tělo networku (LAD: rungy 1:1, `wire#wN`, `Contact`/`I_Contact`/`P_Contact`, `XX_Contact` + `S7_Templates`, cívky, `NOT Coil`, volání `"Inst"(…)` / `#inst.TON(…)` / `"FC"(…)` / instrukce `Move(…)` s piny malými písmeny; FBD: řetěz boxů podle 1. vstupu, odbočky `wire#wN` v rungu nebo `END_RUNG wire#wN`, `NOT` před boxem = negovaný 1. vstup, `pin := NOT x`, atributy volání F-bloku). `nahrad_network(text, n, novy_text)` vymění jen tělo N-tého `NETWORK … END_NETWORK`. Test: `tests\test_s7dcl_zapis.py` — `parse(serialize(parse(x)))` = shoda obsahu na **všech** networcích vzorků (LAD i FBD) a nahrazení networku sebou samým dá blok, který parser čte stejně (FB_Dopravnik NW4 znak po znaku).
+
+**Testy M5:** `tests\test_m5.py` (Upload F-bloku 409, bez `tia` 409, Upload OK → Signed + importovaný `.s7dcl` obsahuje network „po", Check → Checked, neshoda → zůstane Signed + Checked 409, CLI `--check`, „TIA zaneprázdněné", nespustitelný Writer, zámek, FBD ne-safety network), `tests\test_mcp_klient.py` (handshake, isError, nespustitelný příkaz, timeout, konec procesu), `tests\test_stav.py` (šest stavů, starý `stav.json`). Snímky `tests\snimky\M5_a_bez_nastaveni_tia.png`, `M5_b_approved_upload.png`, `M5_c_f_blok_bez_uploadu.png`, `M5_d_signed_check.png`, `M5_e_checked.png`.
+
+**⟦Neověřeno proti živé TIA⟧ (vše výše běží jen proti falešným serverům):**
+- tvar odpovědí Readeru `export_to_folder` (klíče složky, `complete`, `runId`, `nextOffset`) — parsuje se tolerantně, záloha = nová složka v export rootu;
+- tvar odpovědi `ResolveObjectPath` (JSON `path` / prostý text) a zda `ExportBlocksAsDocuments` dá soubory přímo do `exportPath`;
+- chování `ImportFromDocuments` Override u existujícího bloku (instance DB, rozhraní, čísla networků, komentáře), zda TIA po importu network přečísluje nebo změní titulky `MLC_x`;
+- kódování `.s7dcl` z Writeru (BOM, CRLF) — obojí se zachovává tak, jak přišlo;
+- serializace: pořadí pinů volání (vstupy, pak výstupy), klíče `S7_Templates` mimo porovnání a TON (`SrcType`/`DestType` odhad), tvar `P_Contact`/`N_Contact`, `ReturnTrue()`, negovaný výstup volání `Q => NOT x`, prázdný FBD rung bez operandu;
+- F-bloky Upload nemají (409 + pojistka `S7_Safety` v exportu) — F-signaturu nic z M5 nemění;
+- `Connect` bez `portalId` může TIA **spustit**, když žádná instance neběží (popis nástroje Writeru).
 
 ## Jak si Claude bere stav a snímek
 ```
