@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LADEditor</title>
+<title>TIAC_Editor</title>
 <style>
 :root {
   --bg: #1e1e1e; --panel: #252526; --hrana: #3a3a3a; --text: #f0f0f0; --tlum: #a8a8a8;
@@ -153,7 +153,7 @@ svg .ram-chyba { fill: none; stroke: var(--varovani); stroke-width: 2; }
 </style>
 </head>
 <body>
-<header><b>LADEditor</b><span class="info" id="info">prohlížeč a úpravy</span></header>
+<header><b>TIAC_Editor</b><span class="info" id="info">prohlížeč a úpravy</span></header>
 <div class="hlavni">
   <aside id="nw"></aside>
   <main id="obsah"></main>
@@ -423,7 +423,7 @@ async function zobrazNetwork(projekt, blok) {
   const nw = parseInt(q.get('nw') || '1', 10);
   const [strom, b] = await Promise.all([stromNacti(null), api(`/api/blok?projekt=${enc(projekt)}&blok=${enc(blok)}`)]);
   $('info').textContent = `${b.projekt} · export ${b.ts} · ${b.druh}${b.cislo != null ? b.cislo : ''} "${b.blok}"`;
-  document.title = `LADEditor — ${b.blok} NW${nw}`;
+  document.title = `TIAC_Editor — ${b.blok} NW${nw}`;
   $('nw').innerHTML = strom + networkyHtml(b, nw, n => odkaz({nw: n}));
   const net = await api(`/api/network?projekt=${enc(projekt)}&blok=${enc(blok)}&nw=${nw}&sirka=${sirkaPlatna()}`);
   const m = $('obsah');
@@ -473,7 +473,7 @@ async function zobrazUpravu(uid, chyba) {
   const d = await api(`/api/uprava/${enc(uid)}?sirka=${sirkaPlatna()}`);
   const u = d.uprava;
   $('info').textContent = `${u.projekt} · úprava ${u.id} · export před ${u.pred.export_ts}`;
-  document.title = `LADEditor — ${u.id} ${u.blok} NW${u.nw}`;
+  document.title = `TIAC_Editor — ${u.id} ${u.blok} NW${u.nw}`;
   let vlevo = await stromNacti(u.id);
   try {
     const b = await api(`/api/blok?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}`);
@@ -551,7 +551,7 @@ async function editor(uid) {
                      hist: [], redo: [], vyber: null, vklad: null, vetev: null, zmeneno: false});
   ed.kat = await api(`/api/katalog?projekt=${enc(u.projekt)}`);
   $('info').textContent = `${u.projekt} · editor úpravy ${u.id} · export před ${u.pred.export_ts}`;
-  document.title = `LADEditor — upravit ${u.id}`;
+  document.title = `TIAC_Editor — upravit ${u.id}`;
   let vlevo = await stromNacti(u.id);
   try {
     const b = await api(`/api/blok?projekt=${enc(u.projekt)}&blok=${enc(u.blok)}`);

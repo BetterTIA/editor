@@ -1,4 +1,4 @@
-"""Snímek stránky LADEditoru do PNG přes headless Chrome (bez instalací).
+"""Snímek stránky TIAC_Editoru do PNG přes headless Chrome (bez instalací).
 
 python snimek.py --url "http://localhost:8765/?projekt=..&blok=..&nw=2&snimek=1" --out nw2.png [--width 1400 --height 900] [--svetly]
 """

@@ -1,10 +1,10 @@
-# LADEditor — ANET.md
+# TIAC_Editor — ANET.md
 
 Lokální prohlížeč a editor LAD networků (FBD od F1/F2: prohlížení, editor, kontrola, postup pro TIA) z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
 
 ## Spuštění
 ```
-python server.py --port 8765 --export-root "C:\TIA\export" --data "data\ladeditor"
+python server.py --port 8765 --export-root "C:\TIA\export" --data "data\tiac-editor"
 ```
 - `--export-root` = složka `<projekt>\<timestamp YYYYMMDD-HHMMSS>\<PLC>\Blocks\…\<blok>.s7dcl`. Blok se hledá podle jména souboru v **nejnovějším** exportu, který ho obsahuje (dílčí exporty nevadí).
 - `--data` (povinné) = složka dat úprav, `<data>\<projekt>\stav.json` (viz M2).
@@ -29,7 +29,7 @@ Prvek (`prvky[]`): `{id, typ, …}` — `typ` ∈ `kontakt`, `kontakt_nc`, `kont
 `sirka` = šířka plátna v px; cívky se zarovnají k jeho pravému okraji (stránka posílá šířku okna).
 
 ## M2 — úpravy a stavy
-**Úložiště:** `<--data>\<projekt>\stav.json` (např. `data\ladeditor\Demo_Linka\stav.json`). Zapisuje **jen server** (zámek + dočasný soubor + `os.replace`); když server běží, soubor ručně neupravovat — použij `PUT /api/stav`.
+**Úložiště:** `<--data>\<projekt>\stav.json` (např. `data\tiac-editor\Demo_Linka\stav.json`). Zapisuje **jen server** (zámek + dočasný soubor + `os.replace`); když server běží, soubor ručně neupravovat — použij `PUT /api/stav`.
 
 Úprava: `{id (U001…, jedinečné přes projekty), projekt, kolo, blok, druh, cislo_bloku, nw, titulek, autor, cas, stav, poznamka, historie: [{stav, cas, kdo}], pred: {prvky, rungy, vodice, rozlozeni, export_ts}, po: {…}, kontroly: [{cas, shoda, export_ts, poznamka}]}`. Číslo bloku, titulek networku a `pred` doplní server z aktuálního exportu — nikdy se nezadávají ručně (co pošle klient, ignoruje se).
 

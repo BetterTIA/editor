@@ -1,4 +1,4 @@
-"""LADEditor — lokální server (Python stdlib). M1 prohlížeč networků z exportu Readeru, M2 strom úprav a stavy.
+"""TIAC_Editor — lokální server (Python stdlib). M1 prohlížeč networků z exportu Readeru, M2 strom úprav a stavy.
 
 python server.py --port 8765 --export-root "C:\\TIA\\export" --data "<dir>"
 """
@@ -570,13 +570,13 @@ def vytvor_server(port, root, data, host='127.0.0.1'):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='LADEditor server')
+    ap = argparse.ArgumentParser(description='TIAC_Editor server')
     ap.add_argument('--port', type=int, default=8765)
     ap.add_argument('--export-root', required=True)
     ap.add_argument('--data', required=True, help='složka dat úprav: <data>\\<projekt>\\stav.json')
     a = ap.parse_args()
     srv = vytvor_server(a.port, a.export_root, a.data)
-    print('LADEditor na http://localhost:%d  (export root %s, data %s)' % (a.port, a.export_root, a.data), flush=True)
+    print('TIAC_Editor na http://localhost:%d  (export root %s, data %s)' % (a.port, a.export_root, a.data), flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

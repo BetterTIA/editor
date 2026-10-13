@@ -1,7 +1,7 @@
 """Postup skládání úpravy v editoru TIA V21 (F2): z rozdílu před / po očíslované kroky česky.
 
 Hlavička vždy `<druh><číslo> "<blok>" · NW <n>: <titulek>` (pravidlo Honzy 12. 10.). Názvy povelů jen ty ověřené
-v lokální nápovědě TIA V21 (nota LADEditor §5b, tabulka POVELY se zdrojem); co ověřené není, je slovy s ⟦neověřeno⟧.
+v lokální nápovědě TIA V21 (nota TIAC_Editor §5b, tabulka POVELY se zdrojem); co ověřené není, je slovy s ⟦neověřeno⟧.
 """
 import model
 import rozdil

@@ -28,7 +28,7 @@ def postup(server, uprava):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description='LADEditor: kontrola exportu po zápisu proti návrhu')
+    ap = argparse.ArgumentParser(description='TIAC_Editor: kontrola exportu po zápisu proti návrhu')
     ap.add_argument('--server', default='http://localhost:8765')
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument('--uprava', help='zkontroluje export po zápisu proti návrhu')

@@ -76,7 +76,7 @@ class TestApi(unittest.TestCase):
         s, t, b = self.get('/?projekt=%s&blok=FB_Dopravnik&nw=2&snimek=1' % PROJEKT)
         self.assertEqual(s, 200)
         self.assertIn('text/html', t)
-        self.assertIn(b'LADEditor', b)
+        self.assertIn(b'TIAC_Editor', b)
 
     @unittest.skipUnless(any(os.path.exists(p) for p in snimek.PROHLIZECE), 'chybí Chrome/Edge')
     def test_snimek(self):
