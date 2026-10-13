@@ -37,8 +37,9 @@ def from_mcp_json(fpath, key):
 
 
 class Client:
-    def __init__(self, command, env=None, timeout=300, display_name=None):
+    def __init__(self, command, env=None, timeout=300, display_name=None, client_info=None):
         self.command, self.env, self.timeout = list(command), env, timeout
+        self.client_info = client_info or {'name': 'TIAC_Editor', 'version': 'M5'}
         self.display_name = display_name or os.path.basename(self.command[0])
         self.p, self.q, self.err, self.id = None, queue.Queue(), [], 0
 
@@ -60,7 +61,7 @@ class Client:
         threading.Thread(target=self._read_err, daemon=True).start()
         try:
             self._request('initialize', {'protocolVersion': PROTOCOL, 'capabilities': {},
-                                       'clientInfo': {'name': 'TIAC_Editor', 'version': 'M5'}})
+                                       'clientInfo': self.client_info})
             self._send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
         except MCPError:
             self.close()
@@ -112,6 +113,13 @@ class Client:
             if 'error' in z:
                 raise MCPError('%s: %s failed: %s' % (self.display_name, method, z['error'].get('message', z['error'])))
             return z.get('result') or {}
+
+    def list_tools(self, timeout=None):
+        return self._request('tools/list', {}, timeout).get('tools') or []
+
+    def call_raw(self, tool, arguments, timeout=None):
+        """tools/call -> the whole result {content: [...], isError?} (images, errors as data)."""
+        return self._request('tools/call', {'name': tool, 'arguments': arguments}, timeout)
 
     def call(self, tool, arguments, timeout=None):
         """tools/call -> result text (content[0].text); isError -> MCPError with the tool's text."""

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -270,14 +271,14 @@ def api_edit_create(root, data, body):
         after = {'elements': body['after']['elements'], 'rungs': body['after']['rungs']}
         after['wires'] = s7dcl.wires(after)
         after['layout'] = body['after'].get('layout') or _layout(after)[0]
-    when = state.now()
+    when, by = state.now(), str(body.get('by') or 'editor')[:80]
     with state.LOCK:
         s = state.load(data, project)
         u = {'id': state.new_id(data), 'project': project, 'round': str(body.get('round') or '—'),
              'block': net['file'], 'kind': net['kind'], 'block_number': net['number'], 'nw': net['nw'],
-             'title': net['title'], 'language': net['language'], 'f': bool(net.get('f') or body.get('f')), 'author': 'editor', 'time': when, 'state': 'Proposal',
+             'title': net['title'], 'language': net['language'], 'f': bool(net.get('f') or body.get('f')), 'author': by, 'time': when, 'state': 'Proposal',
              'note': str(body.get('note') or ''),
-             'history': [{'state': 'Proposal', 'time': when, 'by': 'editor'}],
+             'history': [{'state': 'Proposal', 'time': when, 'by': by}],
              'before': dict(_model(net), export_ts=net['ts']), 'after': after, 'checks': []}
         s['edits'].append(u)
         state.save(data, project, s)
@@ -516,6 +517,8 @@ def api_edit_after(data, uid, body):
             raise state.StateError('the proposal can be changed only in state Proposal (now %s)' % u['state'])
         u['after'] = after
         u['edited'] = state.now()
+        if body.get('note') is not None:
+            u['note'] = str(body['note'])
         state.save(data, project, s)
     return {'edit': u, 'errors': _validate(after, u.get('f'))}
 
@@ -944,6 +947,32 @@ def api_project_delete(data, name):
     return {'removed': name}
 
 
+# ---------- AI clients (mcp_server.py registers here) ----------
+
+AI_TIMEOUT = 60                      # a client without a heartbeat for this long is forgotten (s)
+
+
+def ai_status(h):
+    """-> {ai: "no client" | "connected: <name>[, <name>…]", ai_clients: [...]}; drops clients without a heartbeat."""
+    now = time.time()
+    for k in [k for k, c in list(h.ai_clients.items()) if now - c['seen'] > h.ai_timeout]:
+        h.ai_clients.pop(k, None)
+    cl = sorted(h.ai_clients.values(), key=lambda c: c['since'])
+    return {'ai': 'connected: ' + ', '.join(c['name'] for c in cl) if cl else 'no client',
+            'ai_clients': [{k: c[k] for k in ('id', 'name', 'version', 'since', 'last_seen')} for c in cl]}
+
+
+def api_ai_heartbeat(h, body):
+    """POST /api/ai/clients {id, name, version?} — register a client or refresh its heartbeat."""
+    if not isinstance(body, dict) or not re.fullmatch(r'[\w-]{1,64}', str(body.get('id') or '')):
+        raise state.StateError('ai client: {id: [A-Za-z0-9_-]{1,64}, name, version?}', 400)
+    c = h.ai_clients.get(body['id']) or {'id': body['id'], 'since': state.now()}
+    c.update(name=str(body.get('name') or 'unknown client')[:80], version=str(body.get('version') or '')[:40],
+             last_seen=state.now(), seen=time.time())
+    h.ai_clients[c['id']] = c
+    return ai_status(h)
+
+
 class SnapshotError(Exception):
     pass
 
@@ -1110,6 +1139,8 @@ class Handler(BaseHTTPRequestHandler):
     mcp_timeout = 300
     jobs = {}
     tia_status = {}
+    ai_clients = {}
+    ai_timeout = AI_TIMEOUT
 
     def log_message(self, fmt, *args):
         pass
@@ -1211,10 +1242,15 @@ class Handler(BaseHTTPRequestHandler):
             elif method == 'GET' and re.fullmatch(r'/api/jobs/[\w-]+', c):
                 self._json(self.jobs[c.split('/')[3]])
             elif method == 'GET' and c == '/api/tia/status':
-                if q.get('refresh') == '1' or q.get('portalId'):
-                    self._json(refresh_status(self, q.get('portalId')))
-                else:
-                    self._json(dict(self.tia_status))
+                st = refresh_status(self, q.get('portalId')) if q.get('refresh') == '1' or q.get('portalId')                     else dict(self.tia_status)
+                self._json(dict(st, **ai_status(self)))
+            elif method == 'GET' and c == '/api/ai/clients':
+                self._json(ai_status(self))
+            elif method == 'POST' and c == '/api/ai/clients':
+                self._json(api_ai_heartbeat(self, self._body()))
+            elif method == 'DELETE' and re.fullmatch(r'/api/ai/clients/[\w-]+', c):
+                self.ai_clients.pop(c.split('/')[4], None)
+                self._json(ai_status(self))
             elif method == 'POST' and c == '/api/check':
                 self._json(api_add_check(self.data, self._body()))
             else:
@@ -1239,9 +1275,10 @@ class Handler(BaseHTTPRequestHandler):
         self._handle('DELETE')
 
 
-def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300, autoconnect=False):
+def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300, autoconnect=False, ai_timeout=AI_TIMEOUT):
     """autoconnect: check the TIA status once in the background at start (and the home page checks it when opened)."""
     h = type('H', (Handler,), {'root': root, 'data': data, 'mcp': mcp, 'mcp_timeout': mcp_timeout, 'jobs': {},
+                               'ai_clients': {}, 'ai_timeout': ai_timeout,
                                'tia_status': {'tia': 'unknown', 'checked': False, 'autoconnect': autoconnect}})
     sync_registry(root, data)
     srv = ThreadingHTTPServer((host, port), h)
@@ -1270,9 +1307,11 @@ def main():
     ap.add_argument('--mcp-timeout', type=int, default=300, help='timeout of one tool call (s)')
     ap.add_argument('--no-autoconnect', action='store_true',
                     help='do not check TIA Portal at start and when the home page opens (only the Refresh button does)')
+    ap.add_argument('--ai-timeout', type=float, default=AI_TIMEOUT,
+                    help='forget an AI client (mcp_server.py) after this many seconds without a heartbeat')
     a = ap.parse_args()
     srv = create_server(a.port, a.export_root, a.data, mcp=mcp_config(a.mcp_json, a.writer_cmd, a.reader_cmd),
-                        mcp_timeout=a.mcp_timeout, autoconnect=not a.no_autoconnect)
+                        mcp_timeout=a.mcp_timeout, autoconnect=not a.no_autoconnect, ai_timeout=a.ai_timeout)
     print('TIAC_Editor at http://localhost:%d  (export root %s, data %s)' % (a.port, a.export_root, a.data), flush=True)
     try:
         srv.serve_forever()
