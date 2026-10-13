@@ -5,43 +5,43 @@
     S7_Safety := "TRUE";
     S7_Version := "0.1"
 }
-FUNCTION_BLOCK "FB_Bezpecnost"
+FUNCTION_BLOCK "FB_Safety"
     VAR_INPUT
         Start : Bool;
-        Servis : Bool;
-        Porucha : Bool;
-        Kvitace_Tl : Bool;
-        Kvitace_HMI : Bool;
-        Kvitace_Dalkova : Bool;
-        Dvere_Zavreny : Bool;
-        Zamek_OK : Bool;
-        Snimac_A : Bool;
-        Snimac_B : Bool;
+        Service : Bool;
+        Fault : Bool;
+        Ack_Button : Bool;
+        Ack_HMI : Bool;
+        Ack_Remote : Bool;
+        Door_Closed : Bool;
+        Lock_OK : Bool;
+        Detector_A : Bool;
+        Detector_B : Bool;
     END_VAR
     VAR_OUTPUT
-        Povoleni : Bool;
-        Povoleni_Pohon : Bool;
-        Nouz_OK : Bool;
-        Ochrana_OK : Bool;
+        Enable : Bool;
+        Enable_Drive : Bool;
+        EStop_OK : Bool;
+        Guard_OK : Bool;
     END_VAR
     VAR
-        NouzStop : ESTOP1;
-        Dvere : SFDOOR;
-        Blokace : Bool;
-        Kvitace : Bool;
-        Kvitace_Pamet : Bool;
-        Kvitace_Nutna : Bool;
-        Kvitace_Pozadavek : Bool;
-        Kontrolka_Zelena : Bool;
-        Kontrolka_Cervena : Bool;
-        Porucha_Pamet : Bool;
-        Pamet_SR : Bool;
-        Stav_SR : Bool;
-        Nuluj : Bool;
-        Vzdy_1 : Bool;
-        Krok : Int;
-        Nesoulad_Pamet : Bool;
-        Nesoulad_Hrana : Bool;
+        EStop : ESTOP1;
+        Door : SFDOOR;
+        Lockout : Bool;
+        Ack : Bool;
+        Ack_Mem : Bool;
+        Ack_Required : Bool;
+        Ack_Request : Bool;
+        Lamp_Green : Bool;
+        Lamp_Red : Bool;
+        Fault_Mem : Bool;
+        Mem_SR : Bool;
+        State_SR : Bool;
+        Clear : Bool;
+        Always_1 : Bool;
+        Step : Int;
+        Mismatch_Mem : Bool;
+        Mismatch_Edge : Bool;
     END_VAR
 
     {
@@ -50,13 +50,13 @@ FUNCTION_BLOCK "FB_Bezpecnost"
     }
     NETWORK
         RUNG #Start
-            O( in2 := #Servis )
+            O( in2 := #Service )
             A(
-                in2 := NOT #Porucha,
-                in3 := "DB_Stroj".Bezpecnost_OK,
-                in4 := #Zamek_OK
+                in2 := NOT #Fault,
+                in3 := "DB_Machine".Safety_OK,
+                in4 := #Lock_OK
             )
-            Coil( #Povoleni_Pohon )
+            Coil( #Enable_Drive )
         END_RUNG
     END_NETWORK
     {
@@ -64,14 +64,14 @@ FUNCTION_BLOCK "FB_Bezpecnost"
         S7_NetworkTitle := "MLC_2"
     }
     NETWORK
-        RUNG #Kvitace_Tl
+        RUNG #Ack_Button
             A( in2 := wire#w1 )
-            Coil( #Kvitace )
+            Coil( #Ack )
         END_RUNG
-        RUNG #Kvitace_HMI
+        RUNG #Ack_HMI
             O(
-                in2 := #Kvitace_Dalkova,
-                in3 := NOT #Blokace
+                in2 := #Ack_Remote,
+                in3 := NOT #Lockout
             )
         END_RUNG wire#w1
     END_NETWORK
@@ -80,14 +80,14 @@ FUNCTION_BLOCK "FB_Bezpecnost"
         S7_NetworkTitle := "MLC_3"
     }
     NETWORK
-        RUNG #Dvere_Zavreny
-            A( in2 := #Zamek_OK )
+        RUNG #Door_Closed
+            A( in2 := #Lock_OK )
             wire#w2
-            Coil( #Ochrana_OK )
-            Coil( #Kontrolka_Zelena )
+            Coil( #Guard_OK )
+            Coil( #Lamp_Green )
         END_RUNG
         RUNG wire#w2
-            NOT Coil( #Kontrolka_Cervena )
+            NOT Coil( #Lamp_Red )
         END_RUNG
     END_NETWORK
     {
@@ -100,19 +100,19 @@ FUNCTION_BLOCK "FB_Bezpecnost"
                 f_user_card := "1";
                 f_image_card := "0"
             }
-            #NouzStop.ESTOP1(
-                E_STOP := "Nouzovy_Stop",
-                ACK_NEC := NOT #Kvitace_Nutna,
+            #EStop.ESTOP1(
+                E_STOP := "Emergency_Stop",
+                ACK_NEC := NOT #Ack_Required,
                 ACK := wire#w1,
                 TIME_DEL :=  ,
-                Q => #Nouz_OK,
+                Q => #EStop_OK,
                 Q_DELAY =>  ,
-                ACK_REQ => #Kvitace_Pozadavek,
+                ACK_REQ => #Ack_Request,
                 DIAG =>
             )
         END_RUNG
-        RUNG #Kvitace
-            P_Trig( #Kvitace_Pamet )
+        RUNG #Ack
+            P_Trig( #Ack_Mem )
         END_RUNG wire#w1
     END_NETWORK
     {
@@ -125,14 +125,14 @@ FUNCTION_BLOCK "FB_Bezpecnost"
                 f_user_card := "1";
                 f_image_card := "0"
             }
-            #Dvere.SFDOOR(
-                IN1 := "Dvere_K1",
-                IN2 := "Dvere_K2",
-                QBAD_IN1 := NOT "Modul_K1".QBAD,
-                QBAD_IN2 := NOT "Modul_K2".QBAD,
-                OPEN_NEC := #Kvitace_Nutna,
-                ACK_NEC := #Kvitace_Nutna,
-                ACK := #Kvitace,
+            #Door.SFDOOR(
+                IN1 := "Door_K1",
+                IN2 := "Door_K2",
+                QBAD_IN1 := NOT "Module_K1".QBAD,
+                QBAD_IN2 := NOT "Module_K2".QBAD,
+                OPEN_NEC := #Ack_Required,
+                ACK_NEC := #Ack_Required,
+                ACK := #Ack,
                 Q =>  ,
                 ACK_REQ =>  ,
                 DIAG =>
@@ -144,18 +144,18 @@ FUNCTION_BLOCK "FB_Bezpecnost"
         S7_NetworkTitle := "MLC_6"
     }
     NETWORK
-        RUNG #Porucha
-            S_Coil( #Porucha_Pamet )
+        RUNG #Fault
+            S_Coil( #Fault_Mem )
         END_RUNG
-        RUNG #Kvitace
-            R_Coil( #Porucha_Pamet )
+        RUNG #Ack
+            R_Coil( #Fault_Mem )
         END_RUNG
-        RUNG #Porucha_Pamet
+        RUNG #Fault_Mem
             S_SR(
-                r1 := #Nuluj,
-                operand := #Pamet_SR
+                r1 := #Clear,
+                operand := #Mem_SR
             )
-            Coil( #Stav_SR )
+            Coil( #State_SR )
         END_RUNG
     END_NETWORK
     {
@@ -164,12 +164,12 @@ FUNCTION_BLOCK "FB_Bezpecnost"
     }
     NETWORK
         RUNG true
-            Coil( #Vzdy_1 )
+            Coil( #Always_1 )
         END_RUNG
         RUNG TRUE
             Move(
                 in := 1,
-                out1 => #Krok
+                out1 => #Step
             )
         END_RUNG
     END_NETWORK
@@ -178,10 +178,10 @@ FUNCTION_BLOCK "FB_Bezpecnost"
         S7_NetworkTitle := "MLC_8"
     }
     NETWORK
-        RUNG #Snimac_A
-            X( in2 := #Snimac_B )
-            N_Trig( #Nesoulad_Pamet )
-            Coil( #Nesoulad_Hrana )
+        RUNG #Detector_A
+            X( in2 := #Detector_B )
+            N_Trig( #Mismatch_Mem )
+            Coil( #Mismatch_Edge )
         END_RUNG
     END_NETWORK
     {

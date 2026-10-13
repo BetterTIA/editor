@@ -3,24 +3,24 @@
     S7_BlockNumber := "20";
     S7_Version := "0.1"
 }
-DATA_BLOCK "DB_Stroj"
+DATA_BLOCK "DB_Machine"
     VAR
-        Bezpecnost_OK : Bool;
-        Rezim_Auto : Bool;
-        Rezim : Int;
-        Servis_Start : Bool;
-        Servis_Blokace : Bool;
+        Safety_OK : Bool;
+        Mode_Auto : Bool;
+        Mode : Int;
+        Service_Start : Bool;
+        Service_Lockout : Bool;
         {
             S7_Setpoint := "False"
         }
-        Rychlost : Real;
-        Zadana_Rychlost : Int;
-        Pocitadlo : STRUCT
-            Kusy : DInt;
-            Zmetky : DInt;
+        Speed : Real;
+        Speed_Setpoint : Int;
+        Counter : STRUCT
+            Pieces : DInt;
+            Rejects : DInt;
         END_STRUCT;
     END_VAR
 
-        Rychlost := 1.0;
+        Speed := 1.0;
 
 END_DATA_BLOCK

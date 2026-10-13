@@ -136,7 +136,7 @@ class TestClicks(unittest.TestCase):
             self.ws.call('Input.dispatchMouseEvent', type=etype, x=x, y=y, button='left', clickCount=1)
 
     def test_fbd_select_box_and_add_input(self):
-        uid = self.edit('FB_Bezpecnost', 1, True)
+        uid = self.edit('FB_Safety', 1, True)
         self.open_page('/?edit=%s&edit_mode=1' % uid)
         self.js("window.__u = []; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) "
                 "addEventListener(t, e => __u.push(t + (e.isTrusted ? '' : '!')), true); 1")
@@ -154,7 +154,7 @@ class TestClicks(unittest.TestCase):
         self.wait_for("ed.after.elements.some(p => p.id === 'n1' && p.type === 'or') && ed.select === 'n1'")
 
     def test_lad_palette_place_and_select(self):
-        uid = self.edit('FB_Dopravnik', 1, False)
+        uid = self.edit('FB_Conveyor', 1, False)
         self.open_page('/?edit=%s&edit_mode=1' % uid)
         self.click("document.querySelector('#ed-canvas g[data-id=\"p1\"] rect.hit')")
         self.wait_for("ed.select === 'p1'")

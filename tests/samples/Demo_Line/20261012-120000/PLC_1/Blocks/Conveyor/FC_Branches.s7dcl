@@ -4,9 +4,9 @@
     S7_BlockNumber := "20";
     S7_Version := "0.1"
 }
-FUNCTION "FC_Vetve" : Void
+FUNCTION "FC_Branches" : Void
     VAR_TEMP
-        Pom : Int;
+        Aux : Int;
     END_VAR
 
     {
@@ -15,18 +15,18 @@ FUNCTION "FC_Vetve" : Void
     }
     NETWORK
         RUNG wire#powerrail
-            Contact( "Senzor_A" )
+            Contact( "Sensor_A" )
             wire#w1
-            Contact( "Senzor_B" )
+            Contact( "Sensor_B" )
             wire#w2
-            Coil( "Vystup_1" )
+            Coil( "Output_1" )
         END_RUNG
         RUNG wire#w1
-            Contact( "Senzor_C" )
+            Contact( "Sensor_C" )
         END_RUNG wire#w2
         RUNG wire#powerrail
-            Contact( "Tlacitko_1" )
-            I_Contact( "Tlacitko_2" )
+            Contact( "Button_1" )
+            I_Contact( "Button_2" )
         END_RUNG wire#w1
     END_NETWORK
     {
@@ -35,19 +35,19 @@ FUNCTION "FC_Vetve" : Void
     }
     NETWORK
         RUNG wire#powerrail
-            Contact( "Cyklus_Start" )
+            Contact( "Cycle_Start" )
             wire#w1
-            Coil( "Cyklus_Bezi" )
+            Coil( "Cycle_Running" )
         END_RUNG
         RUNG wire#w1
             Move(
                 in := 0,
-                out1 => #Pom
+                out1 => #Aux
             )
         END_RUNG
         RUNG wire#w1
-            I_Contact( "Dvere_Zavreny" )
-            R_Coil( "Povoleni_Ruka" )
+            I_Contact( "Door_Closed" )
+            R_Coil( "Enable_Manual" )
         END_RUNG
     END_NETWORK
     {
@@ -55,9 +55,9 @@ FUNCTION "FC_Vetve" : Void
         S7_NetworkTitle := "MLC_3"
     }
     NETWORK
-        RUNG "Senzor_A"
-            O( in2 := "Senzor_B" )
-            Coil( "Vystup_2" )
+        RUNG "Sensor_A"
+            O( in2 := "Sensor_B" )
+            Coil( "Output_2" )
         END_RUNG
     END_NETWORK
     {
@@ -70,7 +70,7 @@ FUNCTION "FC_Vetve" : Void
             wire#w1
             Contact( "M_2" )
             wire#w3
-            Coil( "Most" )
+            Coil( "Bridge" )
         END_RUNG
         RUNG wire#powerrail
             Contact( "M_3" )
@@ -87,27 +87,27 @@ FUNCTION "FC_Vetve" : Void
     }
     NETWORK
         RUNG wire#powerrail
-            Contact( "Takt" )
+            Contact( "Clock" )
             
             Move(
-                in := #Pom,
-                out1 => "DB_Stroj".Kopie
+                in := #Aux,
+                out1 => "DB_Machine".Copy
             )
             { S7_Templates := "SrcType := Int" }
             Add(
-                in1 := #Pom,
+                in1 := #Aux,
                 in2 := 1,
-                out => #Pom
+                out => #Aux
             )
         END_RUNG
         RUNG wire#powerrail
-            Contact( "Senzor_C" )
+            Contact( "Sensor_C" )
             { S7_Templates := "time_type := Time" }
-            "DB_T_Dobeh".TOF(
+            "DB_T_Rundown".TOF(
                 pt := T#500ms,
                 et =>  
             )
-            Coil( "Dobeh" )
+            Coil( "Rundown" )
         END_RUNG
     END_NETWORK
 END_FUNCTION

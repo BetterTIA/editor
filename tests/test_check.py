@@ -16,17 +16,17 @@ import model
 import diff
 import server
 
-EXTRA = os.path.join('PLC_1', 'Blocks', 'Dopravnik')
+EXTRA = os.path.join('PLC_1', 'Blocks', 'Conveyor')
 
 
 def _read(ts, suffix):
-    with open(os.path.join(SAMPLES, PROJECT, ts, EXTRA, 'FB_Dopravnik' + suffix), encoding='utf-8') as f:
+    with open(os.path.join(SAMPLES, PROJECT, ts, EXTRA, 'FB_Conveyor' + suffix), encoding='utf-8') as f:
         return f.read()
 
 
 class TestContentMatch(unittest.TestCase):
     def nw(self, n, ts=TS0):
-        _, b = server._load(SAMPLES, PROJECT, 'FB_Dopravnik', ts)
+        _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', ts)
         return b['networks'][n - 1]
 
     def test_ids_and_node_names_do_not_matter(self):
@@ -48,7 +48,7 @@ class TestContentMatch(unittest.TestCase):
         b = json.loads(json.dumps(a))
         b['elements'][1]['inputs'][1]['operand'] = '#Jiny'
         match, r = diff.content_match(a, b)
-        self.assertEqual(r, ['jiné pins FB_Pas "DB_Pas1": Smer #Smer → #Jiny'])
+        self.assertEqual(r, ['jiné pins FB_Belt "DB_Belt1": Direction #Direction → #Jiny'])
 
     def test_branch_without_element_in_main_path(self):
         m = model.delete({'elements': self.nw(2)['elements'], 'rungs': self.nw(2)['rungs']}, 'p1')
@@ -87,7 +87,7 @@ class TestExportCheck(unittest.TestCase):
         d = os.path.join(self.root, PROJECT, ts, EXTRA)
         os.makedirs(d)
         for suffix, text in (('.s7dcl', s7dcl), ('.s7res', s7res)):
-            with open(os.path.join(d, 'FB_Dopravnik' + suffix), 'w', encoding='utf-8') as f:
+            with open(os.path.join(d, 'FB_Conveyor' + suffix), 'w', encoding='utf-8') as f:
                 f.write(text)
 
     def cli(self, *arg):
@@ -97,11 +97,11 @@ class TestExportCheck(unittest.TestCase):
         return code, out.getvalue()
 
     def test_scenario(self):
-        _, net = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=1' % PROJECT)
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=1' % PROJECT)
         _, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': {'elements': net['elements'], 'rungs': net['rungs']},
                                                    'ops': [{'type': 'insert', 'place': {'r': 0, 'k': 3}, 'element': 'NO'},
-                                                           {'type': 'change', 'id': 'n1', 'values': {'operand': '"Pojistka_OK"'}}]})
-        s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Dopravnik', 'nw': 1,
+                                                           {'type': 'change', 'id': 'n1', 'values': {'operand': '"Fuse_OK"'}}]})
+        s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Conveyor', 'nw': 1,
                                                  'after': r['after']})
         uid = u['id']
         self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
@@ -109,18 +109,18 @@ class TestExportCheck(unittest.TestCase):
         # 1) tentýž export jako před úpravou -> neshoda, chybí kontakt
         code, txt = self.cli('--edit', uid)
         self.assertEqual(code, 1)
-        self.assertIn('chybí v export: contact "Pojistka_OK"', txt)
+        self.assertIn('chybí v export: contact "Fuse_OK"', txt)
         self.assertIn('the same as before the change', txt)
         # 2) export s jiným operandem -> neshoda s poznámkou
         s7dcl, s7res = _read(TS1, '.s7dcl'), _read(TS1, '.s7res')
-        self.export('20261012-150000', s7dcl.replace('"Pojistka_OK"', '"Pojistka_XX"'), s7res)
+        self.export('20261012-150000', s7dcl.replace('"Fuse_OK"', '"Fuse_XX"'), s7res)
         code, txt = self.cli('--edit', uid)
         self.assertEqual(code, 1)
-        self.assertIn('jiný operand: návrh contact "Pojistka_OK", export contact "Pojistka_XX"', txt)
+        self.assertIn('jiný operand: návrh contact "Fuse_OK", export contact "Fuse_XX"', txt)
         self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 409)
         # 3) export se zápisem, ale network posunutý (nový network před NW1, volá FC) -> shoda + poznámka
         new_value = ('    {\n        S7_Language := "LAD";\n        S7_NetworkTitle := "MLC_0"\n    }\n    NETWORK\n'
-                '        RUNG wire#powerrail\n            Contact( #Start )\n            "FC_Vetve"(  )\n'
+                '        RUNG wire#powerrail\n            Contact( #Start )\n            "FC_Branches"(  )\n'
                 '        END_RUNG\n    END_NETWORK\n')
         i = s7dcl.index('    {\n        S7_Language := "LAD";\n        S7_NetworkTitle := "MLC_1"')
         self.export('20261012-160000', s7dcl[:i] + new_value + s7dcl[i:],
@@ -128,8 +128,8 @@ class TestExportCheck(unittest.TestCase):
         s, k = self.req('POST', '/api/edits/%s/check-export' % uid, {})
         self.assertEqual((s, k['match'], k['export_ts'], k['nw_export']), (200, True, '20261012-160000', 2))
         self.assertIn('the network moved: NW 1 → NW 2', k['note'])
-        _, n1 = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=1' % PROJECT)
-        self.assertEqual((n1['elements'][1]['call'], n1['elements'][1]['name']), ('fc', 'FC_Vetve'))   # FC ze staršího exportu
+        _, n1 = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=1' % PROJECT)
+        self.assertEqual((n1['elements'][1]['call'], n1['elements'][1]['name']), ('fc', 'FC_Branches'))   # FC ze staršího exportu
         # 4) zadaný export se zápisem (vzorek TS1) -> shoda, exit 0
         self.export(TS1, s7dcl, s7res)
         code, txt = self.cli('--edit', uid, '--export-ts', TS1)

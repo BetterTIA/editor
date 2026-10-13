@@ -1,17 +1,17 @@
 MultiLingualTexts:
   - id: MLC_1
-    en-US: Povolení — >=1, & s negací, přiřazení
+    en-US: Enable — >=1, & with negation, assignment
   - id: MLC_2
-    en-US: Kvitace — vstup z jiného rungu (wire)
+    en-US: Acknowledge — input from another rung (wire)
   - id: MLC_3
-    en-US: Odbočka za boxem a řetěz přiřazení
+    en-US: Tap after a box and assignment chain
   - id: MLC_4
-    en-US: Nouzový stop — F-blok, hrana kvitace
+    en-US: Emergency stop — F-block, acknowledge edge
   - id: MLC_5
-    en-US: Dveře — F-blok s negovanými piny
+    en-US: Door — F-block with negated pins
   - id: MLC_6
-    en-US: Paměť poruchy — S, R, SR
+    en-US: Fault memory — S, R, SR
   - id: MLC_7
-    en-US: RUNG true a MOVE
+    en-US: RUNG true and MOVE
   - id: MLC_8
-    en-US: Nesoulad snímačů — x a N_TRIG
+    en-US: Detector mismatch — x and N_TRIG

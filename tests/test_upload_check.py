@@ -59,7 +59,7 @@ class TestUploadCheck(unittest.TestCase):
         st['tia'] = tia
         self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 200)
 
-    def proposal(self, block='FB_Dopravnik', nw=1, ops=None, state='Approved'):
+    def proposal(self, block='FB_Conveyor', nw=1, ops=None, state='Approved'):
         _, net = self.req('GET', '/api/network?project=%s&block=%s&nw=%d' % (PROJECT, block, nw))
         after = {'language': 'FBD', 'elements': net['elements']} if net['language'] == 'FBD' else {'elements': net['elements'], 'rungs': net['rungs']}
         if ops:
@@ -77,10 +77,10 @@ class TestUploadCheck(unittest.TestCase):
             return [json.loads(r) for r in f]
 
     OPS = [{'type': 'insert', 'place': {'r': 0, 'k': 3}, 'element': 'NO'},
-           {'type': 'change', 'id': 'n1', 'values': {'operand': '"Pojistka_OK"'}}]
+           {'type': 'change', 'id': 'n1', 'values': {'operand': '"Fuse_OK"'}}]
 
     def test_upload_f_block_and_no_tia_409(self):
-        uid_f = self.proposal('FB_Bezpecnost', 1)
+        uid_f = self.proposal('FB_Safety', 1)
         uid = self.proposal(ops=self.OPS)
         s, e = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertEqual(s, 409)
@@ -111,10 +111,10 @@ class TestUploadCheck(unittest.TestCase):
                           'PreviewImport', 'ImportFromDocuments'])
         imp = self.imports()
         self.assertEqual((len(imp), imp[0]['groupPath'], imp[0]['importOption'], imp[0]['fileNameWithoutExtension']),
-                         (1, 'Dopravnik', 'Override', 'FB_Dopravnik'))
+                         (1, 'Conveyor', 'Override', 'FB_Conveyor'))
         b = s7dcl.load_block(imp[0]['file'])                                  # importovaný .s7dcl má network „po"
         self.assertEqual([p.get('operand') for p in b['networks'][0]['elements']],
-                         ['"Start_Povoleno"', '"DB_Stroj".Bezpecnost_OK', '"DB_Stroj".Rezim_Auto', '"Pojistka_OK"', '#Pripraven'])
+                         ['"Start_Povoleno"', '"DB_Machine".Safety_OK', '"DB_Machine".Mode_Auto', '"Fuse_OK"', '#Ready'])
         self.assertEqual(len(b['networks']), 8)
         # Check: Reader exportuje to, co Writer importoval -> shoda -> Checked
         s, c = self.req('POST', '/api/edits/%s/check' % uid)
@@ -122,7 +122,7 @@ class TestUploadCheck(unittest.TestCase):
         self.assertTrue(c['match'], c)
         self.assertEqual((c['edit']['state'], c['edit']['history'][-1]['by']), ('Checked', 'TIAC_Reader'))
         self.assertEqual(c['edit']['checks'][-1]['export_ts'], c['export_ts'])
-        self.assertTrue(os.path.isdir(os.path.join(self.root, PROJECT, c['export_ts'], 'PLC_1', 'Blocks', 'Dopravnik')))
+        self.assertTrue(os.path.isdir(os.path.join(self.root, PROJECT, c['export_ts'], 'PLC_1', 'Blocks', 'Conveyor')))
         self.assertEqual([z['tool'] for z in c['edit']['writes']], ['TIAC_Writer', 'TIAC_Reader'])
 
     def test_check_mismatch_stays_signed_and_checked_409(self):
@@ -133,10 +133,10 @@ class TestUploadCheck(unittest.TestCase):
         with open(file, encoding='utf-8') as f:
             t = f.read()
         with open(file, 'w', encoding='utf-8') as f:
-            f.write(t.replace('"Pojistka_OK"', '"Pojistka_XX"'))
+            f.write(t.replace('"Fuse_OK"', '"Fuse_XX"'))
         s, c = self.req('POST', '/api/edits/%s/check' % uid)
         self.assertEqual((s, c['ok'], c['match'], c['edit']['state']), (200, False, False, 'Signed'))
-        self.assertIn('Pojistka_XX', c['message'])
+        self.assertIn('Fuse_XX', c['message'])
         self.assertIs(c['edit']['checks'][-1]['match'], False)
         s, e = self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked', 'by': 'user'})
         self.assertEqual(s, 409)                                                 # Checked bez poslední shody
@@ -182,13 +182,13 @@ class TestUploadCheck(unittest.TestCase):
         self.assertIn('another Upload', e['error'])
 
     def test_upload_fbd_non_safety(self):
-        """FBD network v ne-F bloku (FC_Vetve NW3: O + Coil) — upload, import obsahuje nový vstup, Check shoda."""
+        """FBD network v ne-F bloku (FC_Branches NW3: O + Coil) — upload, import obsahuje nový vstup, Check shoda."""
         self.set_tia()
-        uid = self.proposal('FC_Vetve', 3, ops=[{'type': 'add_input', 'id': 'b1', 'operand': '"Senzor_C"'}])
+        uid = self.proposal('FC_Branches', 3, ops=[{'type': 'add_input', 'id': 'b1', 'operand': '"Sensor_C"'}])
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertTrue(r['ok'], r)
         with open(self.imports()[0]['file'], encoding='utf-8') as f:
-            self.assertIn('in3 := "Senzor_C"', f.read())
+            self.assertIn('in3 := "Sensor_C"', f.read())
         s, c = self.req('POST', '/api/edits/%s/check' % uid)
         self.assertEqual((c['match'], c['edit']['state']), (True, 'Checked'))
 

@@ -2,5 +2,5 @@
     S7_Optimized := "TRUE";
     S7_Version := "0.1"
 }
-DATA_BLOCK "DB_Pas1" : "FB_Pas"
+DATA_BLOCK "DB_Belt1" : "FB_Belt"
 END_DATA_BLOCK

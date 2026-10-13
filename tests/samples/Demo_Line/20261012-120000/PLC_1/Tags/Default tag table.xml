@@ -17,35 +17,35 @@
         <AttributeList>
           <DataTypeName>Bool</DataTypeName>
           <LogicalAddress>%I0.1</LogicalAddress>
-          <Name>Nouzovy_Stop</Name>
+          <Name>Emergency_Stop</Name>
         </AttributeList>
       </SW.Tags.PlcTag>
       <SW.Tags.PlcTag ID="3" CompositionName="Tags">
         <AttributeList>
           <DataTypeName>Bool</DataTypeName>
           <LogicalAddress>%I0.2</LogicalAddress>
-          <Name>Kvitace</Name>
+          <Name>Ack</Name>
         </AttributeList>
       </SW.Tags.PlcTag>
       <SW.Tags.PlcTag ID="4" CompositionName="Tags">
         <AttributeList>
           <DataTypeName>Bool</DataTypeName>
           <LogicalAddress>%I0.3</LogicalAddress>
-          <Name>Pojistka_OK</Name>
+          <Name>Fuse_OK</Name>
         </AttributeList>
       </SW.Tags.PlcTag>
       <SW.Tags.PlcTag ID="5" CompositionName="Tags">
         <AttributeList>
           <DataTypeName>Bool</DataTypeName>
           <LogicalAddress>%Q0.0</LogicalAddress>
-          <Name>Hukacka</Name>
+          <Name>Horn</Name>
         </AttributeList>
       </SW.Tags.PlcTag>
       <SW.Tags.PlcTag ID="6" CompositionName="Tags">
         <AttributeList>
           <DataTypeName>Bool</DataTypeName>
           <LogicalAddress>%M10.0</LogicalAddress>
-          <Name>Porucha_Pas1</Name>
+          <Name>Fault_Belt1</Name>
         </AttributeList>
       </SW.Tags.PlcTag>
     </ObjectList>

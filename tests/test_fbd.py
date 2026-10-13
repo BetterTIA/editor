@@ -1,4 +1,4 @@
-"""F1 — FBD: parser, rozložení, operace, rozdíl, API (vzorek FB_Bezpecnost, smyšlená jména)."""
+"""F1 — FBD: parser, rozložení, operace, rozdíl, API (vzorek FB_Safety, smyšlená jména)."""
 import copy
 import http.client
 import json
@@ -13,7 +13,7 @@ import diff
 import s7dcl
 import server
 
-BLOCK = 'FB_Bezpecnost'
+BLOCK = 'FB_Safety'
 
 
 def nw(n, ts=TS0):
@@ -45,16 +45,16 @@ class TestParserFBD(unittest.TestCase):
     def test_bit_logic(self):
         p = nw(1)['elements']
         self.assertEqual([x['type'] for x in p], ['or', 'and', 'assign'])
-        self.assertEqual(inputs(p[0]), [('in1', '#Start', None, False), ('in2', '#Servis', None, False)])
-        self.assertEqual(inputs(p[1])[:2], [('in1', '', 'b1', False), ('in2', '#Porucha', None, True)])
+        self.assertEqual(inputs(p[0]), [('in1', '#Start', None, False), ('in2', '#Service', None, False)])
+        self.assertEqual(inputs(p[1])[:2], [('in1', '', 'b1', False), ('in2', '#Fault', None, True)])
         self.assertEqual([v['n'] for v in p[1]['inputs']], [1, 2, 3])
-        self.assertEqual((p[2]['operand'], p[2]['inputs'][0]['signal']), ('#Povoleni', 'b2'))
+        self.assertEqual((p[2]['operand'], p[2]['inputs'][0]['signal']), ('#Enable', 'b2'))
 
     def test_wire_input_from_other_rung(self):
         p = nw(2)['elements']
         self.assertEqual(types(2), ['and', 'assign', 'or'])
         self.assertEqual(p[0]['inputs'][1]['signal'], 'b3')            # in2 := wire#w1 <- END_RUNG wire#w1
-        self.assertEqual(p[2]['inputs'][2], {'n': 3, 'pin': 'in3', 'operand': '#Blokace', 'signal': None, 'neg': True})
+        self.assertEqual(p[2]['inputs'][2], {'n': 3, 'pin': 'in3', 'operand': '#Lockout', 'signal': None, 'neg': True})
         self.assertEqual(fbd.signals(p), [{'from': 'b3', 'to': 'b1', 'input': 2}, {'from': 'b1', 'to': 'b2', 'input': 1}])
 
     def test_tap_and_assignment_chain(self):
@@ -65,21 +65,21 @@ class TestParserFBD(unittest.TestCase):
 
     def test_call_f_block(self):
         f, h = nw(4)['elements']
-        self.assertEqual((f['type'], f['name'], f['instance']), ('call', 'ESTOP1', '#NouzStop'))
+        self.assertEqual((f['type'], f['name'], f['instance']), ('call', 'ESTOP1', '#EStop'))
         self.assertEqual(f['attributes'], {'f_user_card': '1', 'f_image_card': '0'})
         self.assertNotIn('EN', [v['pin'] for v in f['inputs']])        # F-blok bez napájení nemá EN
         v = {x['pin']: x for x in f['inputs']}
         self.assertTrue(v['ACK_NEC']['neg'])
         self.assertEqual((v['ACK']['signal'], v['TIME_DEL']['operand']), ('b2', ''))
         self.assertEqual([x['pin'] for x in f['outputs']], ['Q', 'Q_DELAY', 'ACK_REQ', 'DIAG'])
-        self.assertEqual((h['type'], h['operand'], inputs(h)), ('ptrig', '#Kvitace_Pamet', [('CLK', '#Kvitace', None, False)]))
+        self.assertEqual((h['type'], h['operand'], inputs(h)), ('ptrig', '#Ack_Mem', [('CLK', '#Ack', None, False)]))
         d = nw(5)['elements'][0]
         self.assertEqual([x['pin'] for x in d['inputs'] if x['neg']], ['QBAD_IN1', 'QBAD_IN2'])
 
     def test_s_r_sr_true_move_xor_empty(self):
         p = nw(6)['elements']
         self.assertEqual(types(6), ['s', 'r', 'sr', 'assign'])
-        self.assertEqual((p[2]['operand'], [v['pin'] for v in p[2]['inputs']]), ('#Pamet_SR', ['S', 'R1']))
+        self.assertEqual((p[2]['operand'], [v['pin'] for v in p[2]['inputs']]), ('#Mem_SR', ['S', 'R1']))
         p = nw(7)['elements']
         self.assertEqual(p[0]['inputs'][0]['operand'], 'true')
         self.assertEqual((p[1]['type'], p[1]['name'], inputs(p[1])[0]), ('instruction', 'MOVE', ('EN', 'TRUE', None, False)))
@@ -119,7 +119,7 @@ class TestLayoutFBD(unittest.TestCase):
         self.assertEqual(r['b1']['r'], r['b2']['r'])                    # výstup >=1 = 1. vstup &
         self.assertEqual(r['b2']['r'], r['b3']['r'])
         b = {d['id']: d for d in k['boxes']}
-        self.assertEqual((b['b1']['symbol'], b['b2']['symbol'], b['b3']['symbol'], b['b3']['above']), ('>=1', '&', '=', '#Povoleni'))
+        self.assertEqual((b['b1']['symbol'], b['b2']['symbol'], b['b3']['symbol'], b['b3']['above']), ('>=1', '&', '=', '#Enable'))
         self.assertTrue(b['b2']['inputs'][1]['neg'])
         self.assertIsNone(b['b2']['inputs'][0]['operand'])               # napájený signálem: bez popisku
         self.assertEqual(k['nodes'], [])
@@ -147,8 +147,8 @@ class TestLayoutFBD(unittest.TestCase):
 class TestOperationsAndDiffFBD(unittest.TestCase):
     def test_operation(self):
         m = fbd.model(nw(1)['elements'])
-        m, i = fbd.apply(m, {'type': 'add_input', 'id': 'b2', 'operand': '#Zamek_OK'})
-        self.assertEqual(m['elements'][1]['inputs'][-1], {'n': 4, 'pin': 'in4', 'operand': '#Zamek_OK', 'signal': None, 'neg': False})
+        m, i = fbd.apply(m, {'type': 'add_input', 'id': 'b2', 'operand': '#Lock_OK'})
+        self.assertEqual(m['elements'][1]['inputs'][-1], {'n': 4, 'pin': 'in4', 'operand': '#Lock_OK', 'signal': None, 'neg': False})
         m, _ = fbd.apply(m, {'type': 'change_operand', 'id': 'b3', 'operand': '#Jine'})
         m, _ = fbd.apply(m, {'type': 'negate', 'id': 'b2', 'input': 2})
         self.assertEqual((m['elements'][2]['operand'], m['elements'][1]['inputs'][1]['neg']), ('#Jine', False))
@@ -214,14 +214,14 @@ class TestApiFBD(unittest.TestCase):
         # Claude: zkouška operací (nic neukládá) -> návrh
         s, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': {'language': 'FBD', 'elements': n['elements']},
                                                     'before': {'language': 'FBD', 'elements': n['elements']},
-                                                    'ops': [{'type': 'add_input', 'id': 'b2', 'operand': '#Zamek_OK'},
-                                                            {'type': 'change_operand', 'id': 'b3', 'operand': '#Povoleni_Pohon'}]})
+                                                    'ops': [{'type': 'add_input', 'id': 'b2', 'operand': '#Lock_OK'},
+                                                            {'type': 'change_operand', 'id': 'b3', 'operand': '#Enable_Drive'}]})
         self.assertEqual((s, r['diff'], r['errors'], r['last']), (200, {'b2': 'changed', 'b3': 'changed'}, [], 'b3'))
         self.assertEqual(r['pin_diff']['b2']['inputs'], [4])
         s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'F1', 'block': BLOCK, 'nw': 1,
                                                 'after': {'elements': r['after']['elements']}, 'block_number': 999, 'title': 'x'})
         self.assertEqual((s, u['state'], u['language'], u['block_number'], u['title']),
-                         (201, 'Proposal', 'FBD', 30, 'Povolení — >=1, & s negací, přiřazení'))
+                         (201, 'Proposal', 'FBD', 30, 'Enable — >=1, & with negation, assignment'))
         self.assertEqual((u['before']['language'], u['before']['export_ts'], u['after']['language'], u['f']), ('FBD', TS2, 'FBD', True))
         self.assertEqual(len(u['after']['signals']), 2)
         s, d = self.req('GET', '/api/edits/%s' % u['id'])                # „před" = nejnovější export, ten už úpravu má

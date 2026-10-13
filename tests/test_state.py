@@ -92,7 +92,7 @@ class TestStateMachine(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
     def test_diff_and_ghost(self):
-        _, b = server._load(SAMPLES, PROJECT, 'FB_Dopravnik', TS0)
+        _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)
         n = b['networks'][1]
         before = {'elements': n['elements'], 'rungs': n['rungs']}
         after = after_nw2(before)
@@ -126,8 +126,8 @@ class TestApiEdits(unittest.TestCase):
         return r.status, (json.loads(t) if r.getheader('Content-Type', '').startswith('application/json') else t)
 
     def create(self, **extra):
-        _, net = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=2' % PROJECT)
-        body = {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Dopravnik', 'nw': 2, 'after': after_nw2(net),
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=2' % PROJECT)
+        body = {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Conveyor', 'nw': 2, 'after': after_nw2(net),
                 'note': 'Pojistka před cívkou'}
         body.update(extra)
         return self.req('POST', '/api/edits', body)
@@ -136,7 +136,7 @@ class TestApiEdits(unittest.TestCase):
         s, u = self.create(title='ručně', block_number=999)
         self.assertEqual(s, 201)
         self.assertEqual((u['id'], u['state'], u['author']), ('U001', 'Proposal', 'editor'))
-        self.assertEqual((u['kind'], u['block_number'], u['nw'], u['title']), ('FB', 10, 2, 'Samodrž motoru'))
+        self.assertEqual((u['kind'], u['block_number'], u['nw'], u['title']), ('FB', 10, 2, 'Motor latch'))
         self.assertEqual(u['before']['export_ts'], TS1)                       # nejnovější export s blokem
         self.assertEqual(len(u['before']['elements']), 7)
         self.assertIsNotNone(u['after']['layout'])                         # přepočteno serverem

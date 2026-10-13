@@ -1,10 +1,10 @@
 """Falešný TIAC_Writer / TIAC_Reader (MCP přes stdio) pro testy a ukázku M5 — s TIA Portalem nemluví.
 
 python tests\\falesny_mcp.py writer [--stav DIR] [--vzorek DIR] [--vice-instanci] [--pomalu S]
-python tests\\falesny_mcp.py reader --export-root DIR --projekt Demo_Linka [--stav DIR] [--vzorek DIR]
+python tests\\falesny_mcp.py reader --export-root DIR --projekt Demo_Line [--stav DIR] [--vzorek DIR]
 
 „Projekt TIA" = složka --stav (výchozí %TEMP%\\tiac_falesny_tia): blok tam je po prvním importu; dokud není,
-čte se z --vzorek (výchozí vzorky Demo_Linka 20261012-120000\\PLC_1\\Blocks).
+čte se z --vzorek (výchozí vzorky Demo_Line 20261012-120000\\PLC_1\\Blocks).
 Writer: Connect, ResolveObjectPath, ExportBlocksAsDocuments (kopie .s7dcl/.s7res do exportPath), PreviewImport,
 ImportFromDocuments (zkopíruje dokumenty do --stav a připíše řádek do <stav>\\importy.jsonl).
 Reader: export_to_folder — nová složka <export-root>\\<projekt>\\<RRRRMMDD-HHMMSS>\\<PLC>\\Blocks\\… s blokem
@@ -21,7 +21,7 @@ import time
 from datetime import datetime, timedelta
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-SAMPLE = os.path.join(ROOT, 'samples', 'Demo_Linka', '20261012-120000', 'PLC_1', 'Blocks')
+SAMPLE = os.path.join(ROOT, 'samples', 'Demo_Line', '20261012-120000', 'PLC_1', 'Blocks')
 
 
 def find(a, block):
@@ -95,7 +95,7 @@ def main():
     ap.add_argument('--state', default=os.path.join(tempfile.gettempdir(), 'tiac_fake_tia'))
     ap.add_argument('--sample', default=SAMPLE)
     ap.add_argument('--export-root')
-    ap.add_argument('--project', default='Demo_Linka')
+    ap.add_argument('--project', default='Demo_Line')
     ap.add_argument('--multi-instances', action='store_true')
     ap.add_argument('--slow', type=float, default=0)
     a = ap.parse_args()

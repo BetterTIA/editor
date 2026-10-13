@@ -51,13 +51,13 @@ class TestRoundtrip(unittest.TestCase):
         self.assertGreaterEqual(n, 30)
 
     def test_text_as_export(self):
-        f = os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Dopravnik', 'FB_Dopravnik.s7dcl')
+        f = os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')
         text = s7dcl.read(f)
         nw4 = s7dcl.parse_block(text)['networks'][3]
         self.assertEqual(z.replace_network(text, 4, z.network_text(nw4)), text)    # NW4 znak po znaku jako export
 
     def test_crlf_and_errors(self):
-        text = s7dcl.read(os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Dopravnik', 'FC_Vetve.s7dcl'))
+        text = s7dcl.read(os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FC_Branches.s7dcl'))
         crlf = text.replace('\n', '\r\n')
         res = z.replace_network(crlf, 1, '        RUNG wire#powerrail\n        END_RUNG\n')
         self.assertNotIn('\n', res.replace('\r\n', ''))
@@ -72,9 +72,9 @@ class TestModelsFromEditor(unittest.TestCase):
         return b['networks'][n - 1]
 
     def test_lad_operation(self):
-        n = self.nw('FB_Dopravnik', 2)
+        n = self.nw('FB_Conveyor', 2)
         m = {'elements': n['elements'], 'rungs': n['rungs']}
-        m = model.insert(m, {'r': 0, 'k': 3}, {'type': 'contact', 'operand': '"Pojistka_OK"'})[0]
+        m = model.insert(m, {'r': 0, 'k': 3}, {'type': 'contact', 'operand': '"Fuse_OK"'})[0]
         m = model.branch(m, {'r': 0, 'k': 4}, {'r': 0, 'k': 5}, {'type': 'contact_nc', 'operand': '#X'})[0]
         m = model.apply(m, {'type': 'insert', 'place': {'r': 0, 'k': 0},
                              'element': {'type': 'comparison', 'op': '>=', 'in1': '#A', 'in2': '5', 'template': 'Int'}})[0]
@@ -82,27 +82,27 @@ class TestModelsFromEditor(unittest.TestCase):
         self.assertIn('{ S7_Templates := "SrcType := Int" }\n            GE_Contact(', z.lad_text(m))
 
     def test_lad_call_fc_and_instruction(self):
-        m = {'elements': [{'id': 'p1', 'type': 'box', 'call': 'fc', 'name': 'FC_Vetve', 'instance': None, 'template': None,
+        m = {'elements': [{'id': 'p1', 'type': 'box', 'call': 'fc', 'name': 'FC_Branches', 'instance': None, 'template': None,
                         'power': ['EN', 'ENO'], 'inputs': [], 'outputs': []},
                        {'id': 'p2', 'type': 'box', 'call': 'instruction', 'name': 'CONV', 'instance': None,
                         'template': 'Int to DInt', 'power': ['EN', 'ENO'],
                         'inputs': [{'pin': 'IN', 'operand': '#A'}], 'outputs': [{'pin': 'OUT', 'operand': '#B'}]}],
              'rungs': [{'from': 'powerrail', 'path': ['p1', 'p2'], 'to': None}]}
         t = z.lad_text(m)
-        self.assertIn('"FC_Vetve"(  )', t)
+        self.assertIn('"FC_Branches"(  )', t)
         self.assertIn('Convert(\n                in := #A,\n                out => #B', t)
         r = reparse(m)
-        self.assertEqual(r['elements'][0]['instance'], '"FC_Vetve"')          # parser: volání; server ho dohledá jako FC
+        self.assertEqual(r['elements'][0]['instance'], '"FC_Branches"')          # parser: volání; server ho dohledá jako FC
         self.assertEqual(diff.content_match({'elements': m['elements'][1:], 'rungs': []},
                                              {'elements': r['elements'][1:], 'rungs': []}), (True, []))
 
     def test_fbd_operation(self):
-        n = self.nw('FB_Bezpecnost', 3)
+        n = self.nw('FB_Safety', 3)
         m = {'language': 'FBD', 'elements': n['elements']}
         for op in ({'type': 'add_input', 'id': 'b1', 'operand': '#Novy'},
                    {'type': 'negate', 'id': 'b1', 'input': 3},
                    {'type': 'insert_box', 'element': 'OR', 'to': {'id': 'b1', 'input': 2}},
-                   {'type': 'change_operand', 'id': 'n1', 'input': 2, 'operand': '#Servis'},
+                   {'type': 'change_operand', 'id': 'n1', 'input': 2, 'operand': '#Service'},
                    {'type': 'insert_box', 'element': 'SR'},
                    {'type': 'change_operand', 'id': 'n2', 'operand': '#Pamet'},
                    {'type': 'change_operand', 'id': 'n2', 'input': 1, 'operand': '#Set'},
@@ -111,7 +111,7 @@ class TestModelsFromEditor(unittest.TestCase):
         self.assertEqual(match(m, reparse(m)), (True, []))
 
     def test_fbd_negate_main_output(self):
-        n = self.nw('FB_Bezpecnost', 2)                     # O -> wire#w1 -> A in2
+        n = self.nw('FB_Safety', 2)                     # O -> wire#w1 -> A in2
         m = fbd.apply({'language': 'FBD', 'elements': n['elements']}, {'type': 'negate', 'id': 'b3', 'output': 'main'})[0]
         r = reparse(m)
         self.assertIn('in2 := NOT wire#w1', z.fbd_text(m))   # zapíše se jako negace vstupu spotřebiče

@@ -30,16 +30,16 @@ class TestClient(unittest.TestCase):
         try:
             with mcp_client.Client(self.writer(), timeout=20) as k:
                 self.assertIn('Connected', k.call('Connect', {}))
-                fpath = json.loads(k.call('ResolveObjectPath', {'softwarePath': 'PLC_1', 'name': 'FB_Dopravnik',
+                fpath = json.loads(k.call('ResolveObjectPath', {'softwarePath': 'PLC_1', 'name': 'FB_Conveyor',
                                                                    'kind': 'block'}))['path']
-                self.assertEqual(fpath, 'Dopravnik/FB_Dopravnik')
+                self.assertEqual(fpath, 'Conveyor/FB_Conveyor')
                 k.call('ExportBlocksAsDocuments', {'softwarePath': 'PLC_1', 'exportPath': work,
-                                                      'regexName': '^FB_Dopravnik$', 'preservePath': False})
-                self.assertTrue(os.path.exists(os.path.join(work, 'FB_Dopravnik.s7res')))
-                with open(os.path.join(work, 'FB_Dopravnik.s7dcl'), 'a', encoding='utf-8') as f:
+                                                      'regexName': '^FB_Conveyor$', 'preservePath': False})
+                self.assertTrue(os.path.exists(os.path.join(work, 'FB_Conveyor.s7res')))
+                with open(os.path.join(work, 'FB_Conveyor.s7dcl'), 'a', encoding='utf-8') as f:
                     f.write('// změna\n')
-                k.call('ImportFromDocuments', {'softwarePath': 'PLC_1', 'groupPath': 'Dopravnik', 'importPath': work,
-                                                  'fileNameWithoutExtension': 'FB_Dopravnik', 'importOption': 'Override'})
+                k.call('ImportFromDocuments', {'softwarePath': 'PLC_1', 'groupPath': 'Conveyor', 'importPath': work,
+                                                  'fileNameWithoutExtension': 'FB_Conveyor', 'importOption': 'Override'})
             with open(os.path.join(self.state, 'imports.jsonl'), encoding='utf-8') as f:
                 imp = json.loads(f.readline())
             self.assertEqual(imp['importOption'], 'Override')
@@ -51,12 +51,12 @@ class TestClient(unittest.TestCase):
     def test_reader_new_folder(self):
         p = [sys.executable, FAKE, 'reader', '--state', self.state, '--export-root', self.root, '--project', PROJECT]
         with mcp_client.Client(p, timeout=20) as k:
-            r = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Dopravnik/FB_Dopravnik'],
+            r = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor'],
                                                           'include': ['blocks'], 'formats': ['documents']}))
-            r2 = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Dopravnik/FB_Dopravnik']}))
+            r2 = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor']}))
         self.assertTrue(r['complete'])
         self.assertNotEqual(r['exportFolder'], r2['exportFolder'])          # druhý export = nové razítko
-        self.assertTrue(os.path.exists(os.path.join(r['exportFolder'], 'PLC_1', 'Blocks', 'Dopravnik', 'FB_Dopravnik.s7dcl')))
+        self.assertTrue(os.path.exists(os.path.join(r['exportFolder'], 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')))
 
     def test_errors(self):
         with self.assertRaises(mcp_client.MCPError) as e:

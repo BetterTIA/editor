@@ -1,11 +1,11 @@
 MultiLingualTexts:
   - id: MLC_1
-    en-US: Vnořená větev a OR na začátku
+    en-US: Nested branch and OR at the start
   - id: MLC_2
-    en-US: Výstupní větve s boxem
+    en-US: Output branches with a box
   - id: MLC_3
-    en-US: FBD network (M1 nekreslí)
+    en-US: FBD network (not drawn by M1)
   - id: MLC_4
-    en-US: Můstek — nejde rozložit
+    en-US: Bridge — cannot be laid out
   - id: MLC_5
-    en-US: Dva rungy, řetěz boxů
+    en-US: Two rungs, chain of boxes

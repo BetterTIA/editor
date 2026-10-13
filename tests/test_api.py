@@ -37,17 +37,17 @@ class TestApi(unittest.TestCase):
         self.assertEqual(s, 200)
         p = json.loads(b)['projects'][0]
         self.assertEqual(p['project'], PROJECT)
-        self.assertIn({'block': 'FB_Dopravnik', 'ts': '20261012-140000'}, p['blocks'])
-        self.assertIn({'block': 'FB_Pas', 'ts': '20261012-120000'}, p['blocks'])     # dílčí export
+        self.assertIn({'block': 'FB_Conveyor', 'ts': '20261012-140000'}, p['blocks'])
+        self.assertIn({'block': 'FB_Belt', 'ts': '20261012-120000'}, p['blocks'])     # dílčí export
 
     def test_block(self):
-        s, _, b = self.get('/api/block?project=%s&block=FB_Dopravnik' % PROJECT)
+        s, _, b = self.get('/api/block?project=%s&block=FB_Conveyor' % PROJECT)
         j = json.loads(b)
         self.assertEqual((s, j['kind'], j['number'], len(j['networks'])), (200, 'FB', 10, 8))
-        self.assertEqual(j['networks'][1], {'nw': 2, 'language': 'LAD', 'title': 'Samodrž motoru'})
+        self.assertEqual(j['networks'][1], {'nw': 2, 'language': 'LAD', 'title': 'Motor latch'})
 
     def test_network(self):
-        s, _, b = self.get('/api/network?project=%s&block=FB_Dopravnik&nw=4' % PROJECT)
+        s, _, b = self.get('/api/network?project=%s&block=FB_Conveyor&nw=4' % PROJECT)
         j = json.loads(b)
         self.assertEqual(s, 200)
         for k in ('block', 'number', 'nw', 'title', 'elements', 'wires', 'layout', 'drawing'):
@@ -56,11 +56,11 @@ class TestApi(unittest.TestCase):
         self.assertEqual(j['warnings'], [])
 
     def test_network_fallbacks(self):
-        _, _, b = self.get('/api/network?project=%s&block=FC_Vetve&nw=4' % PROJECT)
+        _, _, b = self.get('/api/network?project=%s&block=FC_Branches&nw=4' % PROJECT)
         j = json.loads(b)
         self.assertIsNone(j['drawing'])
         self.assertIn('list of rungs', j['warnings'][0])
-        _, _, b = self.get('/api/network?project=%s&block=FC_Vetve&nw=3' % PROJECT)
+        _, _, b = self.get('/api/network?project=%s&block=FC_Branches&nw=3' % PROJECT)
         j = json.loads(b)                                   # od F1 se FBD kreslí (vlastní model)
         self.assertEqual((j['language'], j['drawing']['fbd'], j['warnings']), ('FBD', True, []))
 
@@ -68,12 +68,12 @@ class TestApi(unittest.TestCase):
         self.assertEqual(self.get('/api/block?project=%s&block=Neni' % PROJECT)[0], 404)
         self.assertEqual(self.get('/api/block?project=%s&block=%s' % (PROJECT, quote('../../server')))[0], 404)
         self.assertEqual(self.get('/api/block?project=%s&block=x' % quote('..'))[0], 404)
-        self.assertEqual(self.get('/api/network?project=%s&block=FB_Dopravnik&nw=99' % PROJECT)[0], 404)
-        self.assertEqual(self.get('/api/network?project=%s&block=FB_Dopravnik&nw=x' % PROJECT)[0], 400)
+        self.assertEqual(self.get('/api/network?project=%s&block=FB_Conveyor&nw=99' % PROJECT)[0], 404)
+        self.assertEqual(self.get('/api/network?project=%s&block=FB_Conveyor&nw=x' % PROJECT)[0], 400)
         self.assertEqual(self.get('/nothing')[0], 404)
 
     def test_page(self):
-        s, t, b = self.get('/?project=%s&block=FB_Dopravnik&nw=2&screenshot=1' % PROJECT)
+        s, t, b = self.get('/?project=%s&block=FB_Conveyor&nw=2&screenshot=1' % PROJECT)
         self.assertEqual(s, 200)
         self.assertIn('text/html', t)
         self.assertIn(b'TIAC_Editor', b)
@@ -82,7 +82,7 @@ class TestApi(unittest.TestCase):
     def test_screenshot(self):
         d = tempfile.mkdtemp()
         try:
-            out = screenshot.screenshot('http://127.0.0.1:%d/?project=%s&block=FB_Dopravnik&nw=2&screenshot=1' % (self.port, PROJECT),
+            out = screenshot.screenshot('http://127.0.0.1:%d/?project=%s&block=FB_Conveyor&nw=2&screenshot=1' % (self.port, PROJECT),
                                 os.path.join(d, 's.png'), 900, 400)
             with open(out, 'rb') as f:
                 self.assertEqual(f.read(8), b'\x89PNG\r\n\x1a\n')

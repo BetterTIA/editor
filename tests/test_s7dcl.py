@@ -22,22 +22,22 @@ class TestParser(unittest.TestCase):
             self.assertIn(b['kind'], ('FB', 'FC', 'DB'))
 
     def test_header_and_titles(self):
-        _, b = server._load(SAMPLES, PROJECT, 'FB_Dopravnik', TS0)
-        self.assertEqual((b['kind'], b['name'], b['number']), ('FB', 'FB_Dopravnik', 10))
+        _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)
+        self.assertEqual((b['kind'], b['name'], b['number']), ('FB', 'FB_Conveyor', 10))
         self.assertEqual(len(b['networks']), 8)
         self.assertEqual(b['networks'][0]['title'], 'Připravenost dopravníku')
-        self.assertEqual(b['networks'][3]['title'], 'Volání pásu (instance DB_Pas1)')   # hodnota v '...'
-        self.assertEqual(b['networks'][1]['comment'], 'Start nebo servisní start, Stop rozpíná.\nPřídržná větev přes Motor.')
+        self.assertEqual(b['networks'][3]['title'], 'Belt call (instance DB_Belt1)')   # hodnota v '...'
+        self.assertEqual(b['networks'][1]['comment'], 'Start or service start, Stop opens the circuit.\nHolding branch through Motor.')
         self.assertEqual(b['networks'][7]['title'], '')
 
     def test_series(self):
-        n = nw('FB_Dopravnik', 1)
+        n = nw('FB_Conveyor', 1)
         self.assertEqual([p['type'] for p in n['elements']], ['contact'] * 3 + ['coil'])
-        self.assertEqual(n['elements'][1]['operand'], '"DB_Stroj".Bezpecnost_OK')
+        self.assertEqual(n['elements'][1]['operand'], '"DB_Machine".Safety_OK')
         self.assertEqual(n['rungs'], [{'from': 'powerrail', 'path': ['p1', 'p2', 'p3', 'p4'], 'to': None}])
 
     def test_branches_wire(self):
-        n = nw('FB_Dopravnik', 2)
+        n = nw('FB_Conveyor', 2)
         self.assertEqual(len(n['rungs']), 3)
         self.assertEqual(n['rungs'][0]['path'], ['p1', 'wire#w1', 'p2', 'p3', 'p4'])
         self.assertEqual([r['to'] for r in n['rungs']], [None, 'w1', 'w1'])
@@ -47,42 +47,42 @@ class TestParser(unittest.TestCase):
         self.assertIn({'from': 'w1', 'to': 'p2'}, v)
 
     def test_ton(self):
-        p = nw('FB_Dopravnik', 3)['elements'][1]
-        self.assertEqual((p['type'], p['name'], p['instance'], p['template']), ('box', 'TON', '#T_Rozbeh', 'Time'))
+        p = nw('FB_Conveyor', 3)['elements'][1]
+        self.assertEqual((p['type'], p['name'], p['instance'], p['template']), ('box', 'TON', '#T_Startup', 'Time'))
         self.assertEqual(p['power'], ['IN', 'Q'])
         self.assertEqual(p['inputs'], [{'pin': 'PT', 'operand': 'T#2s'}])
-        self.assertEqual(p['outputs'], [{'pin': 'ET', 'operand': '#Rozbeh_Cas'}])
+        self.assertEqual(p['outputs'], [{'pin': 'ET', 'operand': '#Startup_Time'}])
 
     def test_call_fb(self):
-        n = nw('FB_Dopravnik', 4)
+        n = nw('FB_Conveyor', 4)
         p = n['elements'][1]
-        self.assertEqual((p['call'], p['instance'], p['name']), ('fb', '"DB_Pas1"', 'FB_Pas'))
-        self.assertEqual([x['pin'] for x in p['inputs']], ['Povoleni', 'Smer', 'Rychlost', 'Reset'])
+        self.assertEqual((p['call'], p['instance'], p['name']), ('fb', '"DB_Belt1"', 'FB_Belt'))
+        self.assertEqual([x['pin'] for x in p['inputs']], ['Enable', 'Direction', 'Speed', 'Reset'])
         self.assertEqual(p['inputs'][0]['operand'], 'wire#w1')
         self.assertEqual(p['inputs'][3]['operand'], '')             # prázdný pin
-        self.assertEqual(p['outputs'][2], {'pin': 'Stav', 'operand': ''})
-        self.assertIn({'from': 'w1', 'to': 'p2.Povoleni'}, s7dcl.wires(n))
+        self.assertEqual(p['outputs'][2], {'pin': 'State', 'operand': ''})
+        self.assertIn({'from': 'w1', 'to': 'p2.Enable'}, s7dcl.wires(n))
 
     def test_comparison(self):
-        a, b, _ = nw('FB_Dopravnik', 5)['elements']
+        a, b, _ = nw('FB_Conveyor', 5)['elements']
         self.assertEqual((a['type'], a['op'], a['in1'], a['in2'], a['template']),
-                         ('comparison', '<>', '"DB_Stroj".Rezim', '0', 'Int'))
+                         ('comparison', '<>', '"DB_Machine".Mode', '0', 'Int'))
         self.assertEqual((b['op'], b['template']), ('>', 'Real'))
 
     def test_move(self):
-        p = nw('FB_Dopravnik', 6)['elements'][1]
+        p = nw('FB_Conveyor', 6)['elements'][1]
         self.assertEqual((p['name'], p['power']), ('MOVE', ['EN', 'ENO']))
         self.assertEqual(p['inputs'], [{'pin': 'IN', 'operand': '1500'}])
-        self.assertEqual(p['outputs'], [{'pin': 'OUT1', 'operand': '"DB_Stroj".Zadana_Rychlost'}])
+        self.assertEqual(p['outputs'], [{'pin': 'OUT1', 'operand': '"DB_Machine".Speed_Setpoint'}])
 
     def test_coils_and_trig(self):
-        elements = nw('FB_Dopravnik', 7)['elements']
+        elements = nw('FB_Conveyor', 7)['elements']
         self.assertEqual([p['type'] for p in elements],
                          ['contact', 'coil_s', 'contact', 'coil', 'contact', 'box', 'coil_r'])
-        self.assertEqual((elements[5]['name'], elements[5]['below'], elements[5]['power']), ('P_TRIG', '#Kvitace_P', ['CLK', 'Q']))
+        self.assertEqual((elements[5]['name'], elements[5]['below'], elements[5]['power']), ('P_TRIG', '#Ack_P', ['CLK', 'Q']))
 
     def test_fbd_own_model(self):
-        n = nw('FC_Vetve', 3)
+        n = nw('FC_Branches', 3)
         self.assertEqual(n['language'], 'FBD')
         self.assertNotIn('rungs', n)                                     # FBD nemá LAD rungy, ale boxy (F1)
         self.assertEqual([p['type'] for p in n['elements']], ['or', 'assign'])

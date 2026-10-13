@@ -14,7 +14,7 @@ import server
 
 
 def nw(n):
-    _, b = server._load(SAMPLES, PROJECT, 'FB_Dopravnik', TS0)
+    _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)
     x = b['networks'][n - 1]
     return {'elements': x['elements'], 'rungs': x['rungs']}
 
@@ -24,26 +24,26 @@ CAT = catalog.catalog(SAMPLES, PROJECT)
 
 class TestCatalog(unittest.TestCase):
     def test_fb_belt_pins_and_instance(self):
-        b = next(x for x in CAT['blocks'] if x['key'] == 'fb:FB_Pas')
-        self.assertEqual((b['kind'], b['number'], b['instance']), ('FB', 11, ['"DB_Pas1"']))
+        b = next(x for x in CAT['blocks'] if x['key'] == 'fb:FB_Belt')
+        self.assertEqual((b['kind'], b['number'], b['instance']), ('FB', 11, ['"DB_Belt1"']))
         p = b['element']
-        self.assertEqual([x['pin'] for x in p['inputs']], ['Povoleni', 'Smer', 'Rychlost', 'Reset'])
-        self.assertEqual([x['pin'] for x in p['outputs']], ['Bezi', 'Porucha', 'Stav'])
-        self.assertEqual((p['call'], p['name'], p['instance'], p['power']), ('fb', 'FB_Pas', '"DB_Pas1"', ['EN', 'ENO']))
+        self.assertEqual([x['pin'] for x in p['inputs']], ['Enable', 'Direction', 'Speed', 'Reset'])
+        self.assertEqual([x['pin'] for x in p['outputs']], ['Running', 'Fault', 'State'])
+        self.assertEqual((p['call'], p['name'], p['instance'], p['power']), ('fb', 'FB_Belt', '"DB_Belt1"', ['EN', 'ENO']))
 
     def test_fc_and_interface(self):
-        fc = next(x for x in CAT['blocks'] if x['key'] == 'fc:FC_Vetve')
+        fc = next(x for x in CAT['blocks'] if x['key'] == 'fc:FC_Branches')
         self.assertIsNone(fc['element']['instance'])
-        dop = next(x for x in CAT['blocks'] if x['name'] == 'FB_Dopravnik')
-        self.assertIn({'name': 'T_Rozbeh', 'type': 'TON_TIME'}, dop['interface']['static'])   # atribut {…} přeskočen
+        dop = next(x for x in CAT['blocks'] if x['name'] == 'FB_Conveyor')
+        self.assertIn({'name': 'T_Startup', 'type': 'TON_TIME'}, dop['interface']['static'])   # atribut {…} přeskočen
 
     def test_db_and_tags(self):
         db = {d['name']: d for d in CAT['db']}
-        self.assertEqual(db['DB_Pas1']['instance_type'], 'FB_Pas')
-        members = {c['name']: c['type'] for c in db['DB_Stroj']['members']}
-        self.assertEqual((members['Rychlost'], members['Pocitadlo']), ('Real', 'Struct'))
-        self.assertNotIn('Kusy', members)                                    # vnořené členy STRUCT ne
-        self.assertIn({'name': 'Nouzovy_Stop', 'type': 'Bool', 'address': '%I0.1', 'table': 'Default tag table'}, CAT['tags'])
+        self.assertEqual(db['DB_Belt1']['instance_type'], 'FB_Belt')
+        members = {c['name']: c['type'] for c in db['DB_Machine']['members']}
+        self.assertEqual((members['Speed'], members['Counter']), ('Real', 'Struct'))
+        self.assertNotIn('Pieces', members)                                    # vnořené členy STRUCT ne
+        self.assertIn({'name': 'Emergency_Stop', 'type': 'Bool', 'address': '%I0.1', 'table': 'Default tag table'}, CAT['tags'])
 
     def test_instruction(self):
         keys = {x['key'] for x in CAT['instruction']}
@@ -67,7 +67,7 @@ class TestOperations(unittest.TestCase):
             model.insert(nw(1), {'r': 0, 'k': 9}, catalog.element(CAT, 'NO'))
 
     def test_output_branch_with_fb(self):
-        m, i = model.branch(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, catalog.element(CAT, 'fb:FB_Pas'))
+        m, i = model.branch(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, catalog.element(CAT, 'fb:FB_Belt'))
         self.assertEqual(m['rungs'][0]['path'], ['p1', 'p2', 'p3', 'wire#w1', 'p4'])
         self.assertEqual(m['rungs'][1], {'from': 'w1', 'path': [i], 'to': None})
         self.assertEqual(model.validate(m), [])                             # box ve výstupní větvi smí
@@ -90,8 +90,8 @@ class TestOperations(unittest.TestCase):
         self.assertEqual([p['id'] for p in m['elements']], ['p1'])
 
     def test_change_operand(self):
-        m = model.change(nw(1), 'p1', {'operand': ' "Pojistka_OK" '})
-        self.assertEqual(m['elements'][0]['operand'], '"Pojistka_OK"')
+        m = model.change(nw(1), 'p1', {'operand': ' "Fuse_OK" '})
+        self.assertEqual(m['elements'][0]['operand'], '"Fuse_OK"')
         with self.assertRaises(model.OperationError):
             model.change(nw(1), 'p1', {'type': 'coil'})
         with self.assertRaises(model.OperationError):
@@ -121,7 +121,7 @@ class TestValidation(unittest.TestCase):
             self.assertEqual(model.validate(nw(n)), [], 'NW%d' % n)
 
     def test_box_in_branch(self):
-        m, i = model.branch(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.element(CAT, 'fb:FB_Pas'))
+        m, i = model.branch(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.element(CAT, 'fb:FB_Belt'))
         ch = model.validate(m)
         self.assertEqual([c['id'] for c in ch], [i])
         self.assertIn('parallel branch', ch[0]['error'])
@@ -129,7 +129,7 @@ class TestValidation(unittest.TestCase):
         self.assertTrue(any('parallel branch' in c for c in self.errors(m)))
 
     def test_coil_middle(self):
-        m, _ = model.insert(nw(1), {'r': 0, 'k': 4}, {'type': 'contact', 'operand': '"Kvitace"'})
+        m, _ = model.insert(nw(1), {'r': 0, 'k': 4}, {'type': 'contact', 'operand': '"Ack"'})
         self.assertEqual([c['id'] for c in model.validate(m)], ['p4'])
         self.assertIn('is not at the end', self.errors(m)[0])
 
@@ -170,15 +170,15 @@ class TestApiEditor(unittest.TestCase):
     def test_catalog_api(self):
         s, k = self.req('GET', '/api/catalog?project=%s' % PROJECT)
         self.assertEqual(s, 200)
-        self.assertIn('fb:FB_Pas', [b['key'] for b in k['blocks']])
+        self.assertIn('fb:FB_Belt', [b['key'] for b in k['blocks']])
         self.assertEqual(self.req('GET', '/api/catalog?project=Neni')[0], 404)
 
     def test_layout_with_operations(self):
         before = nw(1)
         s, r = self.req('POST', '/api/layout', {
             'project': PROJECT, 'before': before, 'after': before, 'width': 900,
-            'ops': [{'type': 'branch', 'from': {'r': 0, 'k': 3}, 'to': {'r': 0, 'k': 4}, 'element': 'fb:FB_Pas'},
-                    {'type': 'change', 'id': 'n1', 'values': {'instance': '"DB_Pas1"'}}]})
+            'ops': [{'type': 'branch', 'from': {'r': 0, 'k': 3}, 'to': {'r': 0, 'k': 4}, 'element': 'fb:FB_Belt'},
+                    {'type': 'change', 'id': 'n1', 'values': {'instance': '"DB_Belt1"'}}]})
         self.assertEqual(s, 200)
         self.assertEqual((r['last'], r['diff']), ('n1', {'n1': 'added'}))
         self.assertIsNotNone(r['drawing'])
@@ -190,12 +190,12 @@ class TestApiEditor(unittest.TestCase):
         self.assertEqual(self.req('POST', '/api/layout', {'after': before, 'ops': [{'type': 'delete', 'id': 'p9'}]})[0], 400)
 
     def test_save_after(self):
-        _, net = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=1' % PROJECT)
-        s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Dopravnik', 'nw': 1,
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=1' % PROJECT)
+        s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'Round 1', 'block': 'FB_Conveyor', 'nw': 1,
                                                  'after': {'elements': net['elements'], 'rungs': net['rungs']}})
         self.assertEqual(s, 201)
         _, r = self.req('POST', '/api/layout', {'project': PROJECT, 'after': u['after'], 'ops': [
-            {'type': 'branch', 'from': {'r': 0, 'k': 1}, 'to': {'r': 0, 'k': 2}, 'element': 'fb:FB_Pas'}]})
+            {'type': 'branch', 'from': {'r': 0, 'k': 1}, 'to': {'r': 0, 'k': 2}, 'element': 'fb:FB_Belt'}]})
         s, v = self.req('POST', '/api/edits/%s/after' % u['id'], {'after': r['after']})
         self.assertEqual(s, 200)                                           # uložit lze i s chybou
         self.assertEqual(len(v['errors']), 1)
@@ -210,8 +210,8 @@ class TestApiEditor(unittest.TestCase):
         self.assertIn('Proposal', e['error'])
 
     def test_checked_decides_last_check(self):
-        _, net = self.req('GET', '/api/network?project=%s&block=FB_Dopravnik&nw=1' % PROJECT)
-        _, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'k', 'block': 'FB_Dopravnik', 'nw': 1,
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=1' % PROJECT)
+        _, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'k', 'block': 'FB_Conveyor', 'nw': 1,
                                                  'after': {'elements': net['elements'], 'rungs': net['rungs']}})
         uid = u['id']
         self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
