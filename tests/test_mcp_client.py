@@ -87,6 +87,13 @@ class TestClient(unittest.TestCase):
         self.assertEqual(mcp_client.from_mcp_json(j, 'TIAC_Writer'), (['w.exe', '--allow-write'], None))
         self.assertEqual(mcp_client.from_mcp_json(j, 'tia-portal'), (['r.exe'], {'X': '1'}))
         self.assertIsNone(mcp_client.from_mcp_json(j, 'not'))
+        # the server accepts the old and the new key names, the new one first
+        import server
+        self.assertEqual(server.mcp_config(j)['writer'], (['w.exe', '--allow-write'], None))
+        with open(j, 'w', encoding='utf-8') as f:
+            json.dump({'mcpServers': {'BTIA_Writer': {'command': 'nw.exe'}, 'TIAC_Writer': {'command': 'w.exe'},
+                                      'BTIA_Reader': {'command': 'nr.exe'}}}, f)
+        self.assertEqual(server.mcp_config(j), {'writer': (['nw.exe'], None), 'reader': (['nr.exe'], None)})
 
 
 if __name__ == '__main__':

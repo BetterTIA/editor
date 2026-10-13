@@ -2059,11 +2059,16 @@ def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300,
 
 
 def mcp_config(mcp_json, writer_cmd=None, reader_cmd=None):
-    """Writer / Reader commands: from .mcp.json (keys TIAC_Writer, tia-portal), overridden by --writer-cmd / --reader-cmd."""
-    return {'writer': (mcp_client.command_from_text(writer_cmd), None) if writer_cmd
-            else mcp_client.from_mcp_json(mcp_json, 'TIAC_Writer'),
-            'reader': (mcp_client.command_from_text(reader_cmd), None) if reader_cmd
-            else mcp_client.from_mcp_json(mcp_json, 'tia-portal')}
+    """Writer / Reader commands: from .mcp.json (first key found of WRITER_KEYS / READER_KEYS), overridden by --writer-cmd / --reader-cmd."""
+    def first(keys):
+        return next((c for k in keys if (c := mcp_client.from_mcp_json(mcp_json, k))), None)
+    return {'writer': (mcp_client.command_from_text(writer_cmd), None) if writer_cmd else first(WRITER_KEYS),
+            'reader': (mcp_client.command_from_text(reader_cmd), None) if reader_cmd else first(READER_KEYS)}
+
+
+# .mcp.json server keys, newest name first (the tools are being renamed TIAC_* -> BTIA_*; both keep working)
+WRITER_KEYS = ('BTIA_Writer', 'TIAC_Writer')
+READER_KEYS = ('BTIA_Reader', 'tia-portal')
 
 
 def main():

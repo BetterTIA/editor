@@ -455,7 +455,7 @@ python check.py --check U003      # CHECKED|MISMATCH|ERROR <id> · state … · 
 out and the API returns 409 with a hint.
 
 **Where the server takes the Writer and the Reader from:** `--mcp-json` (default `.mcp.json`, only read) — keys
-`TIAC_Writer` and `tia-portal` (command, args, `env`); overridden by `--writer-cmd "…"` / `--reader-cmd "…"` (the
+`BTIA_Writer` or `TIAC_Writer`, and `BTIA_Reader` or `tia-portal` — the first one found wins (command, args, `env`); overridden by `--writer-cmd "…"` / `--reader-cmd "…"` (the
 whole command as text, paths with spaces in quotes).
 
 **UI:** in the change header **Upload →** (Approved, non-F; for an F-block a note instead that the change is made by
