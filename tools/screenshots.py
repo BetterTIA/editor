@@ -28,13 +28,13 @@ FAKE = os.path.join(ROOT, 'tests', 'fake_mcp.py')
 
 
 class Demo:
-    def __init__(self, root, data, tia=None, slow=None):
+    def __init__(self, root, data, tia=None, slow=None, demo=False):
         mcp = None
         if tia:
             py = sys.executable
             mcp = {'writer': ([py, FAKE, 'writer', '--state', tia] + (['--slow', str(slow)] if slow else []), None),
                    'reader': ([py, FAKE, 'reader', '--state', tia, '--export-root', root, '--project', PROJECT], None)}
-        self.srv = server.create_server(PORT, root, data, mcp=mcp, mcp_timeout=60)
+        self.srv = server.create_server(PORT, root, data, mcp=mcp, mcp_timeout=60, demo=demo)
         self.port = self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
@@ -129,6 +129,32 @@ def main():
         page = '?edit=%s&edit_mode=1&select=b2&input=4' % u2
         d.shot(page, 'fbd_editor.png', 1500, 900)
         frames.append(d.shot(page, 'f6.png', 1280, 800, out=tmp))
+        d.stop()
+
+        # E: other kinds of edits and a group — interface members, a new network, a renamed network
+        d = Demo(root, 'data3', 'tia3')
+        d.req('GET', '/api/tia/status?refresh=1')
+        base = {'project': PROJECT, 'round': 'Jam detection', 'block': 'FB_Conveyor'}
+        iface = d.req('POST', '/api/edits', dict(base, kind='interface', section='Static', note='jam flag and counter', members=[
+            {'name': 'Jam_Detected', 'type': 'Bool', 'comment': 'belt stands while the motor runs'},
+            {'name': 'Jam_Count', 'type': 'Int', 'initial': '0', 'comment': 'jams since power-on'}]))['id']
+        new = d.req('POST', '/api/edits', dict(base, kind='new_network', after_nw=2, title='Jam detection', note='flag a jam',
+                                               comment='Motor on but the belt does not run.', after={
+            'elements': [{'id': 'n1', 'type': 'contact', 'operand': '#Motor'},
+                         {'id': 'n2', 'type': 'contact_nc', 'operand': '#Belt_Running'},
+                         {'id': 'n3', 'type': 'coil', 'operand': '#Jam_Detected'}],
+            'rungs': [{'from': 'powerrail', 'path': ['n1', 'n2', 'n3'], 'to': None}]}))['id']
+        ren = d.req('POST', '/api/edits', dict(base, nw=7, title_after='Faults, acknowledge and jam', note='title only'))['id']
+        d.shot('?edit=' + iface, 'edit_interface.png', 1400, 900)
+        d.shot('?edit=' + new, 'edit_new_network.png', 1400, 900)
+        d.req('POST', '/api/groups', {'edit_ids': [iface, new, ren], 'name': 'jam detection'})
+        d.req('POST', '/api/groups/G001/state', {'state': 'Approved', 'by': 'user'})
+        d.shot('?group=G001', 'edit_group.png', 1400, 1000)
+        d.stop()
+
+        d = Demo(root, 'data4', 'tia4', demo=True)                    # fake Writer/Reader = demo instance
+        d.req('GET', '/api/tia/status?refresh=1')
+        d.shot('', 'demo_banner.png', 1400, 600)
         d.stop()
         if not a.no_gif:
             gif.write(os.path.join(ROOT, 'docs', 'demo.gif'), frames, [300, 350, 400, 400, 450, 450])

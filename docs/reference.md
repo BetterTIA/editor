@@ -125,9 +125,10 @@ Networks in other languages (SCL, STL) or that cannot be laid out come with a wa
 **Storage:** `<--data>\<project>\state.json` (e.g. `data\editor\Demo_Line\state.json`). **Only the server** writes
 it (lock + temporary file + `os.replace`); while the server runs, do not edit the file by hand — use `PUT /api/state`.
 
-Change (edit): `{id (U001…, unique across projects), project, round, block, kind, block_number, nw, title, language, f,
-author, time, state, note, history: [{state, time, by}], before: {elements, rungs, wires, layout, export_ts},
-after: {…}, checks: [{time, match, export_ts, note}], writes: […]}`. Block number, network title, `f` and `before`
+Change (edit) of a network: `{id (U001…, unique across projects), project, round, kind: "network", block, block_kind,
+block_number, nw, title, language, f, author, time, state, note, history: [{state, time, by}], before: {elements, rungs,
+wires, layout, export_ts}, after: {…}, checks: [{time, match, export_ts, note}], writes: […]}` — other kinds (interface
+members, a new network, a title) and groups: see [Edit kinds and groups](#edit-kinds-and-groups). Block number, network title, `f` and `before`
 are filled in by the server from the current export — never entered by hand (whatever the client sends is ignored).
 
 States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
@@ -167,6 +168,74 @@ network list; on the right the change header, "← previous / next →" buttons 
 there is a matching check), the checks, a legend and the canvas with the difference. Round names are merged in the
 tree regardless of letter case and surrounding spaces. If a change is already Checked or later and its last check is
 a mismatch, a warning is shown (the state does not go back by itself).
+
+## Edit kinds and groups
+An edit has a `kind` (an older `state.json` is migrated when it is read: its `kind` held the block kind, which moves to
+`block_kind`, and `kind` becomes `"network"`). Every kind has the same six states, checks, writes and history, and sits
+in the tree under its block.
+
+| kind | Body of `POST /api/edits` (besides `project, round, block, note?, by?`) | Tree item |
+|---|---|---|
+| `network` (default) | `nw`, `after` (model) and/or `title_after?`, `comment_after?` | `NW 2: <title>` (`→ <new title>`) |
+| `interface` | `section: Input\|Output\|InOut\|Static\|Temp\|Constant`, `members: [{name, type, comment?, initial?}]` | `Interface: +4 Static` |
+| `new_network` | `after_nw` (0 = at the start), `title` (unique in the block), `comment?`, `language?` (`LAD`/`FBD`, default the block's), `after` | `NW 3+ (new): <title>` |
+
+Stored fields per kind (all edits: `id, project, round, kind, block, block_kind, block_number, f, author, time, state,
+note, history, checks, writes?, group?`):
+- `network`: `nw, title, comment_before, language, before {model, export_ts}, after, title_after?, comment_after?`;
+- `interface`: `nw: null, section, members, before {interface: {Section: [{name, type}]}, export_ts}`;
+- `new_network`: `nw` (= after_nw + 1, the expected number), `after_nw, after_title` (title of the network it follows),
+  `title, comment?, language, after, before {export_ts}` (its "before" is an empty network).
+
+**Interface edits** only **add** members (changing or removing a member is not offered — propose that by hand). A
+name that is already in the block interface (any section, case-insensitive) is refused (400). The edit page shows the
+section before (the export) and after (added rows green), the other sections as counts. *Check export*: each member is
+in its section of the export with the same type (order does not matter; another section or another type = mismatch).
+TIA steps: "Open the block interface → section **Static** → add `name : Type := start` (comment)". Upload (non-F): the
+member lines `name : Type[ := start];` go before the section's `END_VAR` in `.s7dcl` (a missing section is created after
+the last `END_VAR`); the text is read back and every member must be there. Member **comments are not written** to the
+document (their document form is not verified) — the Upload message says so; add them in TIA.
+
+**#operand warning:** a network or new-network edit whose "after" uses a local operand `#name` (first component; `T#5s`
+and `16#FF` are literals) that is not in the block interface of the newest export gets a warning in `warnings`:
+`operand #name is not in the block interface — propose it first (interface edit)`, or, when an interface edit of the
+same block that is not yet Tested adds it, `… — defined by edit U007 (state Approved)`.
+
+**New network:** the editor's network page has *Propose new network after this one* (a title is required; an empty
+canvas, the palette as usual). The diff draws the whole "after" as added. *Check export* finds the network **by its
+title** (and language), never by number, and notes the number it got: `the new network is NW 3 in the export`. TIA
+steps: select NW n → **Insert network** (`Ctrl+R`, ⟦unverified⟧) → language → title → the elements as for any edit.
+Upload (non-F): `s7dcl_write.insert_network(text, after_nw, body, language)` inserts `{ S7_Language := "…" } NETWORK …
+END_NETWORK` after NW n (refused when NW n in the project has another title than when the edit was proposed — the
+networks moved); the block must read back with one network more and the new one must match the proposal. The
+networks after it move by one; edits of those networks are still found by title (`the network moved: NW 4 → NW 5`).
+
+**Title and comment** (`title_after`, `comment_after` on a network edit, alone or with a model; `''` or the current
+text = unchanged): the edit page shows `old → new`, the editor has Title / Comment fields, *Check export* compares the
+export's title and comment (the network is found by the new title first), TIA steps add "Rename the network title to …".
+
+**Why the title goes through the Writer and not through `.s7res`:** a network's title and comment live in `.s7res`
+under ids like `MLC_3` that the `.s7dcl` attributes point to. How TIA numbers those ids on export and what it expects
+on import is not visible from the samples, so the editor does not invent ids. After `ImportFromDocuments` it calls
+the Writer's `SetNetworkText {softwarePath, blockPath: "<group>/<block>", network, title?, comment?, dryRun: false}`
+(the Writer exports, edits and imports the block itself). This costs a second import of the block but needs no guessed
+format, and it is the same step for a new network (number `after_nw + 1`) and a renamed one (the number the network
+has in the exported block).
+
+**Groups** — several edits that make one change (e.g. two statics + a new network that uses them + a renamed network):
+| Method | Path | Body → answer |
+|---|---|---|
+| POST | `/api/groups` | `{edit_ids: [...] in order, name?}` → 201 the group; at least two edits of one project, none in another group (409) |
+| GET | `/api/groups/<id>` | `{id, project, name, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
+| POST | `/api/groups/<id>/state` | `{state, by}` — every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
+| GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
+| POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}` |
+| POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
+
+Each member stores `group: {id: "G001", order, name?}`; group ids are unique across projects. The group's state is the
+**lowest** state of its members. In the tree a group is one expandable item with that state above the rounds; the group
+page (`?group=G001`) has the state buttons, *Upload group*, *Check export (all members)*, the members and the TIA steps.
+For an F-block the page says **one F-signature change — write all members, then compile the safety program**.
 
 ## Editor, catalog, LAD rules
 **Editor:** a change in state Proposal has an Edit button (`?edit=<id>&edit_mode=1`); from the network view,
@@ -357,6 +426,10 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (the text is stored in the record as `preview`),
 6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`.
 
+Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network);
+a new network and a network edit with `title_after` / `comment_after` get a 7th step `SetNetworkText` (see
+[Edit kinds and groups](#edit-kinds-and-groups)).
+
 Result → `edit.writes` = `[{time, tool: "TIAC_Writer", steps: [{step, ok, message}], ok, message, preview?}]`; on
 success Signed with `by: "TIAC_Writer"`. Response `200 {ok, message, write, edit}` — also on a connection error
 (`ok: false`, message "TIA is busy or the Writer/Reader cannot be started: …", the state does not change).
@@ -441,6 +514,13 @@ and replacing a network with itself gives a block the parser reads the same (FB_
   (`SrcType`/`DestType` guessed), the shape of `P_Contact`/`N_Contact`, `ReturnTrue()`, a negated call output
   `Q => NOT x`, an empty FBD rung without an operand;
 - F-blocks have no Upload (409 + the `S7_Safety` safeguard in the export) — nothing here changes the F-signature;
+  this holds for every kind of edit and for groups;
+- interface members written as `name : Type := start;` before `END_VAR` and a new network as `{ S7_Language := "…" }
+  NETWORK … END_NETWORK` — that TIA imports them (and keeps the other networks' numbers and texts) is not verified;
+  member comments are not written at all;
+- `SetNetworkText` (title / comment after the import) is only driven against the fake Writer; its answer and whether
+  a culture (`en-US`…) must be given in a multilingual project are not verified; `Ctrl+R` for *Insert network* is not
+  verified in the V21 help;
 - `Connect` without `portalId` may **start** TIA Portal when no instance is running (per the Writer's tool description)
   — the editor therefore always calls `GetPortals` first and `Connect` only with a `portalId`.
 - home page / snapshots: the answer shapes of `GetPortals`, `GetProject`, `GetProjectTree`, `GetDevices`,
@@ -528,8 +608,10 @@ error of the editor = `isError: true` with its message):
 | `get_network` | `project`, `block`, `nw`, `export_ts?` | `/api/network` without the SVG geometry: `elements`, `rungs`/`wires` (LAD) or `signals` (FBD), `title`, `comment`, `language`, `f`, `as_lad?` |
 | `list_edits` | `project?`, `state?` | edit summaries `{id, project, round, block, nw, title, language, f, state, author, time, note, last_check}` |
 | `get_edit` | `id` | `edit` (before/after, checks, writes, history), `diff`, `errors`, `warnings`, `next`/`previous`, `checked_allowed`, `tia`, `procedure` (markdown), `url` |
-| `propose_edit` | `project`, `round`, `block`, `nw`, `after`, `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout` |
-| `update_edit` | `id`, `after`, `note?` | replaces "after" (and the note) — Proposal only → `{id, state, errors}` |
+| `propose_edit` | `project`, `round`, `block`, `kind?` + per kind: `nw`, `after?`, `title_after?`, `comment_after?` (network) · `section`, `members` (interface) · `after_nw`, `title`, `after`, `comment?`, `language?` (new_network); `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout`, `warnings` include the #operand warning |
+| `update_edit` | `id`, `after?`, `note?`, `section?`, `members?`, `title?`, `comment?`, `title_after?`, `comment_after?` | changes a Proposal → `{id, state, errors}` |
+| `create_group` | `edit_ids`, `name?` | `POST /api/groups` → the group + `url` |
+| `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
 | `get_procedure` | `id` | the TIA steps as markdown text |
 | `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` checks TIA Portal again) |
@@ -597,6 +679,9 @@ testing through a browser automation extension: when the tab is hidden (`documen
     rung, NW3 tap after & + chain of assignments + `NOT Coil`, NW4 F-block call (multi-instance) with attributes, a
     negated pin and `ACK` from `P_Trig`, NW5 F-block with negated `QBAD`, NW6 S/R/SR, NW7 `RUNG true` + MOVE, NW8 x +
     N_TRIG, NW9 empty.
+- `Demo_Line\20261012-130000\` = a partial export after writing an interface edit (only `FB_Conveyor`, two new statics
+  `Jam_Detected : Bool`, `Jam_Count : Int`; `TS_IF` in `tests\common.py`) — older than `20261012-140000`, so it is not
+  the newest export of the block.
 - `Demo_Line\20261012-140000\` = a partial "export after writing" with only `FB_Conveyor` (NW1 has an extra
   `Contact( "Fuse_OK" )` before the coil) — the **newest** export of that block.
 - `Demo_Line\20261012-150000\` = an export after writing an FBD change (only `FB_Safety`, NW1: an extra 4th & input
@@ -609,7 +694,8 @@ testing through a browser automation extension: when the tab is hidden (`documen
   driven through the MCP client (`tests\test_mcp_server.py`), states (`tests\test_state.py`), changelog
   (`tests\test_changelog.py`), snapshot comparison incl. a moved network and the MCP tools (`tests\test_compare.py`),
   serialization, real clicks and screenshots (skipped without Chrome).
-- `tests\screenshots\` — screenshots of sample networks and of the main home/editor/change/upload views, and
+- `tests\screenshots\` — screenshots of sample networks and of the main home/editor/change/upload views, the other kinds
+  of edits (`edit_interface.png`, `edit_new_network.png`, `edit_group.png`), the demo banner (`demo_banner.png`), and
   `docs\demo.gif`; all regenerated by `python tools\screenshots.py` (temp folders, fake Writer/Reader, port 8765).
 
 ## What works / what does not

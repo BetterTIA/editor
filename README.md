@@ -52,6 +52,20 @@ It is the third tool of the BetterTIA set:
 - An MCP server (`mcp_server.py`), so an AI agent can read projects and networks, propose a change, check an export
   and take a screenshot — on top of a small HTTP API.
 
+## What an edit can be
+
+- **Network change** — the "after" model of one LAD or FBD network, drawn as a diff against the export.
+- **Title and comment** — a new network title / comment, alone or together with a network change.
+- **New network** — inserted after network *n* (or at the start) with its title, language and content.
+- **Interface** — new members in one section of the block interface (Input, Output, InOut, Static, Temp, Constant);
+  a network edit that uses a `#operand` the interface lacks gets a warning pointing at the interface edit.
+- **Group** — several edits that make one change (e.g. two statics, a new network, a renamed network): one state,
+  TIA steps of all members in order, Upload in order (interface → new networks → changes), one check.
+
+Fail-safe blocks get every kind of edit as a proposal with TIA steps; Upload stays refused for them.
+
+![An interface edit: the Static section before and after](tests/screenshots/edit_interface.png)
+
 ## Changelog and versions
 
 The editor keeps a copy of the project: every snapshot is a Reader export with a timestamp. The project page has two
@@ -81,6 +95,9 @@ Then open `http://localhost:8765/`. The server listens on `127.0.0.1` only.
 - `--data` is where the changes are stored (`<data>\<project>\state.json`).
 - `--mcp-json`, `--writer-cmd`, `--reader-cmd` configure the writer and the reader (TIA status, snapshots, Upload, Check).
 - `--no-autoconnect` stops the automatic TIA check at start and on the home page.
+- With the fake Writer/Reader (`tests\fake_mcp.py`) or `--demo` the editor is a **demo instance**: a striped banner on
+  every page, `attached (fake)` in the status bar, and projects outside `--export-root` are refused. Start the editor
+  for a real project without the fake commands.
 
 ## How it connects to TIA
 
@@ -111,7 +128,7 @@ client does not start in this folder. The home page shows the same blocks to cop
 **AI: connected (&lt;client&gt;)** once the agent is attached.
 
 Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
-`run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
+`create_group`, `get_group`, `run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
 `compare_snapshots`, `screenshot` — see
 [docs/reference.md](docs/reference.md#mcp-server).
 
