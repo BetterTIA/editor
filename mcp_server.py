@@ -166,6 +166,16 @@ def update_edit(e, a):
     return {'id': r['edit']['id'], 'state': r['edit']['state'], 'errors': r['errors']}
 
 
+def create_group(e, a):
+    g = e.req('POST', '/api/groups', {'edit_ids': a['edit_ids'], 'name': a.get('name') or ''})
+    return dict(g, url='%s/?group=%s' % (e.url, q(g['id'])))
+
+
+def get_group(e, a):
+    g = e.get('/api/groups/' + q(a['id']))
+    return dict(g, procedure=e.get('/api/groups/%s/procedure' % q(a['id']))['markdown'], url='%s/?group=%s' % (e.url, q(a['id'])))
+
+
 def run_check(e, a):
     r = e.req('POST', '/api/edits/%s/check-export' % q(a['id']), {'export_ts': a['export_ts']} if a.get('export_ts') else {})
     return {k: r.get(k) for k in ('match', 'export_ts', 'nw_export', 'note', 'diffs')} | {'state': r['edit']['state']}
@@ -285,6 +295,13 @@ TOOLS = [
               'title': {'type': 'string', 'description': 'new_network: title'},
               'comment': {'type': 'string', 'description': 'new_network: comment'},
               'title_after': TITLE_AFTER, 'comment_after': COMMENT_AFTER}, ['id']), update_edit),
+    ('create_group', 'Group edits that make one change together (e.g. interface members + new networks + changes of one '
+                     'block), in the order they are made. The group has one state (the lowest of its members); a person '
+                     'moves, uploads and checks it as a whole in the editor.',
+     _schema({'edit_ids': {'type': 'array', 'items': S, 'minItems': 2, 'description': 'edit ids in order'},
+              'name': {'type': 'string', 'description': 'short name of the change'}}, ['edit_ids']), create_group),
+    ('get_group', 'One group: members in order with their states, the common state, F-block note and the TIA steps of '
+                  'all members (markdown).', _schema({'id': S}, ['id']), get_group),
     ('run_check', 'Compare an export (newest or given) with the edit\'s "after" model and record the check.',
      _schema({'id': S, 'export_ts': TS}, ['id']), run_check),
     ('get_procedure', 'Step-by-step instructions for making the edit by hand in TIA Portal (markdown).',

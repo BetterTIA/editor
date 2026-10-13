@@ -1717,6 +1717,149 @@ def api_compare(root, data, project, a, b, block=None):
     return {'project': project, 'from': a, 'to': b, 'blocks': blocks}
 
 
+# ---------- groups of edits (E5): one change made of several edits, written and checked together ----------
+
+UPLOAD_ORDER = {'interface': 0, 'new_network': 1, 'network': 2}      # members first declare, then insert, then change
+
+
+def _group_members(data, gid):
+    """-> (project, state, [edits of the group in order]); KeyError when missing."""
+    for p in state.projects(data):
+        s = state.load(data, p)
+        m = sorted((u for u in s['edits'] if (u.get('group') or {}).get('id') == gid), key=lambda u: u['group']['order'])
+        if m:
+            return p, s, m
+    raise KeyError('group %s does not exist' % gid)
+
+
+def _group_view(project, gid, members):
+    low = min(state.STATES.index(u['state']) for u in members)
+    g = {'id': gid, 'project': project, 'name': members[0]['group'].get('name') or '', 'state': state.STATES[low],
+         'f': any(u.get('f') for u in members), 'blocks': sorted({u['block'] for u in members}),
+         'members': [{'id': u['id'], 'order': u['group']['order'], 'kind': u.get('kind', 'network'), 'block': u['block'],
+                      'where': procedure.header(u), 'state': u['state'], 'f': bool(u.get('f')), 'note': u.get('note') or ''}
+                     for u in members]}
+    g['next'] = state.STATES[low + 1] if low + 1 < len(state.STATES) else None
+    g['previous'] = state.STATES[low - 1] if low > 0 else None
+    if g['f']:
+        g['f_note'] = 'one F-signature change — write all members, then compile the safety program'
+    return g
+
+
+def api_group_create(data, body):
+    """POST /api/groups {edit_ids: [...] in order, name?} -> the group (G001…, unique across projects)."""
+    ids = body.get('edit_ids') if isinstance(body, dict) else None
+    if not isinstance(ids, list) or len(ids) < 2 or not all(isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
+        raise state.StateError('edit_ids: at least two different edit ids, in the order they are made', 400)
+    with state.LOCK:
+        found = [state.find(data, x) for x in ids]
+        project = found[0][0]
+        if any(f[0] != project for f in found):
+            raise state.StateError('the edits of a group must be in one project', 400)
+        taken = [f[2]['id'] + ' (' + f[2]['group']['id'] + ')' for f in found if f[2].get('group')]
+        if taken:
+            raise state.StateError('already in a group: %s' % ', '.join(taken))
+        n = 0
+        for p in state.projects(data):
+            for u in state.load(data, p)['edits']:
+                m = re.fullmatch(r'G(\d+)', (u.get('group') or {}).get('id') or '')
+                if m:
+                    n = max(n, int(m.group(1)))
+        gid = 'G%03d' % (n + 1)
+        s = found[0][1]
+        by_id = {u['id']: u for u in s['edits']}
+        name = str(body.get('name') or '')[:120]
+        for i, x in enumerate(ids, 1):
+            by_id[x]['group'] = dict({'id': gid, 'order': i}, **({'name': name} if name else {}))
+        state.save(data, project, s)
+    return api_group(data, gid)
+
+
+def api_group(data, gid):
+    project, _, members = _group_members(data, gid)
+    return _group_view(project, gid, members)
+
+
+def api_group_state(data, gid, body):
+    """Move every member to the state (members already there stay); only when every one of them can move, else 409."""
+    if not isinstance(body, dict):
+        raise state.StateError('the body must be a JSON object', 400)
+    target = body.get('state')
+    with state.LOCK:
+        project, s, members = _group_members(data, gid)
+        why = []
+        for u in members:
+            if u['state'] == target:
+                continue
+            try:
+                state.change_state(json.loads(json.dumps(u)), target, body.get('by'))    # a trial on a copy
+            except state.StateError as e:
+                why.append('%s: %s' % (u['id'], e))
+        if why:
+            raise state.StateError('the group cannot move to %s — %s' % (target, '; '.join(why)),
+                                   400 if target not in state.STATES else 409)
+        for u in members:
+            if u['state'] != target:
+                state.change_state(u, target, body.get('by'))
+        state.save(data, project, s)
+    return api_group(data, gid)
+
+
+def api_group_procedure(data, gid, root=None):
+    """TIA steps of the members in order, each under its own heading."""
+    project, _, members = _group_members(data, gid)
+    g = _group_view(project, gid, members)
+    parts, md = [], '## TIA steps — group %s%s\n' % (gid, ' · ' + g['name'] if g['name'] else '')
+    if g['f']:
+        md += '\n⚠ F-block: %s.\n' % g['f_note']
+    compile_step = None
+    for u in members:
+        p = api_procedure(data, u['id'], root)
+        steps = p['steps']
+        if g['f']:                                    # one F-signature change: compile once, after the last member
+            compile_step = next((k for k in steps if k.startswith('Compile the safety program')), compile_step)
+            steps = [k for k in steps if not k.startswith('Compile the safety program')]
+        parts.append({'edit': u['id'], 'header': p['header'], 'steps': steps})
+    if compile_step:
+        parts.append({'edit': None, 'header': 'After the last member', 'steps': [compile_step]})
+    for i, x in enumerate(parts, 1):
+        md += '\n### %d. %s%s\n' % (i, x['edit'] + ' — ' if x['edit'] else '', x['header']) + \
+            ''.join('%d. %s\n' % (k, t) for k, t in enumerate(x['steps'], 1))
+    if procedure.N in md:
+        md += '\n%s = not verified in the TIA V21 help, check it in the editor.\n' % procedure.N
+    return {'group': gid, 'f': g['f'], 'f_note': g.get('f_note'), 'parts': parts, 'markdown': md}
+
+
+def api_group_check(root_of, data, gid):
+    """Export check of every member (newest export of each block) -> {match: all matched, results}."""
+    _, _, members = _group_members(data, gid)
+    res = []
+    for u in members:
+        k = api_check_export(root_of(u['id']), data, u['id'], {})
+        res.append({'edit': u['id'], 'match': k['match'], 'export_ts': k['export_ts'], 'note': k['note']})
+    return {'group': gid, 'match': all(x['match'] for x in res), 'results': res, 'view': api_group(data, gid)}
+
+
+def api_group_upload(root_of, data, gid, upload):
+    """Upload of the members (Approved, non-F) one by one: interface edits, then new networks, then network changes;
+    stops at the first failure. upload(uid) = api_upload for one edit."""
+    _, _, members = _group_members(data, gid)
+    if any(u.get('f') for u in members):
+        raise state.StateError('F-block in the group: no Upload — make the changes by hand following the TIA steps, '
+                               'then compile the safety program once')
+    not_ready = ['%s (%s)' % (u['id'], u['state']) for u in members if u['state'] != 'Approved']
+    if not_ready:
+        raise state.StateError('Upload of a group only when every member is Approved: %s' % ', '.join(not_ready))
+    res = []
+    for u in sorted(members, key=lambda u: (UPLOAD_ORDER.get(u.get('kind', 'network'), 2), u['group']['order'])):
+        r = upload(u['id'])
+        res.append({'edit': u['id'], 'ok': r['ok'], 'message': r['message']})
+        if not r['ok']:
+            break
+    ok = len(res) == len(members) and all(x['ok'] for x in res)
+    return {'group': gid, 'ok': ok, 'results': res, 'view': api_group(data, gid)}
+
+
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
@@ -1800,6 +1943,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(api_edit_detail(self.data, c.split('/')[3], int(q.get('width', '0')), root_of(c.split('/')[3])))
             elif method == 'GET' and re.fullmatch(r'/api/edits/[\w-]+/procedure', c):
                 self._json(api_procedure(self.data, c.split('/')[3], root_of(c.split('/')[3])))
+            elif method == 'POST' and c == '/api/groups':
+                self._json(api_group_create(self.data, self._body()), 201)
+            elif method == 'GET' and re.fullmatch(r'/api/groups/[\w-]+', c):
+                self._json(api_group(self.data, c.split('/')[3]))
+            elif method == 'POST' and re.fullmatch(r'/api/groups/[\w-]+/state', c):
+                self._json(api_group_state(self.data, c.split('/')[3], self._body()))
+            elif method == 'GET' and re.fullmatch(r'/api/groups/[\w-]+/procedure', c):
+                gid = c.split('/')[3]
+                self._json(api_group_procedure(self.data, gid, root(_group_members(self.data, gid)[0])))
+            elif method == 'POST' and re.fullmatch(r'/api/groups/[\w-]+/check-export', c):
+                self._json(api_group_check(root_of, self.data, c.split('/')[3]))
+            elif method == 'POST' and re.fullmatch(r'/api/groups/[\w-]+/upload', c):
+                gid = c.split('/')[3]
+                demo_guard(_group_members(self.data, gid)[2][0]['id'])
+                portal = self.tia_status.get('portalId') if self.tia_status.get('tia') == 'attached' else None
+                self._json(api_group_upload(root_of, self.data, gid, lambda uid: api_upload(
+                    root_of(uid), self.data, uid, self.mcp, self.mcp_timeout, portal)))
             elif method == 'GET' and c == '/api/catalog':
                 self._json(api_catalog(root(q.get('project')), q.get('project', '')))
             elif method == 'POST' and c == '/api/layout':
