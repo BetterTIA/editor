@@ -15,7 +15,7 @@ PROHLIZECE = [
 ]
 
 
-def snimek(url, out, width=1400, height=900, svetly=False, cekani_ms=4000):
+def screenshot(url, out, width=1400, height=900, svetly=False, cekani_ms=4000):
     exe = next((p for p in PROHLIZECE if os.path.exists(p)), None)
     if not exe:
         raise RuntimeError('Chrome ani Edge nenalezen')
@@ -45,7 +45,7 @@ def main():
     ap.add_argument('--height', type=int, default=900)
     ap.add_argument('--svetly', action='store_true', help='světlý motiv (výchozí tmavý)')
     a = ap.parse_args()
-    print(snimek(a.url, a.out, a.width, a.height, a.svetly))
+    print(screenshot(a.url, a.out, a.width, a.height, a.svetly))
 
 
 if __name__ == '__main__':

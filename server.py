@@ -16,15 +16,15 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 import fbd
-import katalog
+import catalog
 import layout
-import mcp_klient
+import mcp_client
 import model
-import postup
-import rozdil
+import procedure
+import diff
 import s7dcl
-import s7dcl_zapis
-import stav
+import s7dcl_write
+import state
 
 TS = re.compile(r'^\d{8}-\d{6}$')
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
@@ -162,7 +162,7 @@ def _fbd_po(po, sirka=0):
     try:
         fbd.over_model(po)
     except ValueError as e:
-        raise stav.ChybaStavu(str(e), 400)
+        raise state.ChybaStavu(str(e), 400)
     m = fbd.model(po['prvky'])
     try:
         m['rozlozeni'] = fbd.rozloz(m['prvky'], sirka)[0]
@@ -173,7 +173,7 @@ def _fbd_po(po, sirka=0):
 
 def over_model(po):
     """Model „po" z API (hranice důvěry): prvky s id/typ, boxy s piny, rungy jen z existujících id a wire#."""
-    chyba = stav.ChybaStavu('po musí být model networku {prvky:[{id, typ, …}], rungy:[{z, cesta, do}]}', 400)
+    chyba = state.ChybaStavu('po musí být model networku {prvky:[{id, typ, …}], rungy:[{z, cesta, do}]}', 400)
     if not isinstance(po, dict) or not isinstance(po.get('prvky'), list) or not isinstance(po.get('rungy'), list):
         raise chyba
     ids = set()
@@ -208,77 +208,77 @@ def _rozloz(model, sirka=0):
 
 def api_stav(data, projekt=None):
     if projekt:
-        return stav.nacti(data, projekt)
-    return {'projekty': [{'projekt': p, 'upravy': stav.nacti(data, p)['upravy']} for p in stav.projekty(data)]}
+        return state.nacti(data, projekt)
+    return {'projekty': [{'projekt': p, 'upravy': state.nacti(data, p)['upravy']} for p in state.projekty(data)]}
 
 
 def api_stav_put(root, data, projekt, obj):
     if projekt not in index_exportu(root):
         raise KeyError('neznámý projekt')
-    with stav.ZAMEK:
-        stav.uloz(data, projekt, obj)
+    with state.ZAMEK:
+        state.uloz(data, projekt, obj)
     return obj
 
 
 def api_uprava_nova(root, data, body):
     if not isinstance(body, dict):
-        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+        raise state.ChybaStavu('tělo musí být JSON objekt', 400)
     projekt, blok = str(body.get('projekt', '')), str(body.get('blok', ''))
-    stav._soubor(data, projekt)                      # kontrola --data a jména projektu
+    state._soubor(data, projekt)                      # kontrola --data a jména projektu
     net = api_network(root, projekt, blok, int(body.get('nw', 0)))
     if net['jazyk'] == 'FBD' and net.get('signaly') is not None:
         if not isinstance(body.get('po'), dict):
-            raise stav.ChybaStavu('po musí být FBD model {jazyk: "FBD", prvky: [...]}', 400)
+            raise state.ChybaStavu('po musí být FBD model {jazyk: "FBD", prvky: [...]}', 400)
         po = _fbd_po(dict(body['po'], jazyk='FBD'))
     elif net['jazyk'] != 'LAD':
-        raise stav.ChybaStavu('úprava jen pro LAD nebo FBD network (tento je %s)' % (net['jazyk'] or '?'), 400)
+        raise state.ChybaStavu('úprava jen pro LAD nebo FBD network (tento je %s)' % (net['jazyk'] or '?'), 400)
     else:
         over_model(body.get('po'))
         po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
         po['vodice'] = s7dcl.vodice(po)
         po['rozlozeni'] = body['po'].get('rozlozeni') or _rozloz(po)[0]
-    cas = stav.ted()
-    with stav.ZAMEK:
-        s = stav.nacti(data, projekt)
-        u = {'id': stav.nove_id(data), 'projekt': projekt, 'kolo': str(body.get('kolo') or '—'),
+    cas = state.ted()
+    with state.ZAMEK:
+        s = state.nacti(data, projekt)
+        u = {'id': state.nove_id(data), 'projekt': projekt, 'kolo': str(body.get('kolo') or '—'),
              'blok': net['soubor'], 'druh': net['druh'], 'cislo_bloku': net['cislo'], 'nw': net['nw'],
              'titulek': net['titulek'], 'jazyk': net['jazyk'], 'f': bool(net.get('f') or body.get('f')), 'autor': 'ANet', 'cas': cas, 'stav': 'Proposal',
              'poznamka': str(body.get('poznamka') or ''),
              'historie': [{'stav': 'Proposal', 'cas': cas, 'kdo': 'ANet'}],
              'pred': dict(_model(net), export_ts=net['ts']), 'po': po, 'kontroly': []}
         s['upravy'].append(u)
-        stav.uloz(data, projekt, s)
+        state.uloz(data, projekt, s)
     return u
 
 
 def api_uprava_stav(data, uid, body):
     if not isinstance(body, dict):
-        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
-    with stav.ZAMEK:
-        projekt, s, u = stav.najdi(data, uid)
-        stav.zmen_stav(u, body.get('stav'), body.get('kdo'))
-        stav.uloz(data, projekt, s)
+        raise state.ChybaStavu('tělo musí být JSON objekt', 400)
+    with state.ZAMEK:
+        projekt, s, u = state.najdi(data, uid)
+        state.zmen_stav(u, body.get('stav'), body.get('kdo'))
+        state.uloz(data, projekt, s)
     return u
 
 
 def api_kontrola(data, body):
     if not isinstance(body, dict) or not isinstance(body.get('shoda'), bool):
-        raise stav.ChybaStavu('kontrola: {uprava_id, shoda: true|false, export_ts, poznamka}', 400)
-    with stav.ZAMEK:
-        projekt, s, u = stav.najdi(data, str(body.get('uprava_id', '')))
+        raise state.ChybaStavu('kontrola: {uprava_id, shoda: true|false, export_ts, poznamka}', 400)
+    with state.ZAMEK:
+        projekt, s, u = state.najdi(data, str(body.get('uprava_id', '')))
         u.setdefault('kontroly', []).append({
-            'cas': stav.ted(), 'shoda': body['shoda'], 'export_ts': str(body.get('export_ts') or ''),
+            'cas': state.ted(), 'shoda': body['shoda'], 'export_ts': str(body.get('export_ts') or ''),
             'poznamka': str(body.get('poznamka') or '')})
-        stav.uloz(data, projekt, s)
+        state.uloz(data, projekt, s)
     return u
 
 
 def _kresba_rozdilu(pred, po, sirka=0):
     """Kresba modelu „po" se smazanými prvky jako přízraky a značkami rozdílu proti „pred"."""
-    zmeny, smazane = rozdil.porovnej(pred, po)
+    zmeny, smazane = diff.porovnej(pred, po)
     if fbd.je_fbd(po):
         return _kresba_rozdilu_fbd(pred, po, zmeny, smazane, sirka)
-    prvky, rungy, nevlozene = rozdil.slouc(pred, po, smazane)
+    prvky, rungy, nevlozene = diff.slouc(pred, po, smazane)
     varovani = []
     rozl, kresba = _rozloz({'prvky': prvky, 'rungy': rungy}, sirka)
     if kresba is None:                                # přízraky rozbily rozložení -> jen „po"
@@ -333,27 +333,27 @@ def _validuj(po, f=False, root=None, projekt=None):
 
 def api_uprava_detail(data, uid, sirka=0, root=None):
     """Úprava + kresba „po" s rozdílem, chyby pravidel LAD, přechody stavů."""
-    _, s, u = stav.najdi(data, uid)
+    _, s, u = state.najdi(data, uid)
     vys = _kresba_rozdilu(u['pred'], u['po'], sirka)
     vys['tia'] = s.get('tia')
     k = u.get('kontroly') or []
-    if stav.STAVY.index(u['stav']) >= stav.STAVY.index('Checked') and k and k[-1].get('shoda') is False:
+    if state.STAVY.index(u['stav']) >= state.STAVY.index('Checked') and k and k[-1].get('shoda') is False:
         vys['varovani'].insert(0, 'Poslední kontrola exportem je NESHODA, ale úprava už je %s — stav se sám nevrací, '
                                   'zkontroluj zápis v projektu.' % u['stav'])
-    dalsi, predchozi = stav.prechody(u)
-    vys.update({'uprava': u, 'dalsi': dalsi, 'predchozi': predchozi, 'checked_povolen': stav.checked_povolen(u),
+    dalsi, predchozi = state.prechody(u)
+    vys.update({'uprava': u, 'dalsi': dalsi, 'predchozi': predchozi, 'checked_povolen': state.checked_povolen(u),
                 'chyby': _validuj(u['po'], u.get('f'), root, u['projekt'])})
     return vys
 
 
 def api_postup(data, uid, root=None):
-    _, _, u = stav.najdi(data, uid)
+    _, _, u = state.najdi(data, uid)
     if 'f' not in u and root:                         # úpravy z doby před F2 příznak F-bloku nemají -> z exportu
         try:
             u = dict(u, f=_nacti(root, u['projekt'], u['blok'])[1]['atributy'].get('S7_Safety') == 'TRUE')
         except KeyError:
             pass
-    return dict(postup.postup(u), uprava=uid)
+    return dict(procedure.procedure(u), uprava=uid)
 
 
 # ---------- M3: katalog, editor ----------
@@ -361,14 +361,14 @@ def api_postup(data, uid, root=None):
 def api_katalog(root, projekt):
     if projekt not in index_exportu(root):
         raise KeyError('neznámý projekt')
-    return katalog.katalog(root, projekt)
+    return catalog.catalog(root, projekt)
 
 
 def api_rozlozeni(root, body):
     """Editor / zkouška Clauda: {po, pred?, ops?: [op], projekt?, sirka?} -> „po" po operacích, kresba s rozdílem
     proti „pred", místa vložení, chyby pravidel LAD. Nic neukládá."""
     if not isinstance(body, dict):
-        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+        raise state.ChybaStavu('tělo musí být JSON objekt', 400)
     if fbd.je_fbd(body.get('po')):
         return _rozlozeni_fbd(body, root)
     over_model(body.get('po'))
@@ -382,12 +382,12 @@ def api_rozlozeni(root, body):
         if not kat:
             kat.append(api_katalog(root, str(body.get('projekt', ''))))
         try:
-            return katalog.prvek(kat[0], klic)
+            return catalog.prvek(kat[0], klic)
         except KeyError as e:
             raise model.ChybaOperace(str(e).strip("'"))
     ops = body.get('ops') or []
     if not isinstance(ops, list):
-        raise stav.ChybaStavu('ops musí být seznam operací', 400)
+        raise state.ChybaStavu('ops musí být seznam operací', 400)
     posledni = None
     for op in ops:
         po, posledni = model.proved(po, op, sablona)
@@ -405,18 +405,18 @@ def _rozlozeni_fbd(body, root=None):
     pred = _fbd_po(dict(body['pred'], jazyk='FBD')) if isinstance(body.get('pred'), dict) else None
     ops = body.get('ops') or []
     if not isinstance(ops, list):
-        raise stav.ChybaStavu('ops musí být seznam operací', 400)
+        raise state.ChybaStavu('ops musí být seznam operací', 400)
     posledni, kat, f = None, [], bool(body.get('f'))
 
     def z_katalogu(klic):
         if not kat:
             kat.append(api_katalog(root, str(body.get('projekt', ''))))
-        return katalog.prvek(kat[0], klic)
+        return catalog.prvek(kat[0], klic)
     for op in ops:
         try:
             po, posledni = fbd.proved(po, op, z_katalogu, f)
         except fbd.ChybaOperace as e:
-            raise stav.ChybaStavu(str(e), 400)
+            raise state.ChybaStavu(str(e), 400)
     vys = _kresba_rozdilu(pred or po, po, int(body.get('sirka') or 0))
     if vys['kresba'] is not None:
         po['rozlozeni'] = fbd.rozloz(po['prvky'])[0]
@@ -429,8 +429,8 @@ def api_kontrola_exportem(root, data, uid, body):
     """M4: porovná network úpravy v exportu (nejnovějším / zadaném) s modelem „po" podle obsahu
     a zapíše výsledek jako kontrolu (POST /api/kontrola). Network se hledá podle titulku, pak podle čísla."""
     if not isinstance(body, dict):
-        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
-    _, _, u = stav.najdi(data, uid)
+        raise state.ChybaStavu('tělo musí být JSON objekt', 400)
+    _, _, u = state.najdi(data, uid)
     t, b = _nacti(root, u['projekt'], u['blok'], str(body['export_ts']) if body.get('export_ts') else None)
     pozn = []
     kand = [n for n in b['networky'] if u.get('titulek') and n['titulek'] == u['titulek']]
@@ -455,7 +455,7 @@ def api_kontrola_exportem(root, data, uid, body):
     elif n['jazyk'] != 'LAD':
         shoda, rozd = False, ['NW %d je v exportu v jazyce %s' % (n['nw'], n['jazyk'] or '?')]
     else:
-        shoda, rozd = rozdil.shoda_obsahu(u['po'], n)
+        shoda, rozd = diff.shoda_obsahu(u['po'], n)
     if t == u['pred'].get('export_ts'):
         pozn.append('pozor: export je tentýž jako před úpravou')
     poznamka = ('export = návrh' if shoda else 'NESHODA: ' + '; '.join(rozd)) + ''.join(' · ' + x for x in pozn)
@@ -467,7 +467,7 @@ def api_kontrola_exportem(root, data, uid, body):
 def api_uprava_po(data, uid, body):
     """Uloží model „po" k úpravě (editor „Uložit návrh"). Jen ve stavu Proposal; chyby pravidel uložení nebrání."""
     if not isinstance(body, dict):
-        raise stav.ChybaStavu('tělo musí být JSON objekt', 400)
+        raise state.ChybaStavu('tělo musí být JSON objekt', 400)
     if fbd.je_fbd(body.get('po')):
         po = _fbd_po(body['po'])
     else:
@@ -475,15 +475,15 @@ def api_uprava_po(data, uid, body):
         po = {'prvky': body['po']['prvky'], 'rungy': body['po']['rungy']}
         po['vodice'] = s7dcl.vodice(po)
         po['rozlozeni'] = _rozloz(po)[0]
-    with stav.ZAMEK:
-        projekt, s, u = stav.najdi(data, uid)
+    with state.ZAMEK:
+        projekt, s, u = state.najdi(data, uid)
         if fbd.je_fbd(po) != fbd.je_fbd(u['po']):
-            raise stav.ChybaStavu('jazyk návrhu (LAD/FBD) musí zůstat stejný', 400)
+            raise state.ChybaStavu('jazyk návrhu (LAD/FBD) musí zůstat stejný', 400)
         if u['stav'] != 'Proposal':
-            raise stav.ChybaStavu('návrh lze měnit jen ve stavu Proposal (teď %s)' % u['stav'])
+            raise state.ChybaStavu('návrh lze měnit jen ve stavu Proposal (teď %s)' % u['stav'])
         u['po'] = po
-        u['upraveno'] = stav.ted()
-        stav.uloz(data, projekt, s)
+        u['upraveno'] = state.ted()
+        state.uloz(data, projekt, s)
     return {'uprava': u, 'chyby': _validuj(po, u.get('f'))}
 
 
@@ -496,7 +496,7 @@ CHYBA_SPOJENI = 'TIA zaneprázdněné nebo Writer/Reader nejde spustit: '
 def _tia(s, projekt):
     t = s.get('tia') or {}
     if not t.get('softwarePath'):
-        raise stav.ChybaStavu('projekt %s nemá nastavení TIA (tia: {softwarePath, plcName, groupPath?}) — '
+        raise state.ChybaStavu('projekt %s nemá nastavení TIA (tia: {softwarePath, plcName, groupPath?}) — '
                               'nastav ho v UI u úpravy („Nastavení TIA") nebo přes PUT /api/stav' % projekt)
     return t
 
@@ -504,8 +504,8 @@ def _tia(s, projekt):
 def _klient(mcp, role, timeout):
     cfg = (mcp or {}).get(role)
     if not cfg:
-        raise mcp_klient.ChybaMCP('%s není nastaven (--mcp-json / --%s-cmd)' % (role, role))
-    return mcp_klient.Klient(cfg[0], cfg[1], timeout, 'TIAC_Writer' if role == 'writer' else 'TIAC_Reader')
+        raise mcp_client.ChybaMCP('%s není nastaven (--mcp-json / --%s-cmd)' % (role, role))
+    return mcp_client.Klient(cfg[0], cfg[1], timeout, 'TIAC_Writer' if role == 'writer' else 'TIAC_Reader')
 
 
 def _bez_nazvu_volani(m):
@@ -529,23 +529,23 @@ def _nahrad_v_souboru(soubor, u):
     text = surove.decode('utf-8-sig')
     b = s7dcl.nacti_blok(soubor)
     if b['atributy'].get('S7_Safety') == 'TRUE':
-        raise s7dcl_zapis.ChybaZapisu('blok je F-blok (S7_Safety) — Upload je jen pro ne-safety, zapisuje Honza')
+        raise s7dcl_write.ChybaZapisu('blok je F-blok (S7_Safety) — Upload je jen pro ne-safety, zapisuje Honza')
     kand = [n for n in b['networky'] if u.get('titulek') and n['titulek'] == u['titulek']]
     n = next((x for x in kand if x['nw'] == u['nw']), kand[0]) if kand else \
         (b['networky'][u['nw'] - 1] if u['nw'] <= len(b['networky']) else None)
     if n is None:
-        raise s7dcl_zapis.ChybaZapisu('network %d („%s") v exportovaném bloku není' % (u['nw'], u.get('titulek') or ''))
+        raise s7dcl_write.ChybaZapisu('network %d („%s") v exportovaném bloku není' % (u['nw'], u.get('titulek') or ''))
     jazyk = 'FBD' if fbd.je_fbd(u['po']) else 'LAD'
     if n['jazyk'] != jazyk:
-        raise s7dcl_zapis.ChybaZapisu('NW %d je v projektu %s, návrh je %s' % (n['nw'], n['jazyk'] or '?', jazyk))
-    novy = s7dcl_zapis.nahrad_network(text, n['nw'], s7dcl_zapis.text_networku(u['po']))
+        raise s7dcl_write.ChybaZapisu('NW %d je v projektu %s, návrh je %s' % (n['nw'], n['jazyk'] or '?', jazyk))
+    novy = s7dcl_write.nahrad_network(text, n['nw'], s7dcl_write.text_networku(u['po']))
     zpet = s7dcl.parse_blok(novy.replace('\r\n', '\n'))['networky'][n['nw'] - 1]
     if jazyk == 'FBD':
         shoda, rozd = fbd.shoda_obsahu(_bez_nazvu_volani(u['po']), _bez_nazvu_volani(zpet))
     else:
-        shoda, rozd = rozdil.shoda_obsahu(_bez_nazvu_volani(u['po']), _bez_nazvu_volani(zpet))
+        shoda, rozd = diff.shoda_obsahu(_bez_nazvu_volani(u['po']), _bez_nazvu_volani(zpet))
     if not shoda:
-        raise s7dcl_zapis.ChybaZapisu('serializace návrhu nesedí s návrhem: ' + '; '.join(rozd))
+        raise s7dcl_write.ChybaZapisu('serializace návrhu nesedí s návrhem: ' + '; '.join(rozd))
     with open(soubor, 'wb') as f:
         f.write((b'\xef\xbb\xbf' if bom else b'') + novy.encode('utf-8'))
     return 'NW %d „%s" nahrazen modelem „po"%s' % (n['nw'], n['titulek'], '' if n['nw'] == u['nw'] else
@@ -567,15 +567,15 @@ def _cesta_z_textu(t):
 
 def _zapis(data, uid, zapis, novy_stav, kdo):
     """Uloží záznam Upload/Check do u['zapisy'] a při úspěchu změní stav (když ho mezitím nikdo nezměnil)."""
-    with stav.ZAMEK:
-        projekt, s, u = stav.najdi(data, uid)
+    with state.ZAMEK:
+        projekt, s, u = state.najdi(data, uid)
         u.setdefault('zapisy', []).append(zapis)
         if novy_stav:
             try:
-                stav.zmen_stav(u, novy_stav, kdo)
-            except stav.ChybaStavu as e:
+                state.zmen_stav(u, novy_stav, kdo)
+            except state.ChybaStavu as e:
                 zapis['zprava'] += ' · stav nezměněn: %s' % e
-        stav.uloz(data, projekt, s)
+        state.uloz(data, projekt, s)
     return u
 
 
@@ -591,14 +591,14 @@ def _f_uprava(root, u):
 def api_upload(root, data, uid, mcp, timeout=300):
     """Approved ne-safety úprava -> TIAC_Writer: Connect, ResolveObjectPath, export bloku jako dokumenty,
     náhrada networku, PreviewImport, ImportFromDocuments Override -> Signed (kdo TIAC_Writer)."""
-    _, s, u = stav.najdi(data, uid)
+    _, s, u = state.najdi(data, uid)
     if u['stav'] != 'Approved':
-        raise stav.ChybaStavu('Upload jen ve stavu Approved (teď %s)' % u['stav'])
+        raise state.ChybaStavu('Upload jen ve stavu Approved (teď %s)' % u['stav'])
     if _f_uprava(root, u):
-        raise stav.ChybaStavu('F-blok: Upload není — zapisuje Honza podle Postupu pro TIA')
+        raise state.ChybaStavu('F-blok: Upload není — zapisuje Honza podle Postupu pro TIA')
     tia = _tia(s, u['projekt'])
     if not ZAMEK_TIA.acquire(blocking=False):
-        raise stav.ChybaStavu('právě běží jiný Upload / Check — počkej na jeho konec')
+        raise state.ChybaStavu('právě běží jiný Upload / Check — počkej na jeho konec')
     kroky, prac = [], tempfile.mkdtemp(prefix='tiac_upload_')
 
     def krok(nazev, fce):
@@ -623,7 +623,7 @@ def api_upload(root, data, uid, mcp, timeout=300):
                     'softwarePath': sp, 'exportPath': prac, 'regexName': '^%s$' % re.escape(blok), 'preservePath': False}))
                 soubory = glob.glob(os.path.join(prac, '**', blok + '.s7dcl'), recursive=True)
                 if not soubory:
-                    raise s7dcl_zapis.ChybaZapisu('Writer nevyexportoval %s.s7dcl' % blok)
+                    raise s7dcl_write.ChybaZapisu('Writer nevyexportoval %s.s7dcl' % blok)
                 slozka = os.path.dirname(soubory[0])
                 krok('Náhrada networku v .s7dcl', lambda: _nahrad_v_souboru(soubory[0], u))
                 nahled = krok('PreviewImport', lambda: k.zavolej('PreviewImport', {
@@ -632,11 +632,11 @@ def api_upload(root, data, uid, mcp, timeout=300):
                     'softwarePath': sp, 'groupPath': grp, 'importPath': slozka, 'fileNameWithoutExtension': blok,
                     'importOption': 'Override'}))
             ok, zprava = True, 'zapsáno do projektu (%s, skupina %s) — projekt v TIA ulož (SaveProject Writer nevolá)'                 % (sp, grp or '/')
-        except mcp_klient.ChybaMCP as e:
+        except mcp_client.ChybaMCP as e:
             ok, zprava, nahled = False, CHYBA_SPOJENI + str(e), None
-        except (s7dcl_zapis.ChybaZapisu, s7dcl.ChybaParseru, OSError, ValueError) as e:
+        except (s7dcl_write.ChybaZapisu, s7dcl.ChybaParseru, OSError, ValueError) as e:
             ok, zprava, nahled = False, 'Upload zastaven: %s' % e, None
-        zapis = {'cas': stav.ted(), 'nastroj': 'TIAC_Writer', 'kroky': kroky, 'ok': ok, 'zprava': zprava}
+        zapis = {'cas': state.ted(), 'nastroj': 'TIAC_Writer', 'kroky': kroky, 'ok': ok, 'zprava': zprava}
         if nahled is not None:
             zapis['preview'] = nahled[:4000]
         u = _zapis(data, uid, zapis, 'Signed' if ok else None, 'TIAC_Writer')
@@ -657,9 +657,9 @@ def _json_nebo_nic(t):
 def api_check(root, data, uid, mcp, timeout=300):
     """Signed úprava -> TIAC_Reader export_to_folder (blok do nové složky export rootu) -> kontrola exportem
     -> při shodě Checked (kdo TIAC_Reader); při neshodě zůstane Signed a kontrola se zapíše jako neshoda."""
-    projekt, s, u = stav.najdi(data, uid)
+    projekt, s, u = state.najdi(data, uid)
     if u['stav'] != 'Signed':
-        raise stav.ChybaStavu('Check jen ve stavu Signed (teď %s)' % u['stav'])
+        raise state.ChybaStavu('Check jen ve stavu Signed (teď %s)' % u['stav'])
     tia = _tia(s, projekt)
     try:                                              # PLC a skupina z dosavadního exportu bloku
         t0, cesta, _ = najdi_blok(root, projekt, u['blok'])
@@ -669,7 +669,7 @@ def api_check(root, data, uid, mcp, timeout=300):
     if tia.get('groupPath'):
         casti = casti[:2] + [x for x in tia['groupPath'].split('/') if x] + [u['blok']]
     if not ZAMEK_TIA.acquire(blocking=False):
-        raise stav.ChybaStavu('právě běží jiný Upload / Check — počkej na jeho konec')
+        raise state.ChybaStavu('právě běží jiný Upload / Check — počkej na jeho konec')
     kroky, k_vys = [], None
     try:
         pred = set(index_exportu(root).get(projekt, {}))
@@ -689,17 +689,17 @@ def api_check(root, data, uid, mcp, timeout=300):
             nove = set(index_exportu(root).get(projekt, {})) - pred
             ts = [x for x in re.findall(r'\d{8}-\d{6}', ' '.join(texty)) if x in nove] or sorted(nove)
             if not ts:
-                raise s7dcl_zapis.ChybaZapisu('Reader export v export rootu editoru nenašel (%s\\%s) — odpověď: %s'
+                raise s7dcl_write.ChybaZapisu('Reader export v export rootu editoru nenašel (%s\\%s) — odpověď: %s'
                                               % (root, projekt, texty[-1][:300] if texty else ''))
             k_vys = api_kontrola_exportem(root, data, uid, {'export_ts': ts[-1]})
             kroky.append({'krok': 'Kontrola exportem %s' % ts[-1], 'ok': k_vys['shoda'], 'zprava': k_vys['poznamka']})
             ok, zprava = k_vys['shoda'], ('export = návrh' if k_vys['shoda'] else k_vys['poznamka'])
-        except mcp_klient.ChybaMCP as e:
+        except mcp_client.ChybaMCP as e:
             kroky.append({'krok': 'export_to_folder', 'ok': False, 'zprava': str(e)[:1000]})
             ok, zprava = False, CHYBA_SPOJENI + str(e)
-        except (s7dcl_zapis.ChybaZapisu, s7dcl.ChybaParseru, KeyError, OSError) as e:
+        except (s7dcl_write.ChybaZapisu, s7dcl.ChybaParseru, KeyError, OSError) as e:
             ok, zprava = False, 'Check zastaven: %s' % str(e).strip("'")
-        zapis = {'cas': stav.ted(), 'nastroj': 'TIAC_Reader', 'kroky': kroky, 'ok': ok, 'zprava': zprava}
+        zapis = {'cas': state.ted(), 'nastroj': 'TIAC_Reader', 'kroky': kroky, 'ok': ok, 'zprava': zprava}
         u = _zapis(data, uid, zapis, 'Checked' if ok else None, 'TIAC_Reader')
     finally:
         ZAMEK_TIA.release()
@@ -780,7 +780,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(api_kontrola(self.data, self._telo()))
             else:
                 self._json({'chyba': 'nenalezeno'}, 404)
-        except stav.ChybaStavu as e:
+        except state.ChybaStavu as e:
             self._json({'chyba': str(e)}, e.kod)
         except KeyError as e:
             self._json({'chyba': str(e).strip("'")}, 404)
@@ -804,10 +804,10 @@ def vytvor_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300)
 
 def mcp_konfigurace(mcp_json, writer_cmd=None, reader_cmd=None):
     """Příkazy Writeru / Readeru: z .mcp.json (klíče TIAC_Writer, tia-portal), přebité --writer-cmd / --reader-cmd."""
-    return {'writer': (mcp_klient.prikaz_z_textu(writer_cmd), None) if writer_cmd
-            else mcp_klient.z_mcp_json(mcp_json, 'TIAC_Writer'),
-            'reader': (mcp_klient.prikaz_z_textu(reader_cmd), None) if reader_cmd
-            else mcp_klient.z_mcp_json(mcp_json, 'tia-portal')}
+    return {'writer': (mcp_client.prikaz_z_textu(writer_cmd), None) if writer_cmd
+            else mcp_client.z_mcp_json(mcp_json, 'TIAC_Writer'),
+            'reader': (mcp_client.prikaz_z_textu(reader_cmd), None) if reader_cmd
+            else mcp_client.z_mcp_json(mcp_json, 'tia-portal')}
 
 
 def main():
@@ -817,7 +817,7 @@ def main():
     ap.add_argument('--data', required=True, help='složka dat úprav: <data>\\<projekt>\\stav.json')
     ap.add_argument('--mcp-json', default=r'.mcp.json',
                     help='odkud vzít příkazy TIAC_Writer a tia-portal (Reader); soubor se jen čte')
-    ap.add_argument('--writer-cmd', help='příkaz Writeru místo .mcp.json (např. "python tests\\falesny_mcp.py writer")')
+    ap.add_argument('--writer-cmd', help='příkaz Writeru místo .mcp.json (např. "python tests\\fake_mcp.py writer")')
     ap.add_argument('--reader-cmd', help='příkaz Readeru místo .mcp.json')
     ap.add_argument('--mcp-timeout', type=int, default=300, help='timeout jednoho volání nástroje (s)')
     a = ap.parse_args()

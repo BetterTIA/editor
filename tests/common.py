@@ -5,7 +5,7 @@ import sys
 KOREN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if KOREN not in sys.path:
     sys.path.insert(0, KOREN)
-VZORKY = os.path.join(KOREN, 'tests', 'vzorky')
+VZORKY = os.path.join(KOREN, 'tests', 'samples')
 PROJEKT = 'Demo_Linka'
 TS0 = '20261012-120000'      # původní export (20261012-140000 = export po zápisu úpravy NW1)
 TS1 = '20261012-140000'

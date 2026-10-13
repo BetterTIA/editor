@@ -21,12 +21,12 @@ import time
 from datetime import datetime, timedelta
 
 KOREN = os.path.dirname(os.path.abspath(__file__))
-VZOREK = os.path.join(KOREN, 'vzorky', 'Demo_Linka', '20261012-120000', 'PLC_1', 'Blocks')
+VZOREK = os.path.join(KOREN, 'samples', 'Demo_Linka', '20261012-120000', 'PLC_1', 'Blocks')
 
 
 def najdi(a, blok):
     """-> (složka s <blok>.s7dcl, skupina relativně k Blocks)"""
-    for zdroj in (a.stav, a.vzorek):
+    for zdroj in (a.state, a.vzorek):
         x = glob.glob(os.path.join(zdroj, '**', blok + '.s7dcl'), recursive=True)
         if x:
             d = os.path.dirname(x[0])
@@ -60,9 +60,9 @@ def writer(a, jm, arg):
         return json.dumps({'groupPath': arg['groupPath'], 'overwrite': bloky})
     if jm == 'ImportFromDocuments':
         blok = arg['fileNameWithoutExtension']
-        cil = os.path.join(a.stav, *[x for x in arg['groupPath'].split('/') if x])
+        cil = os.path.join(a.state, *[x for x in arg['groupPath'].split('/') if x])
         kopiruj(arg['importPath'], cil, blok)
-        with open(os.path.join(a.stav, 'importy.jsonl'), 'a', encoding='utf-8') as f:
+        with open(os.path.join(a.state, 'importy.jsonl'), 'a', encoding='utf-8') as f:
             f.write(json.dumps(dict(arg, soubor=os.path.join(cil, blok + '.s7dcl')), ensure_ascii=False) + '\n')
         return 'Imported %s (%s)' % (blok, arg.get('importOption'))
     raise ValueError('nástroj %s falešný Writer nezná' % jm)
@@ -92,14 +92,14 @@ def reader(a, jm, arg):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('role', choices=['writer', 'reader'])
-    ap.add_argument('--stav', default=os.path.join(tempfile.gettempdir(), 'tiac_falesny_tia'))
+    ap.add_argument('--state', default=os.path.join(tempfile.gettempdir(), 'tiac_falesny_tia'))
     ap.add_argument('--vzorek', default=VZOREK)
     ap.add_argument('--export-root')
     ap.add_argument('--projekt', default='Demo_Linka')
     ap.add_argument('--vice-instanci', action='store_true')
     ap.add_argument('--pomalu', type=float, default=0)
     a = ap.parse_args()
-    os.makedirs(a.stav, exist_ok=True)
+    os.makedirs(a.state, exist_ok=True)
     fce = writer if a.role == 'writer' else reader
     for radek in sys.stdin.buffer:
         if not radek.strip():

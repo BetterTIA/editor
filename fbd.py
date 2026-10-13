@@ -238,17 +238,17 @@ def over_model(po):
 
 def _cyklus(prvky):
     P = {p['id']: p for p in prvky}
-    stav = {}
+    state = {}
 
     def dfs(i):
-        stav[i] = 1
+        state[i] = 1
         for v in P[i]['vstupy']:
             s = v.get('signal')
-            if s in P and (stav.get(s) == 1 or (s not in stav and dfs(s))):
+            if s in P and (state.get(s) == 1 or (s not in state and dfs(s))):
                 return True
-        stav[i] = 2
+        state[i] = 2
         return False
-    return any(i not in stav and dfs(i) for i in P)
+    return any(i not in state and dfs(i) for i in P)
 
 
 # ---------- operace (API i editor) ----------
@@ -803,12 +803,12 @@ def rozloz(prvky, min_sirka=0):
             s = v.get('signal')
             if s and rodic.get(s) != (p['id'], i) and strom_boxu[s] != strom_boxu[p['id']]:
                 zavislosti[strom_boxu[p['id']]].append(strom_boxu[s])
-    poradi, stav = [], {}
+    poradi, state = [], {}
 
     def navstiv(k):
-        if k in stav:
+        if k in state:
             return
-        stav[k] = 1
+        state[k] = 1
         for d in zavislosti[k]:
             navstiv(d)
         poradi.append(k)

@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0
+from tests.common import VZORKY, PROJEKT, TS0
 import s7dcl
 import server
 

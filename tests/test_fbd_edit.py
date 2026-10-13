@@ -9,16 +9,16 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0, TS2, po_nw2
+from tests.common import VZORKY, PROJEKT, TS0, TS2, po_nw2
 import fbd
-import katalog
-import kontrola
+import catalog
+import check
 import layout
-import postup
+import procedure
 import server
 
 BLOK = 'FB_Bezpecnost'
-KAT = katalog.katalog(VZORKY, PROJEKT)
+KAT = catalog.catalog(VZORKY, PROJEKT)
 
 
 def nw(n, ts=TS0):
@@ -32,7 +32,7 @@ def m(n, ts=TS0):
 
 def op(model, *ops):
     for o in ops:
-        model, _ = fbd.proved(model, o, lambda k: katalog.prvek(KAT, k))
+        model, _ = fbd.proved(model, o, lambda k: catalog.prvek(KAT, k))
     return model
 
 
@@ -74,11 +74,11 @@ class TestOperace(unittest.TestCase):
 
     def test_vloz_volani_z_katalogu(self):
         x, i = fbd.proved(m(1), {'typ': 'vloz_volani', 'prvek': 'fb:FB_Pas', 'instance': '"DB_Pas1"'},
-                          lambda k: katalog.prvek(KAT, k), True)
+                          lambda k: catalog.prvek(KAT, k), True)
         p = P(x)[i]
         self.assertEqual((p['typ'], p['nazev'], p['instance']), ('volani', 'FB_Pas', '"DB_Pas1"'))
         self.assertNotIn('EN', [v['pin'] for v in p['vstupy']])               # v F-bloku EN není
-        x, i = fbd.proved(m(1), {'typ': 'vloz_box', 'prvek': 'MOVE'}, lambda k: katalog.prvek(KAT, k))
+        x, i = fbd.proved(m(1), {'typ': 'vloz_box', 'prvek': 'MOVE'}, lambda k: catalog.prvek(KAT, k))
         self.assertEqual([v['pin'] for v in P(x)[i]['vstupy']], ['EN', 'IN'])
         with self.assertRaises(fbd.ChybaOperace):
             fbd.proved(m(1), {'typ': 'vloz_volani', 'prvek': 'AND'})
@@ -153,7 +153,7 @@ class TestPostup(unittest.TestCase):
                 {'typ': 'zmen_operand', 'id': 'n1', 'operand': '#Pamet'})
         u = {'id': 'U009', 'druh': 'FB', 'cislo_bloku': 30, 'blok': BLOK, 'nw': 1, 'titulek': nw(1)['titulek'], 'f': True,
              'pred': pred, 'po': po}
-        p = postup.postup(u)
+        p = procedure.procedure(u)
         self.assertEqual(p['hlavicka'], 'FB30 "FB_Bezpecnost" · NW 1: Povolení — >=1, & s negací, přiřazení')
         self.assertTrue(p['markdown'].startswith('### Postup pro TIA — FB30 "FB_Bezpecnost" · NW 1: '))
         t = '\n'.join(p['kroky'])
@@ -163,14 +163,14 @@ class TestPostup(unittest.TestCase):
             self.assertIn(s, t)
         self.assertNotIn('Ctrl+Shift+5', t)
         u['po'] = op(pred, {'typ': 'smaz', 'id': 'b1'})
-        self.assertIn('Vyber box `>=1` (vstupy `#Start`, `#Servis`) a smaž ho: pravý klik → **Delete**', postup.postup(u)['markdown'])
+        self.assertIn('Vyber box `>=1` (vstupy `#Start`, `#Servis`) a smaž ho: pravý klik → **Delete**', procedure.procedure(u)['markdown'])
 
     def test_lad(self):
         _, b = server._nacti(VZORKY, PROJEKT, 'FB_Dopravnik', TS0)
         n = b['networky'][1]
         u = {'id': 'U010', 'druh': 'FB', 'cislo_bloku': 10, 'blok': 'FB_Dopravnik', 'nw': 2, 'titulek': n['titulek'],
              'pred': {'prvky': n['prvky'], 'rungy': n['rungy']}, 'po': po_nw2(n)}
-        p = postup.postup(u)
+        p = procedure.procedure(u)
         self.assertEqual(p['hlavicka'], 'FB10 "FB_Dopravnik" · NW 2: Samodrž motoru')
         t = '\n'.join(p['kroky'])
         self.assertIn('Vlož `-| |- "Pojistka_OK"`', t)
@@ -236,10 +236,10 @@ class TestApiF2(unittest.TestCase):
         self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Approved', 'kdo': 'test'})
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            kod = kontrola.main(['--server', 'http://127.0.0.1:%d' % self.port, '--uprava', uid, '--export-ts', TS0])
+            kod = check.main(['--server', 'http://127.0.0.1:%d' % self.port, '--uprava', uid, '--export-ts', TS0])
         self.assertEqual(kod, 1)                                               # starý export = neshoda
         with contextlib.redirect_stdout(out):
-            kod = kontrola.main(['--server', 'http://127.0.0.1:%d' % self.port, '--uprava', uid])
+            kod = check.main(['--server', 'http://127.0.0.1:%d' % self.port, '--uprava', uid])
         self.assertEqual(kod, 0, out.getvalue())                               # export po zápisu (TS2) = shoda
         s, x = self.req('POST', '/api/uprava/%s/stav' % uid, {'stav': 'Signed', 'kdo': 'test'})
         self.assertEqual((s, x['stav']), (200, 'Signed'))
@@ -247,7 +247,7 @@ class TestApiF2(unittest.TestCase):
         self.assertEqual((s, x['stav']), (200, 'Checked'))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(kontrola.main(['--server', 'http://127.0.0.1:%d' % self.port, '--postup', uid]), 0)
+            self.assertEqual(check.main(['--server', 'http://127.0.0.1:%d' % self.port, '--postup', uid]), 0)
         self.assertTrue(out.getvalue().startswith('### Postup pro TIA — FB30'))
 
     def test_network_jako_lad_a_f(self):

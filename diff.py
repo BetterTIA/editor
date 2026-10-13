@@ -12,18 +12,18 @@ def _klic(p):
 def porovnej(pred, po):
     """-> (rozdil {id: 'pridany'|'zmeneny'}, smazane [id v pred])"""
     P = {p['id']: p for p in pred.get('prvky', [])}
-    rozdil, smazane = {}, []
+    diff, smazane = {}, []
     Q = {q['id']: q for q in po.get('prvky', [])}
     for i, q in Q.items():
         p = P.get(i)
         if p is None or p['typ'] != q['typ']:
-            rozdil[i] = 'pridany'
+            diff[i] = 'pridany'
         elif _klic(p) != _klic(q):
-            rozdil[i] = 'zmeneny'
+            diff[i] = 'zmeneny'
     for i, p in P.items():
         if i not in Q or Q[i]['typ'] != p['typ']:
             smazane.append(i)
-    return rozdil, smazane
+    return diff, smazane
 
 
 def _uzly(rungy):

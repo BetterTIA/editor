@@ -13,12 +13,12 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import KOREN, VZORKY, PROJEKT, TS0
-import kontrola
+from tests.common import KOREN, VZORKY, PROJEKT, TS0
+import check
 import s7dcl
 import server
 
-FALESNY = os.path.join(KOREN, 'tests', 'falesny_mcp.py')
+FALESNY = os.path.join(KOREN, 'tests', 'fake_mcp.py')
 TIA = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
 
 
@@ -30,8 +30,8 @@ class TestUploadCheck(unittest.TestCase):
 
     def spust(self, *writer_navic):
         py = sys.executable
-        mcp = {'writer': ([py, FALESNY, 'writer', '--stav', self.tia] + list(writer_navic), None),
-               'reader': ([py, FALESNY, 'reader', '--stav', self.tia, '--export-root', self.root, '--projekt', PROJEKT], None)}
+        mcp = {'writer': ([py, FALESNY, 'writer', '--state', self.tia] + list(writer_navic), None),
+               'reader': ([py, FALESNY, 'reader', '--state', self.tia, '--export-root', self.root, '--projekt', PROJEKT], None)}
         self.srv = server.vytvor_server(0, self.root, self.data, mcp=mcp, mcp_timeout=30)
         self.url = 'http://127.0.0.1:%d' % self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
@@ -59,7 +59,7 @@ class TestUploadCheck(unittest.TestCase):
         st['tia'] = tia
         self.assertEqual(self.req('PUT', '/api/stav?projekt=%s' % PROJEKT, st)[0], 200)
 
-    def navrh(self, blok='FB_Dopravnik', nw=1, ops=None, stav='Approved'):
+    def navrh(self, blok='FB_Dopravnik', nw=1, ops=None, state='Approved'):
         _, net = self.req('GET', '/api/network?projekt=%s&blok=%s&nw=%d' % (PROJEKT, blok, nw))
         po = {'jazyk': 'FBD', 'prvky': net['prvky']} if net['jazyk'] == 'FBD' else {'prvky': net['prvky'], 'rungy': net['rungy']}
         if ops:
@@ -68,7 +68,7 @@ class TestUploadCheck(unittest.TestCase):
             po = r['po']
         s, u = self.req('POST', '/api/uprava', {'projekt': PROJEKT, 'kolo': 'M5', 'blok': blok, 'nw': nw, 'po': po})
         self.assertEqual(s, 201, u)
-        if stav != 'Proposal':
+        if state != 'Proposal':
             self.req('POST', '/api/uprava/%s/stav' % u['id'], {'stav': 'Approved'})
         return u['id']
 
@@ -91,7 +91,7 @@ class TestUploadCheck(unittest.TestCase):
         self.assertIn('F-blok', e['chyba'])
         s, e = self.req('POST', '/api/uprava/%s/check' % uid)                 # Check jen u Signed
         self.assertEqual(s, 409)
-        uid_p = self.navrh(stav='Proposal')
+        uid_p = self.navrh(state='Proposal')
         self.assertEqual(self.req('POST', '/api/uprava/%s/upload' % uid_p)[0], 409)
         self.assertFalse(os.path.exists(os.path.join(self.tia, 'importy.jsonl')))       # nic se nezapsalo
         _, st = self.req('GET', '/api/stav?projekt=%s' % PROJEKT)
@@ -142,13 +142,13 @@ class TestUploadCheck(unittest.TestCase):
         self.assertEqual(s, 409)                                                 # Checked bez poslední shody
         out = io.StringIO()                                                      # CLI --check: neshoda = exit 1
         with contextlib.redirect_stdout(out):
-            self.assertEqual(kontrola.main(['--server', self.url, '--check', uid]), 1)
+            self.assertEqual(check.main(['--server', self.url, '--check', uid]), 1)
         self.assertTrue(out.getvalue().startswith('NESHODA %s · stav Signed' % uid))
         with open(soubor, 'w', encoding='utf-8') as f:                           # oprava v TIA -> Check projde
             f.write(t)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(kontrola.main(['--server', self.url, '--check', uid]), 0)
+            self.assertEqual(check.main(['--server', self.url, '--check', uid]), 0)
         self.assertTrue(out.getvalue().startswith('CHECKED %s · stav Checked' % uid))
 
     def test_tia_zaneprazdnene(self):

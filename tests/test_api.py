@@ -7,9 +7,9 @@ import threading
 import unittest
 from urllib.parse import quote
 
-from tests.spolecne import VZORKY, PROJEKT
+from tests.common import VZORKY, PROJEKT
 import server
-import snimek
+import screenshot
 
 
 class TestApi(unittest.TestCase):
@@ -78,11 +78,11 @@ class TestApi(unittest.TestCase):
         self.assertIn('text/html', t)
         self.assertIn(b'TIAC_Editor', b)
 
-    @unittest.skipUnless(any(os.path.exists(p) for p in snimek.PROHLIZECE), 'chybí Chrome/Edge')
+    @unittest.skipUnless(any(os.path.exists(p) for p in screenshot.PROHLIZECE), 'chybí Chrome/Edge')
     def test_snimek(self):
         d = tempfile.mkdtemp()
         try:
-            out = snimek.snimek('http://127.0.0.1:%d/?projekt=%s&blok=FB_Dopravnik&nw=2&snimek=1' % (self.port, PROJEKT),
+            out = screenshot.screenshot('http://127.0.0.1:%d/?projekt=%s&blok=FB_Dopravnik&nw=2&snimek=1' % (self.port, PROJEKT),
                                 os.path.join(d, 's.png'), 900, 400)
             with open(out, 'rb') as f:
                 self.assertEqual(f.read(8), b'\x89PNG\r\n\x1a\n')

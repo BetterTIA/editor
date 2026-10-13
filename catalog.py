@@ -165,7 +165,7 @@ def sablona_bloku(b, instance=''):
             'vystupy': [{'pin': x['jmeno'], 'operand': ''} for x in s.get('vystupy', [])]}
 
 
-def katalog(root, projekt):
+def catalog(root, projekt):
     bloky, dbs = [], []
     for _, cesta in sorted(_nejnovejsi(root, projekt, '.s7dcl').items()):
         r = _cti_cache(cesta, lambda c: rozhrani(s7dcl.cti(c)))

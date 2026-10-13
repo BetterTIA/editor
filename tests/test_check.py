@@ -10,10 +10,10 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0, TS1
-import kontrola
+from tests.common import VZORKY, PROJEKT, TS0, TS1
+import check
 import model
-import rozdil
+import diff
 import server
 
 DOP = os.path.join('PLC_1', 'Blocks', 'Dopravnik')
@@ -32,14 +32,14 @@ class TestShodaObsahu(unittest.TestCase):
     def test_id_a_jmena_uzlu_nevadi(self):
         a = self.nw(2)
         b = json.loads(re.sub(r'"p(\d+)"', r'"q\1"', json.dumps(a)).replace('wire#w1', 'wire#w7').replace('"w1"', '"w7"'))
-        self.assertEqual(rozdil.shoda_obsahu(a, b), (True, []))
+        self.assertEqual(diff.shoda_obsahu(a, b), (True, []))
 
     def test_topologie(self):
         a = self.nw(1)
         b = json.loads(json.dumps(a))
         b['rungy'][0]['cesta'] = ['p1', 'wire#w1', 'p3', 'p4']               # p2 paralelně k p1 místo do série
         b['rungy'].append({'z': 'powerrail', 'cesta': ['p2'], 'do': 'w1'})
-        shoda, r = rozdil.shoda_obsahu(a, b)
+        shoda, r = diff.shoda_obsahu(a, b)
         self.assertFalse(shoda)
         self.assertIn('liší se zapojení', r[0])
 
@@ -47,7 +47,7 @@ class TestShodaObsahu(unittest.TestCase):
         a = self.nw(4)
         b = json.loads(json.dumps(a))
         b['prvky'][1]['vstupy'][1]['operand'] = '#Jiny'
-        shoda, r = rozdil.shoda_obsahu(a, b)
+        shoda, r = diff.shoda_obsahu(a, b)
         self.assertEqual(r, ['jiné piny FB_Pas "DB_Pas1": Smer #Smer → #Jiny'])
 
     def test_vetev_bez_prvku_v_hlavni_ceste(self):
@@ -93,7 +93,7 @@ class TestKontrolaExportem(unittest.TestCase):
     def cli(self, *arg):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            kod = kontrola.main(['--server', self.url] + list(arg))
+            kod = check.main(['--server', self.url] + list(arg))
         return kod, out.getvalue()
 
     def test_scenar(self):

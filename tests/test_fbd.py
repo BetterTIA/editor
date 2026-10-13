@@ -7,9 +7,9 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0, TS2
+from tests.common import VZORKY, PROJEKT, TS0, TS2
 import fbd
-import rozdil
+import diff
 import s7dcl
 import server
 
@@ -177,7 +177,7 @@ class TestOperaceARozdilFBD(unittest.TestCase):
         po['prvky'] = [p for p in po['prvky'] if p['id'] != 'b4']               # smazaná červená kontrolka
         po['prvky'].append({'id': 'n1', 'typ': 'assign', 'operand': '#X', 'vystupy': [],
                             'vstupy': [{'n': 1, 'pin': 'in1', 'operand': '', 'signal': 'b2', 'neg': False}]})
-        zmeny, smazane = rozdil.porovnej(pred, po)
+        zmeny, smazane = diff.porovnej(pred, po)
         self.assertEqual((zmeny, smazane), ({'b1': 'zmeneny', 'n1': 'pridany'}, ['b4']))
         self.assertEqual(fbd.zmeny_pinu(pred, po, {'b1'}), {'b1': {'vstupy': [3], 'vystupy': [], 'nad': False}})
         prvky = fbd.slouc(pred, po, smazane)

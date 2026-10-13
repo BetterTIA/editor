@@ -1,6 +1,6 @@
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0
+from tests.common import VZORKY, PROJEKT, TS0
 import layout
 import server
 

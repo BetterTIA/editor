@@ -4,7 +4,7 @@ Hlavička vždy `<druh><číslo> "<blok>" · NW <n>: <titulek>` (pravidlo Honzy 
 v lokální nápovědě TIA V21 (nota TIAC_Editor §5b, tabulka POVELY se zdrojem); co ověřené není, je slovy s ⟦neověřeno⟧.
 """
 import model
-import rozdil
+import diff
 import fbd
 
 N = '⟦neověřeno⟧'
@@ -196,7 +196,7 @@ def kroky_fbd(u):
 
 def kroky_lad(u):
     pred, po = u['pred'], u['po']
-    zmeny, smazane = rozdil.porovnej(pred, po)
+    zmeny, smazane = diff.porovnej(pred, po)
     P = {p['id']: p for p in pred['prvky']}
     Q = {p['id']: p for p in po['prvky']}
     kroky = ['Vyber prvek %s a smaž ho (`Delete`) %s.' % (_c(model._jmeno(P[i])), N) for i in smazane]
@@ -223,7 +223,7 @@ def kroky_lad(u):
     return kroky
 
 
-def postup(u):
+def procedure(u):
     """-> {hlavicka, kroky, markdown} pro úpravu (LAD i FBD)."""
     hl = hlavicka(u)
     vnitrek = kroky_fbd(u) if fbd.je_fbd(u['po']) else kroky_lad(u)

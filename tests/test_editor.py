@@ -6,8 +6,8 @@ import tempfile
 import threading
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0
-import katalog
+from tests.common import VZORKY, PROJEKT, TS0
+import catalog
 import layout
 import model
 import server
@@ -19,7 +19,7 @@ def nw(n):
     return {'prvky': x['prvky'], 'rungy': x['rungy']}
 
 
-KAT = katalog.katalog(VZORKY, PROJEKT)
+KAT = catalog.catalog(VZORKY, PROJEKT)
 
 
 class TestKatalog(unittest.TestCase):
@@ -50,24 +50,24 @@ class TestKatalog(unittest.TestCase):
         for k in ('NO', 'NC', 'P', 'N', 'C', 'S', 'R', 'NEG', 'EQ', 'LE', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'MOVE',
                   'ADD', 'SUB', 'MUL', 'DIV', 'IN_RANGE', 'CONV', 'SWAP', 'P_TRIG', 'N_TRIG', 'RET'):
             self.assertIn(k, klice)
-        ton = katalog.prvek(KAT, 'TON')
+        ton = catalog.prvek(KAT, 'TON')
         self.assertEqual((ton['napajeni'], ton['vstupy'][0]['pin'], ton['sablona']), (['IN', 'Q'], 'PT', 'Time'))
         with self.assertRaises(KeyError):
-            katalog.prvek(KAT, 'fb:Neni')
+            catalog.prvek(KAT, 'fb:Neni')
 
 
 class TestOperace(unittest.TestCase):
     def test_vlozeni_do_serie(self):
-        m, i = model.vloz(nw(1), {'r': 0, 'k': 3}, katalog.prvek(KAT, 'NO'))
+        m, i = model.vloz(nw(1), {'r': 0, 'k': 3}, catalog.prvek(KAT, 'NO'))
         self.assertEqual(i, 'n1')
         self.assertEqual(m['rungy'][0]['cesta'], ['p1', 'p2', 'p3', 'n1', 'p4'])
-        self.assertEqual(model.vloz(m, {'r': 0, 'k': 0}, katalog.prvek(KAT, 'NC'))[1], 'n2')
+        self.assertEqual(model.vloz(m, {'r': 0, 'k': 0}, catalog.prvek(KAT, 'NC'))[1], 'n2')
         layout.rozloz(m['rungy'], m['prvky'])
         with self.assertRaises(model.ChybaOperace):
-            model.vloz(nw(1), {'r': 0, 'k': 9}, katalog.prvek(KAT, 'NO'))
+            model.vloz(nw(1), {'r': 0, 'k': 9}, catalog.prvek(KAT, 'NO'))
 
     def test_vystupni_vetev_s_fb(self):
-        m, i = model.vetev(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, katalog.prvek(KAT, 'fb:FB_Pas'))
+        m, i = model.vetev(nw(1), {'r': 0, 'k': 3}, {'r': 0, 'k': 4}, catalog.prvek(KAT, 'fb:FB_Pas'))
         self.assertEqual(m['rungy'][0]['cesta'], ['p1', 'p2', 'p3', 'wire#w1', 'p4'])
         self.assertEqual(m['rungy'][1], {'z': 'w1', 'cesta': [i], 'do': None})
         self.assertEqual(model.validuj(m), [])                             # box ve výstupní větvi smí
@@ -75,7 +75,7 @@ class TestOperace(unittest.TestCase):
         self.assertGreater(r[i]['r'], r['p4']['r'])
 
     def test_zavrena_vetev_a_smazani(self):
-        m, i = model.vetev(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, katalog.prvek(KAT, 'NO'))
+        m, i = model.vetev(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.prvek(KAT, 'NO'))
         self.assertEqual(m['rungy'][0]['cesta'], ['p1', 'wire#w2', 'p2', 'wire#w1', 'p3', 'p4'])
         self.assertEqual(m['rungy'][1], {'z': 'w2', 'cesta': [i], 'do': 'w1'})
         r, _ = layout.rozloz(m['rungy'], m['prvky'])
@@ -121,11 +121,11 @@ class TestValidace(unittest.TestCase):
             self.assertEqual(model.validuj(nw(n)), [], 'NW%d' % n)
 
     def test_box_ve_vetvi(self):
-        m, i = model.vetev(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, katalog.prvek(KAT, 'fb:FB_Pas'))
+        m, i = model.vetev(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.prvek(KAT, 'fb:FB_Pas'))
         ch = model.validuj(m)
         self.assertEqual([c['id'] for c in ch], [i])
         self.assertIn('paralelní větve', ch[0]['chyba'])
-        m, i = model.vloz(nw(2), {'r': 0, 'k': 0}, katalog.prvek(KAT, 'MOVE'))   # hlavní větev uvnitř paralely
+        m, i = model.vloz(nw(2), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'MOVE'))   # hlavní větev uvnitř paralely
         self.assertTrue(any('paralelní větve' in c for c in self.chyby(m)))
 
     def test_civka_uprostred(self):
@@ -134,12 +134,12 @@ class TestValidace(unittest.TestCase):
         self.assertIn('není na konci', self.chyby(m)[0])
 
     def test_operandy_a_napajeni(self):
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, katalog.prvek(KAT, 'GT'))
+        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'GT'))
         self.assertTrue(any('oba operandy' in c for c in self.chyby(m)))
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, katalog.prvek(KAT, 'TON'))
+        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'TON'))
         ch = self.chyby(m)
         self.assertTrue(any('Chybí instance' in c for c in ch) and any('Chybí PT' in c for c in ch))
-        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, katalog.prvek(KAT, 'NO'))
+        m, _ = model.vloz(nw(1), {'r': 0, 'k': 0}, catalog.prvek(KAT, 'NO'))
         self.assertTrue(any('Chybí operand' in c for c in self.chyby(m)))
         m = nw(1)
         m['rungy'].append({'z': 'w9', 'cesta': ['p1'], 'do': None})

@@ -5,17 +5,17 @@ import glob
 import os
 import unittest
 
-from tests.spolecne import VZORKY, PROJEKT, TS0
+from tests.common import VZORKY, PROJEKT, TS0
 import fbd
 import model
-import rozdil
+import diff
 import s7dcl
-import s7dcl_zapis as z
+import s7dcl_write as z
 import server
 
 
 def shoda(a, b):
-    return fbd.shoda_obsahu(a, b) if a['jazyk'] == 'FBD' else rozdil.shoda_obsahu(a, b)
+    return fbd.shoda_obsahu(a, b) if a['jazyk'] == 'FBD' else diff.shoda_obsahu(a, b)
 
 
 def reparse(nw):
@@ -93,7 +93,7 @@ class TestModelyZEditoru(unittest.TestCase):
         self.assertIn('Convert(\n                in := #A,\n                out => #B', t)
         r = reparse(m)
         self.assertEqual(r['prvky'][0]['instance'], '"FC_Vetve"')          # parser: volání; server ho dohledá jako FC
-        self.assertEqual(rozdil.shoda_obsahu({'prvky': m['prvky'][1:], 'rungy': []},
+        self.assertEqual(diff.shoda_obsahu({'prvky': m['prvky'][1:], 'rungy': []},
                                              {'prvky': r['prvky'][1:], 'rungy': []}), (True, []))
 
     def test_fbd_operace(self):

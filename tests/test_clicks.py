@@ -14,11 +14,11 @@ import time
 import unittest
 import urllib.request
 
-from tests.spolecne import VZORKY, PROJEKT, TS0
+from tests.common import VZORKY, PROJEKT, TS0
 import server
-import snimek
+import screenshot
 
-CHROME = next((p for p in snimek.PROHLIZECE if os.path.exists(p)), None)
+CHROME = next((p for p in screenshot.PROHLIZECE if os.path.exists(p)), None)
 
 
 class WS:
