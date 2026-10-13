@@ -3,7 +3,7 @@ a náhrada textu jednoho networku v souboru bloku (M5, Upload přes TIAC_Writer)
 
 Tvar textu kopíruje exporty V21 ve vzorcích (odsazení 4 mezery, RUNG/END_RUNG, `wire#wN`, `Contact( x )`,
 volání s `:=` / `=>`, `{ S7_Templates := … }`, FBD `A( in2 := … )`, `NOT` před prvkem). Ověřené je jen to, že
-vlastní parser (`s7dcl.py`, `fbd.py`) text přečte na shodný obsah — ne že ho TIA importuje (viz ANET.md, M5).
+vlastní parser (`s7dcl.py`, `fbd.py`) text přečte na shodný obsah — ne že ho TIA importuje (viz docs/reference.cs.md, M5).
 """
 import re
 

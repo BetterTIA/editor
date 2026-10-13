@@ -1,4 +1,4 @@
-# TIAC_Editor — ANET.md
+# BetterTIA Editor — reference (česky)
 
 Lokální prohlížeč a editor LAD networků (FBD od F1/F2: prohlížení, editor, kontrola, postup pro TIA) z exportu Readeru (`.s7dcl` + `.s7res`). Bez instalací: Python 3 stdlib, vanilla JS + SVG, headless Chrome na snímky.
 
