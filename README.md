@@ -14,8 +14,7 @@ It is the third tool of the BetterTIA set:
 | **editor** (this repository) | draws a network from the export, lets you compose a change and tracks it until it is in the project |
 
 > Status: early and experimental. Everything here is tested against the bundled sample project only;
-> writing a network back to a live TIA Portal has not been verified yet. The UI, the code comments and the
-> detailed reference are in Czech.
+> writing a network back to a live TIA Portal has not been verified yet.
 
 ## What it does
 
@@ -39,14 +38,14 @@ It is the third tool of the BetterTIA set:
 ## Run
 
 ```
-python server.py --port 8765 --export-root tests\vzorky --data data
+python server.py --port 8765 --export-root tests\samples --data data
 ```
 
 Then open `http://localhost:8765/`. The server listens on `127.0.0.1` only.
 
 - `--export-root` is a folder laid out as `<project>\<timestamp>\<PLC>\Blocks\…\<block>.s7dcl`, which is
-  what the reader's `export_to_folder` produces. `tests\vzorky` holds a made-up sample project.
-- `--data` is where the changes are stored (`<data>\<project>\stav.json`).
+  what the reader's `export_to_folder` produces. `tests\samples` holds a made-up sample project.
+- `--data` is where the changes are stored (`<data>\<project>\state.json`).
 - `--mcp-json`, `--writer-cmd`, `--reader-cmd` configure the optional Upload and Check.
 
 ## Tests
@@ -57,8 +56,18 @@ python -m unittest discover -s tests
 
 ## Documentation
 
-The full reference (API, data model, grammar notes, milestones) is in
-[docs/reference.cs.md](docs/reference.cs.md), in Czech.
+The full reference (API, data model, editor operations, grammar notes) is in [docs/reference.md](docs/reference.md).
+
+Two small command-line helpers talk to a running server:
+
+```
+python check.py --server http://localhost:8765 --edit <id> [--export-ts <ts>] | --check <id> | --procedure <id>
+python screenshot.py --url <url> --out <png> [--width <px> --height <px>]
+```
+
+`check.py --edit` compares a fresh export with the change (exit 0 match, 1 mismatch, 2 error), `--check` runs the
+Reader-based Check, `--procedure` prints the step-by-step instructions for TIA Portal. `screenshot.py` saves a page
+as PNG with headless Chrome or Edge.
 
 ## Safety
 
