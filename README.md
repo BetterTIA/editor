@@ -28,7 +28,8 @@ It is the third tool of the BetterTIA set:
 - "Export = proposal" check: compares a fresh export with the approved change.
 - Optional `Upload` (through the writer) and `Check` (through the reader) for non-safety blocks. Networks of
   fail-safe blocks are never uploaded; they are changed by hand.
-- A small HTTP API, so an AI assistant can read the state, propose a change and take a screenshot.
+- An MCP server (`mcp_server.py`), so an AI agent can read projects and networks, propose a change, check an export
+  and take a screenshot — on top of a small HTTP API.
 
 ## Requirements
 
@@ -65,6 +66,29 @@ registers it as the project's newest export, which the networks are drawn from.
 > mismatch instead of guessing.
 
 ![Home page](tests/screenshots/home_tia_attached.png)
+
+## Connect an AI agent
+
+Start the editor, then let your MCP client start `mcp_server.py` (it talks to the running editor over HTTP):
+
+```json
+{ "mcpServers": { "bettertia-editor": { "command": "python", "args": ["mcp_server.py", "--server", "http://localhost:8765"] } } }
+```
+
+That is `.mcp.json` for Claude Code or `.cursor/mcp.json` for Cursor; any other client runs
+`python mcp_server.py --server http://localhost:8765` as a stdio server. Use the full path of `mcp_server.py` when the
+client does not start in this folder. The home page shows the same blocks to copy, and the status bar shows
+**AI: connected (&lt;client&gt;)** once the agent is attached.
+
+Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
+`run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `screenshot` — see
+[docs/reference.md](docs/reference.md#mcp-server).
+
+**Why the agent cannot approve or upload:** a change of a PLC program ends up on a real machine. The agent proposes
+and checks; moving a change through `Approved → Signed → …`, Upload and Check stay buttons a person clicks after
+reviewing the diff.
+
+![Home page with an AI agent connected](tests/screenshots/home_ai_connected.png)
 
 ## Tests
 

@@ -18,6 +18,7 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
 - `--mcp-json`, `--writer-cmd`, `--reader-cmd`, `--mcp-timeout` configure the Writer and the Reader (TIA status,
   snapshots, Upload and Check; see [Upload and Check](#upload-and-check)).
 - `--no-autoconnect` = do not check TIA Portal at start and when the home page opens (only the Refresh button does).
+- `--ai-timeout` (60 s) = an AI client (see [MCP server](#mcp-server)) without a heartbeat for this long is forgotten.
 - The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403.
 
 ## Page
@@ -45,8 +46,9 @@ Open / New snapshot / Remove, the progress of the last snapshot job) and **Add p
 - *Open .ap21 file* — the Writer's `OpenTiaProject` opens the project (it **may start TIA Portal and take minutes**),
   then a snapshot; optionally the project is closed afterwards (`CloseProject`, without saving).
 
-Without projects the page shows a short hint. Screenshots: `tests\screenshots\home_empty.png`, `home_projects.png`,
-`home_tia_attached.png`, `snapshot_progress.png`.
+Without projects the page shows a short hint. Below *Add project* is **Connect an AI agent** (see
+[MCP server](#mcp-server)). Screenshots: `tests\screenshots\home_empty.png`, `home_projects.png`,
+`home_tia_attached.png`, `snapshot_progress.png`, `home_ai_connected.png`.
 
 **Project registry** `<data>\projects.json`:
 `[{name, source: "exports"|"tia"|"ap21", export_root, project_path?, tia: {softwarePath, plcName}?, last_snapshot?, added}]`.
@@ -65,7 +67,8 @@ is still there. `tia` from the registry is used by Upload/Check when `state.json
 
 **TIA status** (`GET /api/tia/status`): `{tia: "unknown"|"not running"|"running"|"attached"|"choose", project,
 project_path, portalId, instances: [{portalId, project, path, attached}], writer, reader: "configured"|"missing"|"error: …",
-reader_export_root, ai: "no client", checked, autoconnect, chosen, time, busy?}`.
+reader_export_root, ai: "no client"|"connected: <name>[, <name>…]", ai_clients: [{id, name, version, since, last_seen}],
+checked, autoconnect, chosen, time, busy?}`.
 1. Writer `GetPortals {}` — no instance → `not running`, **no `Connect`** (without `portalId` it would start TIA);
 2. one instance (or the one chosen with `portalId`) → `Connect {portalId}` + `GetProject {portalId}` → `attached`;
 3. more instances → `choose` (the status bar shows a picker);
@@ -73,7 +76,8 @@ reader_export_root, ai: "no client", checked, autoconnect, chosen, time, busy?}`
 
 Every tool call of the check has a 30 s timeout; a Writer that cannot start or fails gives `writer: "error: …"`, never
 a crash. The check runs once in the background at start and when the home page opens, unless `--no-autoconnect`;
-while a job holds TIA the cached status is returned with `busy: true`. `ai` is a placeholder for the editor's own MCP server.
+while a job holds TIA the cached status is returned with `busy: true`. `ai` / `ai_clients` are always current (see
+[MCP server](#mcp-server)).
 
 **Snapshot** (a background job; one job at a time, the same lock as Upload/Check → 409 when busy):
 1. Writer: `OpenTiaProject {path, portalId?}` for an `.ap21` project, otherwise `Connect {portalId}` (the attached
@@ -420,6 +424,56 @@ and replacing a network with itself gives a block the parser reads the same (FB_
   `portalId`, `projectPath`/`path`/`name`, `softwarePath` anywhere in the JSON); how long `OpenTiaProject` takes when it
   has to start TIA (timeout 30 min); that the Reader's folder name equals the TIA project name.
 
+## MCP server
+`mcp_server.py` makes the editor an MCP server for AI agents (Claude Code, Cursor, any MCP client). The client starts
+it as a stdio server (JSON-RPC 2.0, one message per line, protocol `2025-06-18`); it talks to an **already running**
+editor over the HTTP API above — no second editor process, no state of its own.
+```
+python mcp_server.py [--server http://localhost:8765] [--heartbeat 15]     # TIAC_EDITOR_URL overrides the default URL
+```
+Configuration (paths relative to this repository — the client runs the command in its own working folder, so give the
+full path of `mcp_server.py` when it starts elsewhere):
+```
+// Claude Code: .mcp.json in the project folder   ·   Cursor: .cursor/mcp.json
+{ "mcpServers": { "bettertia-editor": { "command": "python", "args": ["mcp_server.py", "--server", "http://localhost:8765"] } } }
+```
+The home page has the same blocks under **Connect an AI agent** with a copy button.
+
+**Presence:** on `initialize` the server registers the client on the editor — `POST /api/ai/clients {id, name, version}`
+with `clientInfo.name/version` — and repeats it every `--heartbeat` seconds and on every tool call; on EOF of stdin it
+calls `DELETE /api/ai/clients/<id>`. The editor forgets a client after `--ai-timeout` (60 s) without a heartbeat (a
+killed client). `GET /api/ai/clients` and `GET /api/tia/status` return `ai: "connected: <name>"` / `"no client"`; the
+status bar shows a green **AI: connected (<name>)** chip with the last heartbeat in its tooltip. If the editor is not
+running, `initialize` still succeeds and every tool answers with an error that says so.
+
+**Tools** (output = JSON text, `screenshot` = an `image` content with a base64 PNG plus the page URL as text; an HTTP
+error of the editor = `isError: true` with its message):
+
+| Tool | Arguments | Returns / does |
+|---|---|---|
+| `list_projects` | — | projects (`name, source, latest_export, exports, edits` by state, `tia`) + TIA status (`tia, project, writer, reader, ai`) |
+| `list_blocks` | `project`, `export_ts?` | blocks of the newest export of each block (or of one export): `block` (file name — use it as `block`), `name`, `kind`, `number`, `language`, `title`, `networks`, `export_ts` |
+| `get_network` | `project`, `block`, `nw`, `export_ts?` | `/api/network` without the SVG geometry: `elements`, `rungs`/`wires` (LAD) or `signals` (FBD), `title`, `comment`, `language`, `f`, `as_lad?` |
+| `list_edits` | `project?`, `state?` | edit summaries `{id, project, round, block, nw, title, language, f, state, author, time, note, last_check}` |
+| `get_edit` | `id` | `edit` (before/after, checks, writes, history), `diff`, `errors`, `warnings`, `next`/`previous`, `checked_allowed`, `tia`, `procedure` (markdown), `url` |
+| `propose_edit` | `project`, `round`, `block`, `nw`, `after`, `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout` |
+| `update_edit` | `id`, `after`, `note?` | replaces "after" (and the note) — Proposal only → `{id, state, errors}` |
+| `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
+| `get_procedure` | `id` | the TIA steps as markdown text |
+| `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` checks TIA Portal again) |
+| `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |
+| `get_job` | `id` | the job record (steps, chunks, result, error) |
+| `screenshot` | `edit` or `project`+`block`+`nw`, `width?` (1400), `height?` (900), `theme?` (`dark`/`light`) | PNG through `screenshot.py`; without Chrome/Edge an error with a hint to use `get_network` / `get_edit` |
+
+A typical flow: `list_projects` → `list_blocks` → `get_network` → change `elements`/`rungs` (keep the ids of kept
+elements, new ids for new ones) → `propose_edit` → fix `errors` with `update_edit` → a person approves it in the
+editor → after writing to TIA Portal and a new export, `run_check`.
+
+**Not offered on purpose:** changing the state of an edit (Approved, Signed, Checked, Uploaded, Tested), Upload and
+Check. Approving a change of a PLC program and writing it into the project are human decisions with consequences on
+a real machine; the agent prepares and checks, a person reviews the diff and clicks. The HTTP API keeps those
+endpoints for the UI.
+
 ## Reading state and taking a screenshot (scripts, AI assistants)
 ```
 curl -s "http://localhost:8765/api/network?project=Demo_Line&block=FB_Conveyor&nw=2"
@@ -476,7 +530,8 @@ testing through a browser automation extension: when the tab is hidden (`documen
   `TS2` = `20261012-150000`. Variants (other operand, moved network) are created inside tests in a temporary export root.
 - `python -m unittest discover -s tests` — parser, layout (element positions), API through `http.client` against a
   server on a free port, LAD/FBD editor operations, export check, Upload/Check against the fake servers
-  (`tests\test_upload_check.py`), MCP client (`tests\test_mcp_client.py`), states (`tests\test_state.py`),
+  (`tests\test_upload_check.py`), MCP client (`tests\test_mcp_client.py`), the editor's MCP server
+  driven through the MCP client (`tests\test_mcp_server.py`), states (`tests\test_state.py`),
   serialization, real clicks and screenshots (skipped without Chrome).
 - `tests\screenshots\` — screenshots of all sample networks (dark theme) and of the main editor/change/upload views.
 
