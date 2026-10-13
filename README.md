@@ -1,9 +1,29 @@
 # BetterTIA Editor
 
-A local web app for viewing and editing single LAD and FBD networks of a TIA Portal project, built on top of
-the text export (`.s7dcl` / `.s7res`, SIMATIC source documents, TIA Portal V20+).
+**A review tool for AI-proposed changes to TIA Portal networks.** An AI agent proposes a change to one LAD or FBD
+network; you see the before/after diff drawn the way TIA Portal draws it, approve it, and track it until it is in the
+project and tested. A local web app built on the text export (`.s7dcl` / `.s7res`, SIMATIC source documents,
+TIA Portal V20+).
 
-![Network, editor, proposal, upload and check](docs/demo.gif)
+![Home, a change moving from Proposal to Checked, TIA steps and the FBD editor](docs/demo.gif)
+
+## Why
+
+AI agents can already read a PLC program and suggest a fix, but nobody should paste an unreviewed change into a
+machine. This editor puts a person between the agent and TIA Portal: every change is one network, shown as a diagram
+diff, with step-by-step instructions to make it by hand. Approving, writing to the project and testing stay explicit
+steps a person takes, and each step is recorded.
+
+## Workflow
+
+![Proposal → Approved → Signed → Checked → Uploaded → Tested](docs/workflow.svg)
+
+| | |
+|---|---|
+| ![Home page with an AI agent connected](tests/screenshots/home_ai_connected.png) | ![A change in state Checked, after Upload and Check](tests/screenshots/edit_checked_upload_check.png) |
+| Home: projects, connection strip (TIA, Writer, Reader, AI), connecting an agent | A change after Upload and Check: stepper, diff, export checks, Writer/Reader steps |
+| ![FBD editor with the palette](tests/screenshots/fbd_editor.png) | ![TIA steps for making the change by hand](tests/screenshots/tia_steps.png) |
+| FBD editor: palette, insertion points, rule check, element properties | TIA steps: the same change as instructions for TIA Portal |
 
 It is the third tool of the BetterTIA set:
 
@@ -65,8 +85,6 @@ registers it as the project's newest export, which the networks are drawn from.
 > call. Run the editor with the same export root, or add the reader's folder as a project; the editor reports a
 > mismatch instead of guessing.
 
-![Home page](tests/screenshots/home_tia_attached.png)
-
 ## Connect an AI agent
 
 Start the editor, then let your MCP client start `mcp_server.py` (it talks to the running editor over HTTP):
@@ -88,13 +106,14 @@ Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, 
 and checks; moving a change through `Approved → Signed → …`, Upload and Check stay buttons a person clicks after
 reviewing the diff.
 
-![Home page with an AI agent connected](tests/screenshots/home_ai_connected.png)
-
 ## Tests
 
 ```
 python -m unittest discover -s tests
 ```
+
+The screenshots in `tests\screenshots\` and `docs\demo.gif` are regenerated from the sample project with the fake
+Writer/Reader by `python tools\screenshots.py` (needs Chrome or Edge and a free port 8765).
 
 ## Documentation
 

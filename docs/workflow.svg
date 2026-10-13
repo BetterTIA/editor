@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="120" viewBox="0 0 880 120" font-family="Segoe UI, system-ui, sans-serif">
+  <title>Workflow: Proposal, Approved, Signed, Checked, Uploaded, Tested</title>
+  <style>
+    .t { fill: #161b21; font-size: 15px; font-weight: 600; }
+    .s { fill: #56606c; font-size: 12px; }
+    .w { stroke: #8c96a1; stroke-width: 2; }
+    .r { stroke: #0a6f8a; stroke-width: 5; }
+    @media (prefers-color-scheme: dark) { .t { fill: #e7eaee; } .s { fill: #9ba5b1; } .r { stroke: #4cc9e0; } }
+  </style>
+  <line class="r" x1="10" y1="12" x2="10" y2="72"/>
+  <line class="w" x1="10" y1="42" x2="790" y2="42"/>
+  <g text-anchor="middle">
+    <circle cx="60" cy="42" r="10" fill="#8b95a2"/><text class="t" x="60" y="94">Proposal</text><text class="s" x="60" y="112">AI or you</text>
+    <circle cx="206" cy="42" r="10" fill="#1aa3c2"/><text class="t" x="206" y="94">Approved</text><text class="s" x="206" y="112">you, after the diff</text>
+    <circle cx="352" cy="42" r="10" fill="#9b6dea"/><text class="t" x="352" y="94">Signed</text><text class="s" x="352" y="112">written to the project</text>
+    <circle cx="498" cy="42" r="10" fill="#14a88f"/><text class="t" x="498" y="94">Checked</text><text class="s" x="498" y="112">export = proposal</text>
+    <circle cx="644" cy="42" r="10" fill="#d9a514"/><text class="t" x="644" y="94">Uploaded</text><text class="s" x="644" y="112">loaded into the PLC</text>
+    <circle cx="790" cy="42" r="10" fill="#3fae55"/><text class="t" x="790" y="94">Tested</text><text class="s" x="790" y="112">on the machine</text>
+  </g>
+</svg>
