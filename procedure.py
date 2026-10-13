@@ -38,9 +38,21 @@ def _p(k):
     return COMMANDS[k][0]
 
 
+def block_name(u):
+    return '%s%s "%s"' % (u.get('block_kind') or '', u.get('block_number') if u.get('block_number') is not None else '', u['block'])
+
+
+def where(u):
+    """What the edit changes, as the tree and the changelog show it."""
+    if u.get('kind') == 'interface':
+        return 'Interface: +%d %s' % (len(u.get('members') or []), u.get('section'))
+    if u.get('kind') == 'new_network':
+        return 'NW %s+ (new): %s' % (u.get('after_nw'), u.get('title') or '(no title)')
+    return 'NW %s: %s' % (u['nw'], u.get('title') or '(no title)')
+
+
 def header(u):
-    return '%s%s "%s" · NW %s: %s' % (u.get('kind') or '', u.get('block_number') if u.get('block_number') is not None else '',
-                                      u['block'], u['nw'], u.get('title') or '(no title)')
+    return '%s · %s' % (block_name(u), where(u))
 
 
 def _c(x):
@@ -225,12 +237,29 @@ def steps_lad(u):
     return steps
 
 
+SECTION_TEXT = {'Input': 'Input', 'Output': 'Output', 'InOut': 'InOut', 'Static': 'Static', 'Temp': 'Temp',
+                'Constant': 'Constant'}
+
+
+def member_text(m):
+    return '`%s : %s%s`%s' % (m['name'], m['type'], ' := %s' % m['initial'] if m.get('initial') else '',
+                              ' (%s)' % m['comment'] if m.get('comment') else '')
+
+
+def steps_interface(u):
+    sec = SECTION_TEXT.get(u.get('section'), u.get('section'))
+    return ['Open the block interface → section **%s** → add %s.' % (sec, member_text(m)) for m in u.get('members') or []]
+
+
 def procedure(u):
-    """-> {header, steps, markdown} for an edit (LAD and FBD)."""
+    """-> {header, steps, markdown} for an edit (network change, interface members)."""
     hl = header(u)
-    inner = steps_fbd(u) if fbd.is_fbd(u['after']) else steps_lad(u)
-    steps = ['Open the block %s and find network **NW %s: %s**.' % (
-        _c('%s%s "%s"' % (u.get('kind') or '', u.get('block_number') or '', u['block'])), u['nw'], u.get('title') or '')]
+    if u.get('kind') == 'interface':
+        inner = steps_interface(u)
+        steps = ['Open the block %s (the interface is the upper part of the program editor).' % _c(block_name(u))]
+    else:
+        inner = steps_fbd(u) if fbd.is_fbd(u['after']) else steps_lad(u)
+        steps = ['Open the block %s and find network **NW %s: %s**.' % (_c(block_name(u)), u['nw'], u.get('title') or '')]
     steps += inner or ['The proposal does not differ from the export — nothing to change in TIA.']
     if u.get('f') and inner:
         steps.append('Compile the safety program and check the F-signature; safety changes are protected by the F-CPU password / '

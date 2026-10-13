@@ -254,32 +254,159 @@ def api_state_put(root, data, project, obj):
     return obj
 
 
+def _after_model(after, language):
+    """"after" from the API (trust boundary) -> stored model with wires/layout; wrong shape = 400."""
+    if language == 'FBD':
+        if not isinstance(after, dict):
+            raise state.StateError('after must be an FBD model {language: "FBD", elements: [...]}', 400)
+        return _fbd_after(dict(after, language='FBD'))
+    verify_model(after)
+    m = {'elements': after['elements'], 'rungs': after['rungs']}
+    m['wires'] = s7dcl.wires(m)
+    m['layout'] = after.get('layout') or _layout(m)[0]
+    return m
+
+
+def _empty_model(after):
+    return {'language': 'FBD', 'elements': [], 'signals': [], 'layout': {}} if fbd.is_fbd(after) else \
+        {'elements': [], 'rungs': [], 'wires': [], 'layout': {}}
+
+
+# ---------- block interface (E2) ----------
+
+SECTIONS = {'Input': 'inputs', 'Output': 'outputs', 'InOut': 'inout', 'Static': 'static', 'Temp': 'temp',
+            'Constant': 'constants'}
+
+
+def block_interface(root, project, block, ts=None):
+    """-> (export ts, {Section: [{name, type}]}) from the block's `.s7dcl` header (top-level members)."""
+    t, fpath, _ = find_block(root, project, block, ts)
+    r = catalog.interface(s7dcl.read(fpath)) or {'section': {}}
+    inv = {v: k for k, v in SECTIONS.items()}
+    return t, {inv[k]: v for k, v in r['section'].items() if k in inv}
+
+
+def _text_field(m, k, bad=''):
+    v = m.get(k)
+    if v is None or v == '':
+        return None
+    if not isinstance(v, str) or len(v) > 500 or any(c in v for c in '\r\n' + bad):
+        raise state.StateError('member %s: %s must be one line of text' % (m.get('name'), k), 400)
+    return v.strip()
+
+
+def _members(v, taken):
+    """members from the API -> [{name, type, comment?, initial?}]; added members only, a name may not exist yet."""
+    if not isinstance(v, list) or not v:
+        raise state.StateError('members: [{name, type, comment?, initial?}] — at least one', 400)
+    res, seen = [], {x.lower() for x in taken}
+    for m in v:
+        if not isinstance(m, dict) or not re.fullmatch(r'[A-Za-z_]\w{0,127}', str(m.get('name') or '')) \
+                or not re.fullmatch(r'[^;:\r\n{}]{1,200}', str(m.get('type') or '').strip()):
+            raise state.StateError('a member needs a name (identifier) and a type, e.g. {"name": "Aux", "type": "Bool"}', 400)
+        if m['name'].lower() in seen:
+            raise state.StateError('member %s is already in the interface (or twice in the edit)' % m['name'], 400)
+        seen.add(m['name'].lower())
+        x = {'name': m['name'], 'type': m['type'].strip()}
+        for k, bad in (('comment', ''), ('initial', ';')):
+            t = _text_field(m, k, bad)
+            if t:
+                x[k] = t
+        res.append(x)
+    return res
+
+
+def _section(v):
+    if v not in SECTIONS:
+        raise state.StateError('section must be one of %s' % ', '.join(SECTIONS), 400)
+    return v
+
+
+def _interface_rows(u):
+    """before = the export's interface, after = the same with the edit's members appended (added: true)."""
+    before = u['before']['interface']
+    after = {k: [dict(m) for m in v] for k, v in before.items()}
+    after.setdefault(u['section'], []).extend(dict(m, added=True) for m in u['members'])
+    return {'section': u['section'], 'before': before, 'after': after}
+
+
+def _local_operands(x, res=None):
+    """Names of local operands (#name, first component) used anywhere in a model; T#5s, 16#FF are literals."""
+    res = set() if res is None else res
+    if isinstance(x, dict):
+        for k, v in x.items():
+            if k not in ('id', 'type', 'call', 'name', 'template', 'power', 'signal', 'pin', 'op', 'layout', 'wires'):
+                _local_operands(v, res)
+    elif isinstance(x, list):
+        for v in x:
+            _local_operands(v, res)
+    elif isinstance(x, str):
+        res.update(m.strip('"') for m in re.findall(r'(?<![\w#])#("[^"]+"|[A-Za-z_]\w*)', x))
+    return res
+
+
+def _operand_warnings(root, data, u):
+    """Local operands of "after" that the block interface lacks: defined by a pending interface edit, or not at all."""
+    names = _local_operands(u.get('after'))
+    if not names:
+        return []
+    try:
+        known = {m['name'].lower() for v in block_interface(root, u['project'], u['block'])[1].values() for m in v}
+        edits = [x for x in state.load(data, u['project'])['edits']
+                 if x.get('kind') == 'interface' and x['block'] == u['block'] and x['state'] != 'Tested']
+    except (KeyError, OSError, ValueError, s7dcl.SourceParseError, state.StateError):
+        return []
+    res = []
+    for n in sorted(names, key=str.lower):
+        if n.lower() in known:
+            continue
+        by = next((x for x in edits if any(m['name'].lower() == n.lower() for m in x.get('members') or [])), None)
+        res.append('operand #%s is not in the block interface — %s' % (
+            n, 'defined by edit %s (state %s)' % (by['id'], by['state']) if by else 'propose it first (interface edit)'))
+    return res
+
+
+def _new_interface(root, project, block, body):
+    t, iface = block_interface(root, project, block)
+    _, b = _load(root, project, block, t)
+    if b['kind'] not in ('FB', 'FC', 'OB'):
+        raise state.StateError('interface edits are for FB, FC and OB blocks (this one is %s)' % b['kind'], 400)
+    return {'block': block, 'nw': None, 'title': '', 'section': _section(body.get('section')),
+            'members': _members(body.get('members'), [m['name'] for v in iface.values() for m in v]),
+            'before': {'interface': iface, 'export_ts': t}, '_block': b}
+
+
+def _new_change(root, project, block, body):
+    net = api_network(root, project, block, int(body.get('nw', 0)))
+    if net['language'] == 'FBD' and net.get('signals') is not None:
+        language = 'FBD'
+    elif net['language'] != 'LAD':
+        raise state.StateError('changes only for LAD or FBD networks (this one is %s)' % (net['language'] or '?'), 400)
+    else:
+        language = 'LAD'
+    return {'block': net['file'], 'nw': net['nw'], 'title': net['title'], 'language': net['language'],
+            'after': _after_model(body.get('after'), language), 'f_net': net.get('f'),
+            'before': dict(_model(net), export_ts=net['ts'])}
+
+
 def api_edit_create(root, data, body):
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     project, block = str(body.get('project', '')), str(body.get('block', ''))
+    kind = body.get('kind') or 'network'
+    if kind not in state.KINDS:
+        raise state.StateError('kind must be one of %s' % ', '.join(state.KINDS), 400)
     state._file(data, project)                      # checks --data and the project name
-    net = api_network(root, project, block, int(body.get('nw', 0)))
-    if net['language'] == 'FBD' and net.get('signals') is not None:
-        if not isinstance(body.get('after'), dict):
-            raise state.StateError('after must be an FBD model {language: "FBD", elements: [...]}', 400)
-        after = _fbd_after(dict(body['after'], language='FBD'))
-    elif net['language'] != 'LAD':
-        raise state.StateError('changes only for LAD or FBD networks (this one is %s)' % (net['language'] or '?'), 400)
-    else:
-        verify_model(body.get('after'))
-        after = {'elements': body['after']['elements'], 'rungs': body['after']['rungs']}
-        after['wires'] = s7dcl.wires(after)
-        after['layout'] = body['after'].get('layout') or _layout(after)[0]
+    u = {'interface': _new_interface, 'network': _new_change}[kind](root, project, block, body)
+    b = u.pop('_block', None) or _load(root, project, u['block'])[1]
+    f = bool(u.pop('f_net', None) or b['attributes'].get('S7_Safety') == 'TRUE' or body.get('f'))
     when, by = state.now(), str(body.get('by') or 'editor')[:80]
     with state.LOCK:
         s = state.load(data, project)
-        u = {'id': state.new_id(data), 'project': project, 'round': str(body.get('round') or '—'),
-             'block': net['file'], 'kind': net['kind'], 'block_number': net['number'], 'nw': net['nw'],
-             'title': net['title'], 'language': net['language'], 'f': bool(net.get('f') or body.get('f')), 'author': by, 'time': when, 'state': 'Proposal',
-             'note': str(body.get('note') or ''),
-             'history': [{'state': 'Proposal', 'time': when, 'by': by}],
-             'before': dict(_model(net), export_ts=net['ts']), 'after': after, 'checks': []}
+        u.update({'id': state.new_id(data), 'project': project, 'round': str(body.get('round') or '—'), 'kind': kind,
+                  'block_kind': b['kind'], 'block_number': b['number'], 'f': f, 'author': by, 'time': when,
+                  'state': 'Proposal', 'note': str(body.get('note') or ''),
+                  'history': [{'state': 'Proposal', 'time': when, 'by': by}], 'checks': []})
         s['edits'].append(u)
         state.save(data, project, s)
     return u
@@ -368,7 +495,12 @@ def _validate(after, f=False, root=None, project=None):
 def api_edit_detail(data, uid, width=0, root=None):
     """Change + "after" drawing with the diff, LAD rule errors, state transitions."""
     _, s, u = state.find(data, uid)
-    res = _diff_drawing(u['before'], u['after'], width)
+    if u.get('kind') == 'interface':
+        res = {'interface': _interface_rows(u), 'diff': {}, 'drawing': None, 'elements': [], 'rungs': [], 'warnings': []}
+    else:
+        res = _diff_drawing(u['before'] if u.get('kind') == 'network' else _empty_model(u['after']), u['after'], width)
+        if root:
+            res['warnings'] += _operand_warnings(root, data, u)
     res['tia'] = s.get('tia')
     k = u.get('checks') or []
     if state.STATES.index(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
@@ -376,7 +508,7 @@ def api_edit_detail(data, uid, width=0, root=None):
                                      'back by itself; check what was written to the project.' % u['state'])
     following, previous = state.transitions(u)
     res.update({'edit': u, 'next': following, 'previous': previous, 'checked_allowed': state.checked_allowed(u),
-                'errors': _validate(u['after'], u.get('f'), root, u['project'])})
+                'errors': _validate(u['after'], u.get('f'), root, u['project']) if 'after' in u else []})
     return res
 
 
@@ -463,12 +595,39 @@ def _layout_fbd(body, root=None):
     return res
 
 
+def _norm_type(t):
+    return re.sub(r'\s+', '', str(t or '')).strip('"').lower()
+
+
+def _check_interface(root, data, uid, u, body):
+    """Interface edit: every member is in its section of the export with the same type (order does not matter)."""
+    t, iface = block_interface(root, u['project'], u['block'], str(body['export_ts']) if body.get('export_ts') else None)
+    diffs = []
+    for m in u['members']:
+        where = {sec: x for sec, v in iface.items() for x in v if x['name'].lower() == m['name'].lower()}
+        if not where:
+            diffs.append('missing in the export: %s : %s (%s)' % (m['name'], m['type'], u['section']))
+        elif u['section'] not in where:
+            diffs.append('%s is in section %s, the proposal says %s' % (m['name'], ', '.join(where), u['section']))
+        elif _norm_type(where[u['section']]['type']) != _norm_type(m['type']):
+            diffs.append('different type: %s : %s in the export, %s in the proposal' % (m['name'], where[u['section']]['type'], m['type']))
+    match = not diffs
+    note = ('export = proposal (%d member%s in %s)' % (len(u['members']), '' if len(u['members']) == 1 else 's', u['section'])
+            if match else 'MISMATCH: %s' % '; '.join(diffs))
+    if t == u['before'].get('export_ts'):
+        note += ' · note: the export is the same as before the change'
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note})
+    return {'match': match, 'export_ts': t, 'nw_export': None, 'note': note, 'diffs': diffs, 'edit': u}
+
+
 def api_check_export(root, data, uid, body):
     """Compare the change's network in the export (newest / given) with the "after" model by content
     and record the result as a check (POST /api/check). The network is found by title, then by number."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     _, _, u = state.find(data, uid)
+    if u.get('kind') == 'interface':
+        return _check_interface(root, data, uid, u, body)
     t, b = _load(root, u['project'], u['block'], str(body['export_ts']) if body.get('export_ts') else None)
     notes = []
     cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
@@ -503,28 +662,33 @@ def api_check_export(root, data, uid, body):
 
 
 def api_edit_after(data, uid, body):
-    """Save the "after" model of a change (editor "Save proposal"). Only in state Proposal; rule errors do not block saving."""
+    """Save a proposal (editor "Save proposal", update_edit): the "after" model of a network edit, the members/section of an
+    interface edit, the note. Only in state Proposal; rule errors do not block saving."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
-    if fbd.is_fbd(body.get('after')):
-        after = _fbd_after(body['after'])
-    else:
-        verify_model(body.get('after'))
-        after = {'elements': body['after']['elements'], 'rungs': body['after']['rungs']}
-        after['wires'] = s7dcl.wires(after)
-        after['layout'] = _layout(after)[0]
     with state.LOCK:
         project, s, u = state.find(data, uid)
-        if fbd.is_fbd(after) != fbd.is_fbd(u['after']):
-            raise state.StateError('the language of the proposal (LAD/FBD) must stay the same', 400)
         if u['state'] != 'Proposal':
             raise state.StateError('the proposal can be changed only in state Proposal (now %s)' % u['state'])
-        u['after'] = after
+        if u.get('kind') == 'interface':
+            if body.get('section') is not None:
+                u['section'] = _section(body['section'])
+            if body.get('members') is not None:
+                u['members'] = _members(body['members'], [m['name'] for v in u['before']['interface'].values() for m in v])
+        else:
+            if body.get('after') is None:
+                raise state.StateError('after: the network model is required', 400)
+            after = _after_model(body['after'], 'FBD' if fbd.is_fbd(body['after']) else 'LAD')
+            if body['after'].get('layout') and not fbd.is_fbd(after):
+                after['layout'] = _layout(after)[0]          # the client's layout is not trusted here
+            if fbd.is_fbd(after) != fbd.is_fbd(u['after']):
+                raise state.StateError('the language of the proposal (LAD/FBD) must stay the same', 400)
+            u['after'] = after
         u['edited'] = state.now()
         if body.get('note') is not None:
             u['note'] = str(body['note'])
         state.save(data, project, s)
-    return {'edit': u, 'errors': _validate(after, u.get('f'))}
+    return {'edit': u, 'errors': _validate(u['after'], u.get('f')) if 'after' in u else []}
 
 
 # ---------- Upload (TIAC_Writer) and Check (TIAC_Reader) ----------
@@ -560,6 +724,21 @@ def _without_call_names(m):
     return m
 
 
+def _add_members_in_file(file, bom, text, u):
+    """Interface edit: member lines into the VAR section of the exported .s7dcl; read back, every member must be there."""
+    new_value = s7dcl_write.add_members(text, u['section'], u['members'])
+    got = (catalog.interface(new_value.replace('\r\n', '\n')) or {'section': {}})['section'].get(SECTIONS[u['section']], [])
+    have = {(x['name'].lower(), _norm_type(x['type'])) for x in got}
+    missing = [m['name'] for m in u['members'] if (m['name'].lower(), _norm_type(m['type'])) not in have]
+    if missing:
+        raise s7dcl_write.WriteError('the written interface does not read back with %s' % ', '.join(missing))
+    with open(file, 'wb') as f:
+        f.write((b'\xef\xbb\xbf' if bom else b'') + new_value.encode('utf-8'))
+    comments = [m['name'] for m in u['members'] if m.get('comment')]
+    return '%d member(s) added to section %s%s' % (len(u['members']), u['section'], (
+        ' — comments are not written to the document (%s): add them in TIA' % ', '.join(comments)) if comments else '')
+
+
 def _replace_in_file(file, u):
     """Replace the change's network (by title, otherwise by number) in the exported .s7dcl with the "after" model -> description.
     Safeguards: no F-block and no network in another language is overwritten; the replaced text is parsed again and must match the proposal."""
@@ -570,6 +749,8 @@ def _replace_in_file(file, u):
     b = s7dcl.load_block(file)
     if b['attributes'].get('S7_Safety') == 'TRUE':
         raise s7dcl_write.WriteError('the block is an F-block (S7_Safety) — Upload is for non-safety blocks only, change it by hand')
+    if u.get('kind') == 'interface':
+        return _add_members_in_file(file, bom, text, u)
     cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
     n = next((x for x in cand if x['nw'] == u['nw']), cand[0]) if cand else \
         (b['networks'][u['nw'] - 1] if u['nw'] <= len(b['networks']) else None)
@@ -674,7 +855,8 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
                 if not files:
                     raise s7dcl_write.WriteError('the Writer did not export %s.s7dcl' % block)
                 folder = os.path.dirname(files[0])
-                step('Replace the network in .s7dcl', lambda: _replace_in_file(files[0], u))
+                step({'interface': 'Add interface members in .s7dcl'}.get(u.get('kind'), 'Replace the network in .s7dcl'),
+                     lambda: _replace_in_file(files[0], u))
                 preview = step('PreviewImport', lambda: k.call('PreviewImport', {
                     'softwarePath': sp, 'importPath': folder, 'kind': 'block', 'groupPath': grp}))
                 step('ImportFromDocuments', lambda: k.call('ImportFromDocuments', {
@@ -1178,7 +1360,7 @@ def changelog_markdown(project, items):
             day = x['time'][:10]
             out += ['', '## %s' % day, '', '| Time | Event | Block · network | By | Details |', '|---|---|---|---|---|']
         what = '%s %s' % (x['edit'], x['kind']) if x.get('edit') else x['kind']
-        where = procedure.header(dict(x, kind=x.get('block_kind'))) if x.get('edit') else ''
+        where = x.get('where') or ''
         out.append('| %s | %s | %s | %s | %s |' % tuple(_cell(v) for v in (x['time'][11:19], what, where, x['by'], x['summary'])))
     return '\n'.join(out) + '\n'
 
@@ -1195,7 +1377,8 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
     def add(time_, kind, summary, u=None, by=''):
         x = {'time': time_ or '', 'kind': kind, 'block': '', 'nw': None, 'title': '', 'by': by or '', 'summary': summary}
         if u:
-            x.update(edit=u['id'], block=u['block'], nw=u['nw'], title=u.get('title') or '', block_kind=u.get('kind'),
+            x.update(edit=u['id'], block=u['block'], nw=u['nw'], title=u.get('title') or '', block_kind=u.get('block_kind'),
+                     edit_kind=u.get('kind') or 'network', where=procedure.header(u),
                      block_number=u.get('block_number'), state=u['state'])
         items.append(x)
     for u in edits:
@@ -1320,7 +1503,7 @@ def _pair(xa, xb):
 
 def _matches(edits, block, n):
     """Edits of this block whose "after" model is this network (same title or number, same content)."""
-    return [u['id'] for u in edits if u.get('block') == block
+    return [u['id'] for u in edits if u.get('block') == block and 'after' in u
             and (u.get('title') and u['title'] == n['title'] or u.get('nw') == n['nw'])
             and _same_network(dict(u['after'], language='FBD' if fbd.is_fbd(u['after']) else 'LAD'), n)[0]]
 

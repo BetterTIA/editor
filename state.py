@@ -12,6 +12,8 @@ from datetime import datetime
 # Six states: Signed = written to the project (by hand or by the Writer), Checked = Reader export = proposal.
 # An older state.json with five states loads unchanged (the state names stayed the same).
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
+# what an edit changes: one network's model (and title/comment), block interface members, a new network
+KINDS = ['network', 'interface', 'new_network']
 LOCK = threading.RLock()
 
 
@@ -38,12 +40,22 @@ def load(data, project):
     if not os.path.exists(c):
         return {'edits': []}
     with open(c, encoding='utf-8') as f:
-        return json.load(f)
+        return migrate(json.load(f))
+
+
+def migrate(obj):
+    """Edits before kinds existed: `kind` held the block kind (FB, FC, OB) -> `block_kind`, `kind` = "network"."""
+    for u in (obj.get('edits') if isinstance(obj, dict) else None) or []:
+        if isinstance(u, dict) and u.get('kind') not in KINDS:
+            if u.get('kind') is not None:
+                u['block_kind'] = u['kind']
+            u['kind'] = 'network'
+    return obj
 
 
 def save(data, project, obj):
     """Atomic write: the whole file to .tmp in the same folder, then os.replace (the old file survives an error)."""
-    verify_structure(obj)
+    verify_structure(migrate(obj))
     _write_json(_file(data, project), obj)
 
 

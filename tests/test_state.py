@@ -66,12 +66,17 @@ class TestStateMachine(unittest.TestCase):
             with open(os.path.join(d, PROJECT, 'state.json'), 'w', encoding='utf-8') as f:
                 json.dump(old, f)
             st = state.load(d, PROJECT)
-            self.assertEqual(st, old)
+            new = {'edits': [dict(u, kind='network') for u in old['edits']]}   # edits without a kind are network edits
+            self.assertEqual(st, new)
             state.save(d, PROJECT, st)                                  # passes the structure check and the write
-            self.assertEqual(state.load(d, PROJECT), old)
+            self.assertEqual(state.load(d, PROJECT), new)
             self.assertEqual(state.transitions(st['edits'][3]), ('Tested', 'Checked'))
         finally:
             shutil.rmtree(d, ignore_errors=True)
+
+    def test_kind_was_the_block_kind(self):
+        st = state.migrate({'edits': [{'id': 'U001', 'kind': 'FB'}, {'id': 'U002', 'kind': 'interface', 'block_kind': 'FC'}]})
+        self.assertEqual([(u['kind'], u.get('block_kind')) for u in st['edits']], [('network', 'FB'), ('interface', 'FC')])
 
     def test_atomic_write(self):
         d = tempfile.mkdtemp()
@@ -136,7 +141,8 @@ class TestApiEdits(unittest.TestCase):
         s, u = self.create(title='manual', block_number=999)
         self.assertEqual(s, 201)
         self.assertEqual((u['id'], u['state'], u['author']), ('U001', 'Proposal', 'editor'))
-        self.assertEqual((u['kind'], u['block_number'], u['nw'], u['title']), ('FB', 10, 2, 'Motor latch'))
+        self.assertEqual((u['kind'], u['block_kind'], u['block_number'], u['nw'], u['title']),
+                         ('network', 'FB', 10, 2, 'Motor latch'))
         self.assertEqual(u['before']['export_ts'], TS1)                       # newest export containing the block
         self.assertEqual(len(u['before']['elements']), 7)
         self.assertIsNotNone(u['after']['layout'])                         # recomputed by the server

@@ -1,0 +1,19 @@
+MultiLingualTexts:
+  - id: MLC_1
+    en-US: Připravenost dopravníku
+  - id: MLC_2
+    en-US: Motor latch
+  - id: MLC_2k
+    en-US: |-
+      Start or service start, Stop opens the circuit.
+      Holding branch through Motor.
+  - id: MLC_3
+    en-US: Startup
+  - id: MLC_4
+    en-US: 'Belt call (instance DB_Belt1)'
+  - id: MLC_5
+    en-US: Mode and speed comparison
+  - id: MLC_6
+    en-US: Speed setpoint
+  - id: MLC_7
+    en-US: Faults and acknowledge

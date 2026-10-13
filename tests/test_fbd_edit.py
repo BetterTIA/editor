@@ -151,7 +151,7 @@ class TestProcedure(unittest.TestCase):
                 {'type': 'change_operand', 'id': 'b3', 'operand': '#Enable_Drive'},
                 {'type': 'insert_box', 'element': 'P_TRIG', 'to': {'id': 'b2', 'input': 1}},
                 {'type': 'change_operand', 'id': 'n1', 'operand': '#Mem'})
-        u = {'id': 'U009', 'kind': 'FB', 'block_number': 30, 'block': BLOCK, 'nw': 1, 'title': nw(1)['title'], 'f': True,
+        u = {'id': 'U009', 'block_kind': 'FB', 'block_number': 30, 'block': BLOCK, 'nw': 1, 'title': nw(1)['title'], 'f': True,
              'before': before, 'after': after}
         p = procedure.procedure(u)
         self.assertEqual(p['header'], 'FB30 "FB_Safety" · NW 1: Enable — >=1, & with negation, assignment')
@@ -168,7 +168,7 @@ class TestProcedure(unittest.TestCase):
     def test_lad(self):
         _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)
         n = b['networks'][1]
-        u = {'id': 'U010', 'kind': 'FB', 'block_number': 10, 'block': 'FB_Conveyor', 'nw': 2, 'title': n['title'],
+        u = {'id': 'U010', 'block_kind': 'FB', 'block_number': 10, 'block': 'FB_Conveyor', 'nw': 2, 'title': n['title'],
              'before': {'elements': n['elements'], 'rungs': n['rungs']}, 'after': after_nw2(n)}
         p = procedure.procedure(u)
         self.assertEqual(p['header'], 'FB10 "FB_Conveyor" · NW 2: Motor latch')

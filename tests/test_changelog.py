@@ -87,6 +87,7 @@ class TestChangelogUnit(unittest.TestCase):
             items = server.api_changelog(root, data, PROJECT, jobs)['items']
             self.assertEqual([(x['time'], x['summary'], x['by']) for x in items], [
                 ('2026-10-12T12:00:00', 'snapshot: full export, 6 blocks (job J001)', 'TIAC_Reader'),
+                ('2026-10-12T13:00:00', 'partial export: FB_Conveyor', ''),
                 ('2026-10-12T14:00:00', 'partial export: FB_Conveyor', ''),
                 ('2026-10-12T15:00:00', 'partial export: FB_Safety', ''),
                 ('2026-10-12T16:00:01', 'snapshot failed (job J002): TIA Portal is not running', 'TIAC_Reader')])

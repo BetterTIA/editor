@@ -109,7 +109,8 @@ def get_network(e, a):
 
 def _summary(u):
     k = u.get('checks') or []
-    return {'id': u['id'], 'project': u['project'], 'round': u.get('round'), 'block': u['block'], 'nw': u['nw'],
+    return {'id': u['id'], 'project': u['project'], 'kind': u.get('kind', 'network'), 'round': u.get('round'),
+            'block': u['block'], 'nw': u['nw'], 'where': where(u),
             'title': u.get('title'), 'language': u.get('language'), 'f': u.get('f'), 'state': u['state'],
             'author': u.get('author'), 'time': u.get('time'), 'note': u.get('note'),
             'last_check': k[-1] if k else None}
@@ -131,17 +132,37 @@ def get_edit(e, a):
             'url': '%s/?edit=%s' % (e.url, q(a['id']))}
 
 
+def where(u):
+    """Short description of what an edit changes (the editor's tree label)."""
+    if u.get('kind') == 'interface':
+        return 'Interface: +%d %s' % (len(u.get('members') or []), u.get('section'))
+    if u.get('kind') == 'new_network':
+        return 'NW %s+ (new): %s' % (u.get('after_nw'), u.get('title') or '')
+    return 'NW %s: %s' % (u.get('nw'), u.get('title') or '')
+
+
+KIND_FIELDS = {'network': ('nw', 'after'), 'interface': ('section', 'members'), 'new_network': ('after_nw', 'title', 'after')}
+OPTIONAL = ('comment', 'language', 'title_after', 'comment_after')
+
+
 def propose_edit(e, a, client=None):
-    u = e.req('POST', '/api/edits', {'project': a['project'], 'round': a['round'], 'block': a['block'], 'nw': a['nw'],
-                                     'after': a['after'], 'note': a.get('note') or '',
-                                     'by': a.get('by') or (client or {}).get('name') or 'AI'})
+    kind = a.get('kind') or 'network'
+    if kind not in KIND_FIELDS:
+        raise ToolError('kind must be one of %s' % ', '.join(KIND_FIELDS))
+    missing = [k for k in KIND_FIELDS[kind] if a.get(k) in (None, '')]
+    if missing:
+        raise ToolError('kind %s needs: %s' % (kind, ', '.join(missing)))
+    body = {k: a[k] for k in KIND_FIELDS[kind] + OPTIONAL if a.get(k) is not None}
+    u = e.req('POST', '/api/edits', dict(body, project=a['project'], round=a['round'], block=a['block'], kind=kind,
+                                         note=a.get('note') or '', by=a.get('by') or (client or {}).get('name') or 'AI'))
     d = e.get('/api/edits/' + q(u['id']))
     return {'id': u['id'], 'state': u['state'], 'errors': d.get('errors'), 'warnings': d.get('warnings'),
             'url': '%s/?edit=%s' % (e.url, q(u['id']))}
 
 
 def update_edit(e, a):
-    r = e.req('POST', '/api/edits/%s/after' % q(a['id']), {'after': a['after'], 'note': a.get('note')})
+    r = e.req('POST', '/api/edits/%s/after' % q(a['id']),
+              {k: a.get(k) for k in ('after', 'note', 'section', 'members', 'title', 'comment', 'title_after', 'comment_after')})
     return {'id': r['edit']['id'], 'state': r['edit']['state'], 'errors': r['errors']}
 
 
@@ -219,6 +240,12 @@ MODEL = {'type': 'object', 'description': 'network model: LAD {elements, rungs} 
                                           'start from get_network, keep the ids of kept elements, new ids for new ones'}
 TS = {'type': 'string', 'description': 'export timestamp YYYYMMDD-HHMMSS (default: the newest export of the block)'}
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
+KIND = {'type': 'string', 'enum': ['network', 'interface'], 'description': 'what the edit changes (default network)'}
+SECTION = {'type': 'string', 'enum': ['Input', 'Output', 'InOut', 'Static', 'Temp', 'Constant'],
+           'description': 'interface section the members are added to'}
+MEMBERS = {'type': 'array', 'description': 'interface members to add (adding only; changing or removing is not offered)',
+           'items': {'type': 'object', 'required': ['name', 'type'], 'properties': {
+               'name': S, 'type': S, 'comment': S, 'initial': {'type': 'string', 'description': 'start value'}}}}
 
 TOOLS = [
     ('list_projects', 'Projects in the editor with their exports, edits by state and the TIA Portal status.',
@@ -232,14 +259,18 @@ TOOLS = [
      _schema({'project': S, 'state': {'type': 'string', 'enum': STATES}}), list_edits),
     ('get_edit', 'One edit: before/after models, diff marks, rule errors, checks, writes, history and the TIA steps.',
      _schema({'id': S}, ['id']), get_edit),
-    ('propose_edit', 'Create a new edit in state Proposal from an "after" model of one network. Returns the id and '
-                     'LAD/FBD rule errors. A human reviews and approves it in the editor.',
+    ('propose_edit', 'Create a new edit in state Proposal. kind "network" (default): an "after" model of network nw. '
+                     'kind "interface": add members to one section of the block interface (section + members). '
+                     'Returns the id, LAD/FBD rule errors and warnings (e.g. a #operand missing from the interface). '
+                     'A human reviews and approves it in the editor.',
      _schema({'project': S, 'round': {'type': 'string', 'description': 'round / topic the edit belongs to'},
-              'block': S, 'nw': I, 'after': MODEL, 'note': S,
+              'block': S, 'kind': KIND, 'nw': I, 'after': MODEL, 'note': S,
+              'section': SECTION, 'members': MEMBERS,
               'by': {'type': 'string', 'description': 'author shown in the history (default: the client name)'}},
-             ['project', 'round', 'block', 'nw', 'after']), propose_edit),
-    ('update_edit', 'Replace the "after" model (and optionally the note) of an edit — only while it is a Proposal.',
-     _schema({'id': S, 'after': MODEL, 'note': S}, ['id', 'after']), update_edit),
+             ['project', 'round', 'block']), propose_edit),
+    ('update_edit', 'Change a Proposal: the "after" model of a network edit, the members/section of an interface edit, '
+                    'and the note.',
+     _schema({'id': S, 'after': MODEL, 'note': S, 'section': SECTION, 'members': MEMBERS}, ['id']), update_edit),
     ('run_check', 'Compare an export (newest or given) with the edit\'s "after" model and record the check.',
      _schema({'id': S, 'export_ts': TS}, ['id']), run_check),
     ('get_procedure', 'Step-by-step instructions for making the edit by hand in TIA Portal (markdown).',

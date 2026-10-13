@@ -217,6 +217,13 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 .properties td:first-child { color: var(--muted); font-family: var(--mono); white-space: nowrap; width: 96px; overflow: hidden; text-overflow: ellipsis; }
 .properties input, .properties select { width: 100%; font: 13px var(--mono); padding: 3px 6px; }
 .properties .section td { color: var(--accent); font-family: inherit; font-weight: 600; padding-top: var(--s2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
+.iface { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); padding: var(--s2) var(--s1); }
+.iface h3 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 var(--s1); }
+.iface table { width: 100%; border-collapse: collapse; font: 12px/1.5 var(--mono); }
+.iface th { text-align: left; color: var(--muted); font: 600 11px "Segoe UI", system-ui, sans-serif; padding: 2px 6px; border-bottom: 1px solid var(--edge); }
+.iface td { padding: 2px 6px; border-bottom: 1px dashed var(--edge); overflow-wrap: anywhere; }
+.iface tr.added td { color: var(--added); font-weight: 700; background: color-mix(in srgb, var(--added) 8%, transparent); }
+.iface .other { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
 /* ---------- edit tree ---------- */
 .tree { padding-bottom: var(--s2); border-bottom: 1px solid var(--edge); }
 .tree .u0, .tree .u1, .tree .u2 { padding: 3px var(--s3); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -545,10 +552,13 @@ function treeHtml(st, activeId) {
       h += `<div class="u1">Round: ${esc(String(uk[0].round ?? '').trim())}</div>`;
       for (const [block, ub] of group(uk, u => u.block)) {
         const u0 = ub[0];
-        h += `<div class="u2">${esc(u0.kind || '')}${u0.block_number ?? ''} "${esc(block)}"</div>`;
-        const nws = [...group(ub, u => u.nw)].sort((a, b) => a[0] - b[0]);
-        for (const [nw, un] of nws) {
-          h += `<a class="u3" href="?project=${enc(p.project)}&block=${enc(block)}&nw=${nw}"><span class="c">NW ${nw}</span>${esc(un[0].title || '')}</a>`;
+        h += `<div class="u2">${esc(u0.block_kind || '')}${u0.block_number ?? ''} "${esc(block)}"</div>`;
+        const nws = [...group(ub, treeKey)].sort((a, b) => treeOrder(a[1][0]) - treeOrder(b[1][0]));
+        for (const [, un] of nws) {
+          const x = un[0];
+          h += !x.kind || x.kind === 'network'
+            ? `<a class="u3" href="?project=${enc(p.project)}&block=${enc(block)}&nw=${x.nw}"><span class="c">NW ${x.nw}</span>${esc(x.title || '')}</a>`
+            : `<a class="u3" href="?edit=${enc(x.id)}"><span class="c">${esc(editWhere(x).split(':')[0])}:</span>${esc(editWhere(x).split(':').slice(1).join(':'))}</a>`;
           for (const u of un) {
             h += `<a class="u4 ${u.id === activeId ? 'active' : ''}" href="?edit=${enc(u.id)}"><span class="c">${esc(u.id)}</span>` +
                  `<span class="state s-${esc(u.state)}">${esc(u.state)}</span><span class="note">${esc(u.note || '')}</span></a>`;
@@ -559,6 +569,14 @@ function treeHtml(st, activeId) {
   }
   return h + '</div>';
 }
+// what an edit changes: "NW 2: title", "Interface: +4 Static", "NW 3+ (new): title"
+function editWhere(u) {
+  if (u.kind === 'interface') return `Interface: +${(u.members || []).length} ${u.section}`;
+  if (u.kind === 'new_network') return `NW ${u.after_nw}+ (new): ${u.title || ''}`;
+  return `NW ${u.nw}: ${u.title || ''}`;
+}
+const treeKey = u => u.kind === 'interface' || u.kind === 'new_network' ? u.kind + ':' + u.id : 'nw:' + u.nw;
+const treeOrder = u => u.kind === 'interface' ? -1 : u.kind === 'new_network' ? u.after_nw + 0.5 : u.nw;
 let lastState = {projects: []};
 async function loadTree(activeId) {
   try { lastState = await api('/api/state'); return treeHtml(lastState, activeId); }
@@ -655,7 +673,7 @@ async function showEdit(uid, error) {
   const checks = u.checks || [], last = checks[checks.length - 1];
   m.innerHTML =
     `<div class="edit-head">` +
-    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
+    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.block_kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">${esc(editWhere(u).split(':')[0])}:</span>${esc(editWhere(u).split(':').slice(1).join(':'))}</h1>` +
     `<div class="header"><span class="state s-${esc(u.state)}">${esc(u.state)}</span>${d.errors.length ? `<span class="mark-errors">⚠ ${errorCount(d.errors.length, language)}</span> · ` : ''} round <b>${esc(u.round)}</b> · author <b>${esc(u.author)}</b> · ${esc(u.time.replace('T', ' '))}</div>` +
     (u.note ? `<p class="comment">${esc(u.note)}</p>` : '') +
     `<div class="buttons">` +
@@ -666,14 +684,16 @@ async function showEdit(uid, error) {
     (u.state === 'Approved' ? (u.f ? `<span class="fblock">⚠ F-block: change it by hand following the TIA steps below</span>`
       : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed' : 'fill in the TIA settings for the project first'}">Upload to TIA</button>`) : '') +
     (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exports the block and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
-    (u.state === 'Proposal' ? `<button id="edit_mode">Edit</button>` : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
+    (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
     `<span class="progress" id="progress"></span>` +
     `</div></div>` +
     (d.errors.length ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.length})</b> — open it in the editor and fix:<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
     d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
-    `<details class="panel" open><summary>Model <span class="sum">"after" against the export</span>` +
-    `<span class="legend"><span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></span></summary><div class="body canvas-body" id="model"></div></details>` +
+    (d.interface ? `<details class="panel" open><summary>Interface <span class="sum">section ${esc(d.interface.section)}: before / after</span>` +
+      `<span class="legend"><span class="p">added</span></span></summary><div class="body">${interfaceHtml(d.interface)}</div></details>`
+    : `<details class="panel" open><summary>Model <span class="sum">${u.kind === 'new_network' ? `new ${esc(u.language || '')} network after NW ${u.after_nw}` : '"after" against the export'}</span>` +
+    `<span class="legend"><span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></span></summary><div class="body canvas-body" id="model"></div></details>`) +
     `<details class="panel checks" open><summary>Export checks <span class="sum">${checks.length ? `${checks.length} · latest ${last.match ? 'match' : 'mismatch'}` : 'none yet'}</span></summary><div class="body">` +
     (checks.length ? checks.map(k =>
       `<div><span class="${k.match ? 'ok' : 'bad'}">${k.match ? '✓ match' : '✗ mismatch'}</span> · ${esc(k.time.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.note ? ' · ' + esc(k.note) : ''}</div>`).join('')
@@ -725,8 +745,18 @@ async function showEdit(uid, error) {
       catch (e) { await showEdit(uid, e.message); }
     };
   }
-  canvas($('model'), d, d.diff);
+  if ($('model')) canvas($('model'), d, d.diff);
   try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* no TIA steps */ }
+}
+// E2: interface edit — the edited section before / after, the other sections as counts
+function interfaceHtml(x) {
+  const table = rows => `<table><tr><th>Name</th><th>Data type</th><th>Start value</th><th>Comment</th></tr>` +
+    (rows.length ? rows.map(m => `<tr class="${m.added ? 'added' : ''}"><td>${m.added ? '+ ' : ''}${esc(m.name)}</td><td>${esc(m.type)}</td>` +
+      `<td>${esc(m.initial || '')}</td><td>${esc(m.comment || '')}</td></tr>`).join('') : '<tr><td colspan="4">(empty)</td></tr>') + `</table>`;
+  const other = Object.entries(x.before).filter(([k]) => k !== x.section).map(([k, v]) => `${k} ${v.length}`);
+  return `<div class="iface"><div><h3>Before (export)</h3>${table(x.before[x.section] || [])}</div>` +
+    `<div><h3>After</h3>${table(x.after[x.section] || [])}</div>` +
+    (other.length ? `<div class="other">Other sections unchanged: ${esc(other.join(' · '))}</div>` : '') + `</div>`;
 }
 // F2: TIA steps (markdown -> list), with copy to clipboard
 function md(t) {
@@ -758,7 +788,7 @@ async function showChangelog(project) {
   const row = x => `<div><span class="t">${esc(x.time.slice(11, 19))}</span>` +
     `<span class="k${x.kind === 'check' && x.summary.startsWith('MISMATCH') ? ' check-bad' : ''}">${esc(KIND_TEXT[x.kind] || x.kind)}</span>` +
     (x.edit ? `<a class="c" href="?edit=${enc(x.edit)}">${esc(x.edit)}</a><span class="state s-${esc(x.state)}" title="current state of the edit">${esc(x.state)}</span>` +
-      `<b>${esc(x.block_kind || '')}${x.block_number ?? ''} "${esc(x.block)}" · NW ${x.nw}: ${esc(x.title || '(no title)')}</b>` : '') +
+      `<b>${esc(x.where || '')}</b>` : '') +
     `<span class="sum">${esc(x.summary)}</span>${x.by ? `<span class="by">by ${esc(x.by)}</span>` : ''}</div>`;
   $('content').innerHTML = projectTabs(project, 'changelog') +
     `<h1>Changelog <span class="c">${esc(project)}</span></h1>` +
@@ -838,6 +868,7 @@ async function editor(uid) {
   const d = await api(`/api/edits/${enc(uid)}`);
   const u = d.edit;
   if (u.state !== 'Proposal') { await showEdit(uid, `Only a proposal in state Proposal can be edited (now ${u.state}).`); return; }
+  if (u.kind === 'interface') { await showEdit(uid, 'An interface edit has no canvas — change its members with update_edit (MCP) or POST /api/edits/<id>/after.'); return; }
   const fbd = u.after.language === 'FBD';
   Object.assign(ed, {u, fbd, f: !!u.f, input: null,
                      before: fbd ? {language: 'FBD', elements: u.before.elements} : {elements: u.before.elements, rungs: u.before.rungs},
@@ -856,7 +887,7 @@ async function editor(uid) {
   palette();
   operands();
   $('content').innerHTML = `<div class="edit-head">` +
-    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
+    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.block_kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">${esc(editWhere(u).split(':')[0])}:</span>${esc(editWhere(u).split(':').slice(1).join(':'))}</h1>` +
     `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · editing</div>` +
     `<div class="tools" style="margin:0">` +
     `<button id="ed-undo" title="Ctrl+Z">↶ Undo</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button><span class="sep"></span>` +

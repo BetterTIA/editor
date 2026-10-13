@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 
-from tests.common import ROOT, SAMPLES, PROJECT, TS0, TS1, TS2
+from tests.common import ROOT, SAMPLES, PROJECT, TS0, TS1, TS2, TS_IF
 import mcp_client
 import server
 
@@ -55,7 +55,7 @@ class TestCompare(unittest.TestCase):
     def test_snapshots(self):
         s = server.api_snapshots(self.root, PROJECT)['snapshots']
         self.assertEqual([(x['ts'], x['full'], x['block_count']) for x in s],
-                         [(TS4, True, 5), (TS3, False, 1), (TS2, False, 1), (TS1, False, 1), (TS0, True, 6)])
+                         [(TS4, True, 5), (TS3, False, 1), (TS2, False, 1), (TS1, False, 1), (TS_IF, False, 1), (TS0, True, 6)])
         self.assertEqual(s[1]['blocks'], ['FB_Conveyor'])
         self.assertNotIn('blocks', s[0])
 
@@ -145,7 +145,7 @@ class TestCompareApi(unittest.TestCase):
         self.assertEqual({k: b['networks'][0]['matches'] for k, b in blocks(r).items()},
                          {'FB_Conveyor': [u['id']], 'FB_Safety': [v['id']]})
         s, r = self.req('GET', '/api/projects/%s/snapshots' % PROJECT)
-        self.assertEqual((s, len(r['snapshots'])), (200, 3))
+        self.assertEqual((s, len(r['snapshots'])), (200, 4))
         self.assertEqual(self.req('GET', '/api/projects/%s/compare?from=%s&to=x' % (PROJECT, TS0))[0], 404)
         self.assertEqual(self.req('GET', '/api/projects/Nope/snapshots')[0], 404)
 
@@ -173,15 +173,15 @@ class TestCompareApi(unittest.TestCase):
         k.start()
         try:
             s = json.loads(k.call('list_snapshots', {'project': PROJECT}))['snapshots']
-            self.assertEqual([x['ts'] for x in s], [TS2, TS1, TS0])
+            self.assertEqual([x['ts'] for x in s], [TS2, TS1, TS_IF, TS0])
             r = json.loads(k.call('compare_snapshots', {'project': PROJECT, 'from': TS0, 'to': TS1}))
             self.assertEqual([(b['block'], b['networks'][0]['nw_to'], b['networks'][0]['matches']) for b in r['blocks']],
                              [('FB_Conveyor', 1, [uid])])
             r = json.loads(k.call('compare_snapshots', {'project': PROJECT, 'from': TS0, 'to': TS2, 'block': 'FB_Safety'}))
             self.assertEqual([b['block'] for b in r['blocks']], ['FB_Safety'])
             items = json.loads(k.call('get_changelog', {'project': PROJECT}))['items']
-            self.assertEqual([x['kind'] for x in items], ['snapshot', 'snapshot', 'snapshot', 'proposed'])
-            self.assertEqual(len(json.loads(k.call('get_changelog', {'project': PROJECT, 'until': TS1}))['items']), 2)
+            self.assertEqual([x['kind'] for x in items], ['snapshot'] * 4 + ['proposed'])
+            self.assertEqual(len(json.loads(k.call('get_changelog', {'project': PROJECT, 'until': TS1}))['items']), 3)
             md = k.call('get_changelog', {'project': PROJECT, 'format': 'md'})
             self.assertIn('| %s proposed | FB10 "FB_Conveyor" · NW 1: ' % uid, md)
             with self.assertRaises(mcp_client.MCPError) as e:

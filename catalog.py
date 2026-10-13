@@ -66,7 +66,7 @@ def interface(text):
     head = text[:m.start()] if m else text
     # shortcut: attributes `{…}` are removed by a regex that ignores quotes — a `}` inside an attribute value would break it
     head_rest = re.sub(r'\{[^{}]*\}', '', head)
-    if not re.search(r'^(FUNCTION_BLOCK|FUNCTION|DATA_BLOCK)\b', head_rest, re.M):
+    if not re.search(r'^(FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK|DATA_BLOCK)\b', head_rest, re.M):
         return None
     b = s7dcl.parse_block(head_rest + '\n')
     hm = re.search(r'S7_BlockNumber\s*:=\s*"(\d+)"', head)

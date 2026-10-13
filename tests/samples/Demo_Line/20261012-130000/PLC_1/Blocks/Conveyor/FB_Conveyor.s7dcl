@@ -1,0 +1,164 @@
+{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_BlockNumber := "10";
+    S7_Version := "0.1"
+}
+FUNCTION_BLOCK "FB_Conveyor"
+    VAR_INPUT
+        Start : Bool;
+        Stop : Bool;
+        Direction : Bool;
+        Speed : Real;
+    END_VAR
+    VAR_OUTPUT
+        Motor : Bool;
+        Fault : Bool;
+    END_VAR
+    VAR
+        {
+            S7_Setpoint := "False"
+        }
+        T_Startup : TON_TIME;
+        Startup_Time : Time;
+        Started_Up : Bool;
+        Ready : Bool;
+        Moving : Bool;
+        Ack_P : Bool;
+        Temp_High : Bool;
+        Belt_Running : Bool;
+        Jam_Detected : Bool;
+        Jam_Count : Int;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Start_Povoleno" )
+            Contact( "DB_Machine".Safety_OK )
+            Contact( "DB_Machine".Mode_Auto )
+            Coil( #Ready )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_2";
+        S7_NetworkComment := "MLC_2k"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Start )
+            wire#w1
+            I_Contact( #Stop )
+            Contact( #Ready )
+            Coil( #Motor )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Motor )
+        END_RUNG wire#w1
+        RUNG wire#powerrail
+            Contact( "DB_Machine".Service_Start )
+            I_Contact( "DB_Machine".Service_Lockout )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_3"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Motor )
+            { S7_Templates := "time_type := Time" }
+            #T_Startup.TON(
+                pt := T#2s,
+                et => #Startup_Time
+            )
+            Coil( #Started_Up )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_4"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Motor )
+            "DB_Belt1"(
+                Enable := wire#w1,
+                Direction := #Direction,
+                Speed := "DB_Machine".Speed,
+                Reset :=  ,
+                Running => #Belt_Running,
+                Fault => "Fault_Belt1",
+                State =>  
+            )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Started_Up )
+            I_Contact( "Emergency_Stop" )
+        END_RUNG wire#w1
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_5"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            { S7_Templates := "SrcType := Int" }
+            NE_Contact(
+                in1 := "DB_Machine".Mode,
+                in2 := 0
+            )
+            { S7_Templates := "SrcType := Real" }
+            GT_Contact(
+                in1 := #Speed,
+                in2 := 0.5
+            )
+            Coil( #Moving )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_6"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Motor )
+            
+            Move(
+                in := 1500,
+                out1 => "DB_Machine".Speed_Setpoint
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_7"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Fault_Belt1" )
+            wire#w1
+            S_Coil( #Fault )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( #Temp_High )
+        END_RUNG wire#w1
+        RUNG wire#w1
+            Coil( "Horn" )
+        END_RUNG
+        RUNG wire#powerrail
+            Contact( "Ack" )
+            P_Trig( #Ack_P )
+            R_Coil( #Fault )
+        END_RUNG
+    END_NETWORK
+    { S7_Language := "LAD" }
+    NETWORK
+        RUNG wire#powerrail
+        END_RUNG
+    END_NETWORK
+END_FUNCTION_BLOCK

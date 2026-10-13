@@ -255,3 +255,46 @@ def replace_network(text_s7dcl, nw_number, new_text):
         new_value += '\n'
     t = t[:z] + new_value + t[k.start():]
     return t.replace('\n', '\r\n') if crlf else t
+
+
+# ---------- block interface (E2) ----------
+
+# section of an interface edit -> the keyword line that opens it in `.s7dcl`
+SECTION_KEYWORD = {'Input': 'VAR_INPUT', 'Output': 'VAR_OUTPUT', 'InOut': 'VAR_IN_OUT', 'Static': 'VAR', 'Temp': 'VAR_TEMP',
+                   'Constant': 'VAR CONSTANT'}
+
+
+def member_line(m):
+    """{name, type, initial?} -> `name : Type := initial;` (comments are not written: their document form is unverified)."""
+    return '%s : %s%s;' % (m['name'], m['type'], ' := %s' % m['initial'] if m.get('initial') else '')
+
+
+def add_members(text_s7dcl, section, members):
+    """Appends member lines at the end of the interface section (before its END_VAR); a missing section is created after
+    the last END_VAR of the interface (or right after the block header line). Networks are not touched. CRLF is kept."""
+    if section not in SECTION_KEYWORD:
+        raise WriteError('unknown interface section %r' % (section,))
+    crlf = '\r\n' in text_s7dcl
+    t = text_s7dcl.replace('\r\n', '\n')
+    m = re.search(r'^[ \t]*(?:NETWORK|BEGIN)[ \t]*$', t, re.M)
+    head_end = m.start() if m else len(t)
+    kw = SECTION_KEYWORD[section].replace(' ', r'[ \t]+')
+    opening = re.compile(r'^([ \t]*)%s[ \t]*$' % kw, re.M).search(t, 0, head_end)
+    if opening:
+        end = re.compile(r'^([ \t]*)END_VAR[ \t]*$', re.M).search(t, opening.end(), head_end)
+        if not end:
+            raise WriteError('%s without END_VAR' % SECTION_KEYWORD[section])
+        ind = opening.group(1) + '    '
+        t = t[:end.start()] + ''.join(ind + member_line(x) + '\n' for x in members) + t[end.start():]
+    else:
+        ends = list(re.compile(r'^([ \t]*)END_VAR[ \t]*\n', re.M).finditer(t, 0, head_end))
+        if ends:
+            at, ind = ends[-1].end(), ends[-1].group(1)
+        else:
+            hl = re.compile(r'^(FUNCTION_BLOCK|FUNCTION|ORGANIZATION_BLOCK)\b.*\n', re.M).search(t, 0, head_end)
+            if not hl:
+                raise WriteError('block header not found')
+            at, ind = hl.end(), '    '
+        t = t[:at] + ind + SECTION_KEYWORD[section] + '\n' + ''.join(ind + '    ' + member_line(x) + '\n' for x in members) \
+            + ind + 'END_VAR\n' + t[at:]
+    return t.replace('\n', '\r\n') if crlf else t
