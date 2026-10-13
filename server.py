@@ -1019,6 +1019,23 @@ def _same(a, b):
     return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
+def _inside(path, root):
+    """Is path the root or below it? (different drives = no)"""
+    a, b = (os.path.normcase(os.path.abspath(x)) for x in (path, root))
+    try:
+        return os.path.commonpath([a, b]) == b
+    except ValueError:
+        return False
+
+
+def is_fake(mcp):
+    """Writer or Reader command runs tests/fake_mcp.py -> the editor is a demo instance."""
+    return any(os.path.basename(str(x)) == 'fake_mcp.py' for cfg in (mcp or {}).values() if cfg for x in cfg[0])
+
+
+DEMO_REFUSED = 'demo instance: start the editor without fake Writer/Reader for real projects'
+
+
 def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, portal=None, software_path=None,
              close=False):
     """TIA project -> Reader export of the whole PLC (chunked) -> registry. name None = a new project named by the Reader folder."""
@@ -1400,6 +1417,7 @@ class Handler(BaseHTTPRequestHandler):
     tia_status = {}
     ai_clients = {}
     ai_timeout = AI_TIMEOUT
+    demo = False                     # fake Writer/Reader: only projects under the default export root
 
     def log_message(self, fmt, *args):
         pass
@@ -1436,6 +1454,10 @@ class Handler(BaseHTTPRequestHandler):
         def body_project():
             b = self._body()
             return b.get('project') if isinstance(b, dict) else ''
+
+        def demo_guard(uid):                              # Upload / Check of a real project through fake servers
+            if self.demo and not _inside(root_of(uid), self.root):
+                raise state.StateError(DEMO_REFUSED)
         origin = self.headers.get('Origin')
         if method != 'GET' and origin and urlparse(origin).hostname not in ('localhost', '127.0.0.1'):
             self._json({'error': 'cross-origin request refused'}, 403)   # another web page must not drive TIA
@@ -1478,15 +1500,20 @@ class Handler(BaseHTTPRequestHandler):
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check-export', c):
                 self._json(api_check_export(root_of(c.split('/')[3]), self.data, c.split('/')[3], self._body()))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/upload', c):
+                demo_guard(c.split('/')[3])
                 self._json(api_upload(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout,
                                       self.tia_status.get('portalId') if self.tia_status.get('tia') == 'attached' else None))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check', c):
+                demo_guard(c.split('/')[3])
                 self._json(api_check(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
             elif method == 'GET' and c == '/api/projects':
                 self._json(api_projects(self.root, self.data, self.jobs))
             elif method == 'POST' and c == '/api/projects':
                 b = self._body() if isinstance(self._body(), dict) else {}
                 if b.get('source') == 'exports':
+                    path = str(b.get('path') or '').strip().strip('"')
+                    if self.demo and path and not b.get('force') and not _inside(path, self.root):
+                        raise state.StateError(DEMO_REFUSED)
                     self._json(api_project_add_exports(self.data, b), 201)
                 elif b.get('source') in ('tia', 'ap21'):
                     self._json({'job': api_snapshot(self, None, b, b['source'])}, 202)
@@ -1516,7 +1543,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.jobs[c.split('/')[3]])
             elif method == 'GET' and c == '/api/tia/status':
                 st = refresh_status(self, q.get('portalId')) if q.get('refresh') == '1' or q.get('portalId')                     else dict(self.tia_status)
-                self._json(dict(st, **ai_status(self)))
+                self._json(dict(st, demo=self.demo, **ai_status(self)))
             elif method == 'GET' and c == '/api/ai/clients':
                 self._json(ai_status(self))
             elif method == 'POST' and c == '/api/ai/clients':
@@ -1548,10 +1575,12 @@ class Handler(BaseHTTPRequestHandler):
         self._handle('DELETE')
 
 
-def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300, autoconnect=False, ai_timeout=AI_TIMEOUT):
-    """autoconnect: check the TIA status once in the background at start (and the home page checks it when opened)."""
+def create_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300, autoconnect=False, ai_timeout=AI_TIMEOUT,
+                  demo=False):
+    """autoconnect: check the TIA status once in the background at start (and the home page checks it when opened).
+    demo: fake Writer/Reader — projects outside the default export root are refused (add, Upload, Check)."""
     h = type('H', (Handler,), {'root': root, 'data': data, 'mcp': mcp, 'mcp_timeout': mcp_timeout, 'jobs': {},
-                               'ai_clients': {}, 'ai_timeout': ai_timeout,
+                               'ai_clients': {}, 'ai_timeout': ai_timeout, 'demo': demo,
                                'tia_status': {'tia': 'unknown', 'checked': False, 'autoconnect': autoconnect}})
     sync_registry(root, data)
     srv = ThreadingHTTPServer((host, port), h)
@@ -1582,10 +1611,15 @@ def main():
                     help='do not check TIA Portal at start and when the home page opens (only the Refresh button does)')
     ap.add_argument('--ai-timeout', type=float, default=AI_TIMEOUT,
                     help='forget an AI client (mcp_server.py) after this many seconds without a heartbeat')
+    ap.add_argument('--demo', action='store_true',
+                    help='demo instance (also implied by a fake Writer/Reader): a banner on every page, real projects refused')
     a = ap.parse_args()
-    srv = create_server(a.port, a.export_root, a.data, mcp=mcp_config(a.mcp_json, a.writer_cmd, a.reader_cmd),
-                        mcp_timeout=a.mcp_timeout, autoconnect=not a.no_autoconnect, ai_timeout=a.ai_timeout)
-    print('TIAC_Editor at http://localhost:%d  (export root %s, data %s)' % (a.port, a.export_root, a.data), flush=True)
+    mcp = mcp_config(a.mcp_json, a.writer_cmd, a.reader_cmd)
+    demo = a.demo or is_fake(mcp)
+    srv = create_server(a.port, a.export_root, a.data, mcp=mcp, mcp_timeout=a.mcp_timeout,
+                        autoconnect=not a.no_autoconnect, ai_timeout=a.ai_timeout, demo=demo)
+    print('TIAC_Editor at http://localhost:%d  (export root %s, data %s%s)' % (a.port, a.export_root, a.data,
+                                                                              ', DEMO — fake TIA' if demo else ''), flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

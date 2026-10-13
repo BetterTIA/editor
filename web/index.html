@@ -31,7 +31,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
-       display: grid; grid-template-rows: auto 1fr; }
+       display: grid; grid-template-rows: auto auto 1fr; }
 a { color: var(--accent); }
 :focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-sm); }
 h1 { font-size: 18px; margin: 0 0 var(--s1); font-weight: 600; line-height: 1.3; }
@@ -71,6 +71,10 @@ header .info { color: var(--muted); font-size: 13px; min-width: 0; overflow: hid
 .chip.bad b { color: var(--deleted); }
 .status button, .status select { font-size: 12px; padding: 2px 10px; border-radius: 999px; }
 #theme { padding: 4px 8px; border-radius: 999px; line-height: 1; }
+.demo-banner { background: repeating-linear-gradient(-45deg, var(--warning) 0 14px, color-mix(in srgb, var(--warning) 80%, #000) 14px 28px);
+               color: #1b1200; font-weight: 700; text-align: center; padding: 4px var(--s4); letter-spacing: .02em; font-size: 13px; }
+.demo-banner span { background: var(--warning); padding: 1px 10px; border-radius: var(--r-sm); }
+.demo-banner:empty { padding: 0; }
 /* ---------- layout ---------- */
 .main { display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
 aside { border-right: 1px solid var(--edge); overflow: auto; background: var(--panel); padding-bottom: var(--s4); }
@@ -308,6 +312,7 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 </script>
 </head>
 <body>
+<div class="demo-banner" id="demo-banner" role="status"></div>
 <header><a href="/" class="brand" aria-label="BetterTIA Editor, home"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 2v18" stroke="var(--accent)" stroke-width="3"/><path d="M3 11h5M14 11h5M8 6v10M14 6v10" stroke="var(--accent)" stroke-width="2" fill="none"/></svg>BetterTIA Editor</a><a href="/" id="home-link">Home</a><span class="info" id="info">viewer and editor</span><span class="status" id="status"></span><button id="theme" title="switch light / dark theme" aria-label="switch theme">&#9680;</button></header>
 <div class="main">
   <aside id="nw"></aside>
@@ -1201,15 +1206,17 @@ function statusHtml(st) {
   const chip = (cls, label, value, title) => `<span class="chip ${cls}" title="${esc(title || value)}">${label} <b>${esc(value)}</b></span>`;
   const tool = v => (v || 'missing').startsWith('error') ? 'bad' : v === 'configured' ? 'ok' : 'warn';
   let tia;
-  if (st.tia === 'attached') tia = chip('ok', 'TIA', `attached · ${st.project || '?'}`, st.project_path);
+  const fake = st.demo ? ' (fake)' : '';
+  $('demo-banner').innerHTML = st.demo ? '<span>DEMO — fake TIA, nothing is written to a real project</span>' : '';
+  if (st.tia === 'attached') tia = chip(st.demo ? 'warn' : 'ok', 'TIA', `attached${fake} · ${st.project || '?'}`, st.project_path);
   else if (st.tia === 'running') tia = chip('warn', 'TIA', `running: ${st.project || '?'}`, st.project_path);
   else if (st.tia === 'not running') tia = chip('warn', 'TIA', 'not running', 'no TIA Portal instance — open your project in TIA Portal');
   else if (st.tia === 'choose') tia = chip('warn', 'TIA', `${st.instances.length} instances`) +
     `<select id="portal"><option value="">choose instance…</option>${st.instances.map(i =>
       `<option value="${esc(i.portalId)}">${esc(i.project || '?')} (${esc(i.portalId)})</option>`).join('')}</select>`;
   else tia = chip('', 'TIA', st.checked === false ? 'not checked' : 'unknown');
-  return tia + chip(tool(st.writer), 'Writer', st.writer || '—') +
-    chip(tool(st.reader), 'Reader', st.reader || '—', st.reader_export_root ? `${st.reader} · Reader export root: ${st.reader_export_root}` : st.reader) +
+  return tia + chip(tool(st.writer), 'Writer', (st.writer || '—') + fake) +
+    chip(tool(st.reader), 'Reader', (st.reader || '—') + fake, st.reader_export_root ? `${st.reader} · Reader export root: ${st.reader_export_root}` : st.reader) +
     aiChip(st, chip) +
     `<button id="status-refresh" title="check TIA Portal, Writer and Reader again">${st.busy ? 'Busy…' : 'Refresh'}</button>`;
 }

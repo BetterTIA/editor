@@ -18,6 +18,8 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
 - `--mcp-json`, `--writer-cmd`, `--reader-cmd`, `--mcp-timeout` configure the Writer and the Reader (TIA status,
   snapshots, Upload and Check; see [Upload and Check](#upload-and-check)).
 - `--no-autoconnect` = do not check TIA Portal at start and when the home page opens (only the Refresh button does).
+- `--demo` = a demo instance (see [Demo mode](#demo-mode)); implied when `--writer-cmd` / `--reader-cmd` (or the
+  `.mcp.json` entries) run `testsake_mcp.py`.
 - `--ai-timeout` (60 s) = an AI client (see [MCP server](#mcp-server)) without a heartbeat for this long is forgotten.
 - The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403.
 
@@ -45,7 +47,9 @@ drawn from. Without TIA Portal it is a viewer of exports already on disk.
 configured, one card per project (name, source, last snapshot, number of exports, PLC, edits by state,
 Open / New snapshot / Remove, the progress of the last snapshot job) and **Add project**:
 - *Export folder* — a folder on disk: a project folder (`<project>\<YYYYMMDD-HHMMSS>\…`) or an export root with
-  project folders (each one is added);
+  project folders (each one is added). For a project folder the registry stores its **parent** as `export_root`
+  (the project name is the folder name): `{source: "exports", path: "<folder>\Line_A"}` → `export_root: "<folder>"`,
+  `name: "Line_A"`;
 - *Connect to open TIA project* — snapshot of the project open in TIA Portal (does not start TIA);
 - *Open .ap21 file* — the Writer's `OpenTiaProject` opens the project (it **may start TIA Portal and take minutes**),
   then a snapshot; optionally the project is closed afterwards (`CloseProject`, without saving).
@@ -386,6 +390,18 @@ hand following the TIA steps), **Check →** (Signed); while running the buttons
 them; the result is in the "Upload / Check (Writer, Reader)" panel with the steps (a failed step in red with its
 message), an error also as a warning at the top (the page does not break). A "States: …" line shows the six states
 with the current one highlighted.
+
+### Demo mode
+A server whose Writer or Reader runs `testsake_mcp.py` (or that is started with `--demo`) is a **demo instance**:
+- every page shows a striped banner "DEMO — fake TIA, nothing is written to a real project", the status bar says
+  `attached (fake)` / `configured (fake)`, and `GET /api/tia/status` returns `demo: true`;
+- `POST /api/projects {source: "exports", path}` with a path **outside** the default `--export-root` → **409**
+  "demo instance: start the editor without fake Writer/Reader for real projects" (`force: true` in the body overrides
+  it — API only, the UI does not offer it);
+- Upload and Check of an edit whose project lives outside the default export root → the same 409.
+
+Start the editor for a real project without fake commands; a demo instance and a real one can run side by side on
+different ports.
 
 **Fake servers (tests and demo, no TIA):** `tests\fake_mcp.py writer|reader` — MCP over stdio, only the tools above.
 The "TIA project" = the `--state` folder (default `%TEMP%\tiac_fake_tia`): the Writer exports the block from there
