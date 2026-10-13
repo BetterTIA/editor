@@ -76,7 +76,7 @@ class TestApi(unittest.TestCase):
         s, t, b = self.get('/?project=%s&block=FB_Conveyor&nw=2&screenshot=1' % PROJECT)
         self.assertEqual(s, 200)
         self.assertIn('text/html', t)
-        self.assertIn(b'TIAC_Editor', b)
+        self.assertIn(b'BetterTIA Editor', b)
 
     @unittest.skipUnless(any(os.path.exists(p) for p in screenshot.BROWSERS), 'Chrome/Edge missing')
     def test_screenshot(self):

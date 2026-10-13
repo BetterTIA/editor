@@ -3,219 +3,298 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TIAC_Editor</title>
+<title>BetterTIA Editor</title>
 <style>
+/* ---------- tokens: dark is the default, [data-theme="light"] overrides (set before paint by the script below) ---------- */
 :root {
-  --bg: #1e1e1e; --panel: #252526; --edge: #3a3a3a; --text: #f0f0f0; --muted: #a8a8a8;
-  --accent: #00D7FF; --wire: #8A8A8A; --warning: #fb923c; --select: #0e3a47;
+  --bg: #14171b; --panel: #1b1f24; --raised: #22272e; --edge: #2f363f; --edge-strong: #46505c;
+  --text: #e7eaee; --muted: #9ba5b1; --accent: #4cc9e0; --accent-ink: #062530; --accent-soft: rgba(76, 201, 224, .14);
+  --wire: #8c96a1; --operand: #e7eaee; --warning: #f0a050; --select: rgba(76, 201, 224, .14);
+  --added: #6bd97e; --changed: #f0a050; --deleted: #ff7a7a;
+  --s-Proposal: #a3acb7; --s-Approved: #4cc9e0; --s-Signed: #c49bff; --s-Checked: #3ad1b5; --s-Uploaded: #f2c94c; --s-Tested: #6bd97e;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 12px rgba(0, 0, 0, .25);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --r-sm: 5px; --r: 8px;
+  --mono: Consolas, "Cascadia Mono", "DejaVu Sans Mono", monospace;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #ffffff; --panel: #f3f3f3; --edge: #d0d0d0; --text: #111111; --muted: #555555;
-    --accent: #0a7ea4; --wire: #4a4a4a; --warning: #c2410c; --select: #d6f1fa;
-    color-scheme: light;
-  }
-}
 :root[data-theme="light"] {
-  --bg: #ffffff; --panel: #f3f3f3; --edge: #d0d0d0; --text: #111111; --muted: #555555;
-  --accent: #0a7ea4; --wire: #4a4a4a; --warning: #c2410c; --select: #d6f1fa;
+  --bg: #f3f5f7; --panel: #ffffff; --raised: #f7f8fa; --edge: #d9dee4; --edge-strong: #b3bcc7;
+  --text: #161b21; --muted: #56606c; --accent: #0a6f8a; --accent-ink: #ffffff; --accent-soft: rgba(10, 111, 138, .10);
+  --wire: #59636e; --operand: #161b21; --warning: #b45309; --select: rgba(10, 111, 138, .10);
+  --added: #15803d; --changed: #c2410c; --deleted: #b91c1c;
+  --s-Proposal: #5b6573; --s-Approved: #0a6f8a; --s-Signed: #7c3aed; --s-Checked: #0f766e; --s-Uploaded: #8a5a00; --s-Tested: #15803d;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 2px 8px rgba(16, 24, 40, .06);
   color-scheme: light;
 }
+/* ---------- base ---------- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+body { background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
        display: grid; grid-template-rows: auto 1fr; }
-header { display: flex; gap: 16px; align-items: baseline; padding: 8px 16px; border-bottom: 1px solid var(--edge);
-         background: var(--panel); }
-header b { color: var(--accent); font-size: 15px; }
-header .info { color: var(--muted); }
-.main { display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
-aside { border-right: 1px solid var(--edge); overflow: auto; background: var(--panel); }
-aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 12px 12px 6px; }
-aside a { display: block; padding: 5px 12px; color: var(--text); text-decoration: none; border-left: 3px solid transparent;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+a { color: var(--accent); }
+:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-sm); }
+h1 { font-size: 18px; margin: 0 0 var(--s1); font-weight: 600; line-height: 1.3; }
+h1 .c, .c { color: var(--accent); font-family: var(--mono); }
+code, pre { font-family: var(--mono); }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+/* one button system: default = secondary, .primary/.forward/.hl = primary */
+button, .btn { font-size: 13px; padding: 5px 12px; border-radius: var(--r-sm); border: 1px solid var(--edge-strong);
+               background: var(--raised); color: var(--text); line-height: 1.3; transition: border-color .12s, background .12s; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { color: var(--muted); border-color: var(--edge); background: transparent; cursor: not-allowed; opacity: .75; }
+button.primary, button.forward, button.hl { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.primary:hover:not(:disabled), button.forward:hover:not(:disabled), button.hl:hover:not(:disabled) { filter: brightness(1.08); }
+button.primary:disabled, button.forward:disabled, button.hl:disabled { background: transparent; color: var(--muted); border-color: var(--edge); }
+button.small { font-size: 12px; padding: 2px 8px; }
+input[type=text], input:not([type]), select { background: var(--bg); border: 1px solid var(--edge-strong); border-radius: var(--r-sm);
+                                             padding: 4px 8px; color: var(--text); }
+input:focus-visible, select:focus-visible { border-color: var(--accent); }
+/* ---------- header and status strip ---------- */
+header { display: flex; gap: var(--s4); align-items: center; padding: var(--s2) var(--s4); border-bottom: 1px solid var(--edge);
+         background: var(--panel); min-height: 48px; }
+header .brand { display: flex; gap: var(--s2); align-items: center; color: var(--text); text-decoration: none; font-weight: 600; font-size: 15px; }
+header .brand svg { flex: none; }
+header a { color: var(--muted); text-decoration: none; }
+header a:hover { color: var(--accent); }
+header .info { color: var(--muted); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status { margin-left: auto; display: flex; gap: var(--s1); align-items: center; flex-wrap: wrap; font-size: 12px;
+          padding: 3px; border: 1px solid var(--edge); border-radius: 999px; background: var(--bg); }
+.chip { display: inline-flex; gap: 6px; align-items: center; border-radius: 999px; padding: 2px 10px; color: var(--muted);
+        white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+.chip::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--edge-strong); }
+.chip b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.chip.ok::before { background: var(--added); box-shadow: 0 0 0 3px color-mix(in srgb, var(--added) 25%, transparent); }
+.chip.warn::before { background: var(--warning); }
+.chip.bad::before { background: var(--deleted); }
+.chip.bad b { color: var(--deleted); }
+.status button, .status select { font-size: 12px; padding: 2px 10px; border-radius: 999px; }
+#theme { padding: 4px 8px; border-radius: 999px; line-height: 1; }
+/* ---------- layout ---------- */
+.main { display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
+aside { border-right: 1px solid var(--edge); overflow: auto; background: var(--panel); padding-bottom: var(--s4); }
+aside h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: var(--s4) var(--s3) var(--s2); }
+aside a { display: block; padding: 5px var(--s3); color: var(--text); text-decoration: none;
+          border-left: 3px solid transparent; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 aside a:hover { background: var(--select); }
-aside a.active { border-left-color: var(--accent); background: var(--select); }
-aside a .c { color: var(--accent); font-family: Consolas, monospace; margin-right: 6px; }
-aside a .j { color: var(--muted); font-size: 11px; margin-left: 4px; }
-main { overflow: auto; padding: 14px 18px; min-width: 0; }
-h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
-h1 .c { color: var(--accent); font-family: Consolas, monospace; }
-.comment { color: var(--muted); margin: 0 0 8px; white-space: pre-wrap; }
-.warning { color: var(--warning); border: 1px solid var(--warning); padding: 6px 10px; border-radius: 4px; margin: 8px 0; }
-.canvas { overflow: auto; border: 1px solid var(--edge); border-radius: 4px; background: var(--bg); padding: 6px 0; }
-svg text { font: 12px Consolas, "DejaVu Sans Mono", monospace; fill: var(--text); }
+aside a.active { border-left-color: var(--accent); background: var(--select); font-weight: 600; }
+aside a .c { margin-right: 6px; }
+aside a .j { color: var(--muted); font-size: 11px; border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }
+main { overflow: auto; padding: var(--s4) var(--s5); min-width: 0; }
+.comment { color: var(--muted); margin: 0 0 var(--s2); white-space: pre-wrap; }
+.warning { color: var(--text); border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent); border-left: 4px solid var(--warning);
+           background: color-mix(in srgb, var(--warning) 9%, transparent); padding: var(--s2) var(--s3); border-radius: var(--r-sm); margin: var(--s2) 0; }
+.warning b { color: var(--warning); }
+.notice { border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); padding: var(--s4); margin: var(--s3) 0; max-width: 640px; }
+.notice b { display: block; margin-bottom: var(--s1); font-size: 15px; }
+.notice span { color: var(--muted); }
+/* ---------- canvas (LAD / FBD) ---------- */
+.canvas { overflow: auto; border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); padding: var(--s2) 0;
+          background-image: radial-gradient(color-mix(in srgb, var(--wire) 22%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
+svg text { font: 12px var(--mono); fill: var(--operand); }
 svg .pin { font-size: 11px; fill: var(--muted); }
 svg .symbol { font-weight: bold; fill: var(--accent); }
-svg .empty { fill: var(--muted); }
-svg .wire { stroke: var(--wire); stroke-width: 1.5; fill: none; }
+svg .empty { fill: var(--muted); font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+svg .wire { stroke: var(--wire); stroke-width: 1.6; fill: none; stroke-linecap: square; }
 svg .rail { stroke: var(--accent); stroke-width: 4; }
-svg .el { stroke: var(--accent); stroke-width: 2; fill: none; }
-svg .box { stroke: var(--accent); stroke-width: 1.5; fill: var(--bg); }
-svg .mask { fill: var(--bg); stroke: none; }
-svg .neg { fill: var(--bg); stroke-width: 1.5; }
+svg .el { stroke: var(--accent); stroke-width: 2; fill: none; stroke-linecap: round; }
+svg .box { stroke: var(--accent); stroke-width: 1.6; fill: var(--panel); }
+svg .mask { fill: var(--panel); stroke: none; }
+svg .neg { fill: var(--panel); stroke-width: 1.6; }
 svg .node { fill: var(--wire); stroke: none; }
 svg .hit-pin { fill: transparent; cursor: pointer; }
-.procedure ol { margin: 4px 0 8px; padding-left: 22px; font-size: 13px; }
-.procedure li { margin: 3px 0; }
-.procedure code { font: 12px Consolas, monospace; color: var(--accent); }
-.procedure h3 { display: flex; gap: 10px; align-items: center; }
-.procedure button { font: inherit; font-size: 12px; padding: 1px 9px; border-radius: 4px; border: 1px solid var(--edge);
-                 background: var(--panel); color: var(--text); cursor: pointer; text-transform: none; letter-spacing: 0; }
-.errors .var { color: var(--muted); }
-svg g.d-changed text.without-changes { fill: var(--text); font-weight: normal; }   /* FBD: on a changed box only the changed pins */
-pre, .rungs { font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; }
+svg g.d-changed text.without-changes { fill: var(--operand); font-weight: normal; }   /* FBD: on a changed box only the changed pins */
+svg g.d-added .el, svg g.d-added .box { stroke: var(--added); stroke-width: 2.6; }
+svg g.d-added text, svg g.d-added .symbol { fill: var(--added); font-weight: bold; }
+svg g.d-changed .el, svg g.d-changed .box { stroke: var(--changed); stroke-width: 2.6; }
+svg g.d-changed text, svg g.d-changed .symbol { fill: var(--changed); font-weight: bold; }
+svg g.d-deleted .el, svg g.d-deleted .box { stroke: var(--deleted); stroke-width: 2.6; stroke-dasharray: 3 2; }
+svg g.d-deleted text, svg g.d-deleted .symbol { fill: var(--deleted); text-decoration: line-through; }
+pre, .rungs { font: 12px/1.6 var(--mono); white-space: pre-wrap; }
+.rungs { padding: var(--s2) var(--s3); }
 .rungs div { border-bottom: 1px dashed var(--edge); padding: 2px 0; }
 ul.select { list-style: none; padding: 0; columns: 3 220px; }
-ul.select a { color: var(--text); }
-/* M2: diff and states */
-:root { --added: #4ade80; --changed: #fb923c; --deleted: #f87171;
-        --s-Proposal: #a8a8a8; --s-Approved: #00D7FF; --s-Signed: #c084fc; --s-Checked: #2dd4bf; --s-Uploaded: #facc15; --s-Tested: #4ade80; }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) { --added: #15803d; --changed: #c2410c; --deleted: #b91c1c;
-    --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Checked: #0f766e; --s-Uploaded: #a16207; --s-Tested: #15803d; }
-}
-:root[data-theme="light"] { --added: #15803d; --changed: #c2410c; --deleted: #b91c1c;
-  --s-Proposal: #6b7280; --s-Approved: #0a7ea4; --s-Signed: #7e22ce; --s-Checked: #0f766e; --s-Uploaded: #a16207; --s-Tested: #15803d; }
-svg g.d-added .el, svg g.d-added .box { stroke: var(--added); stroke-width: 2.5; }
-svg g.d-added text, svg g.d-added .symbol { fill: var(--added); font-weight: bold; }
-svg g.d-changed .el, svg g.d-changed .box { stroke: var(--changed); stroke-width: 2.5; }
-svg g.d-changed text, svg g.d-changed .symbol { fill: var(--changed); font-weight: bold; }
-svg g.d-deleted .el, svg g.d-deleted .box { stroke: var(--deleted); stroke-width: 2.5; stroke-dasharray: 3 2; }
-svg g.d-deleted text, svg g.d-deleted .symbol { fill: var(--deleted); text-decoration: line-through; }
-.tree { padding-bottom: 6px; border-bottom: 1px solid var(--edge); }
-.tree .u0, .tree .u1, .tree .u2 { padding: 3px 12px; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tree .u0 { color: var(--text); font-weight: 600; }
-.tree .u1 { padding-left: 22px; }
-.tree .u2 { padding-left: 32px; }
-.tree a.u3 { padding-left: 42px; font-size: 13px; }
-.tree a.u4 { padding-left: 54px; font-size: 13px; }
-.tree .empty { padding: 3px 12px; color: var(--muted); font-size: 12px; margin: 0; }
-.state { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: 11px; font-weight: 600; margin: 0 6px;
-        border: 1px solid var(--sc); color: var(--sc); }
+ul.select li { padding: 2px 0; }
+ul.select a { color: var(--text); text-decoration: none; } ul.select a:hover { color: var(--accent); }
+.legend { font-size: 12px; color: var(--muted); display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.legend span::before { content: ''; width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.legend .p { color: var(--added); } .legend .z { color: var(--changed); } .legend .s { color: var(--deleted); } .legend .e { color: var(--warning); }
+/* ---------- states: chip + dot, stepper ---------- */
 .s-Proposal { --sc: var(--s-Proposal); } .s-Approved { --sc: var(--s-Approved); } .s-Signed { --sc: var(--s-Signed); }
 .s-Checked { --sc: var(--s-Checked); } .s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); }
-.header { color: var(--muted); margin: 2px 0 8px; }
+.state { display: inline-flex; gap: 5px; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+         margin: 0 6px; border: 1px solid color-mix(in srgb, var(--sc) 60%, transparent); color: var(--sc);
+         background: color-mix(in srgb, var(--sc) 12%, transparent); white-space: nowrap; line-height: 18px; }
+.state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--sc); }
+.stepper { display: flex; align-items: center; gap: 0; list-style: none; margin: 0; padding: 0 0 0 var(--s3); position: relative;
+           border-left: 4px solid var(--accent); flex-wrap: wrap; }   /* the left edge is the power rail */
+.stepper li { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 6px 0; }
+.stepper li + li::before { content: ''; width: 22px; height: 2px; background: var(--edge-strong); margin: 0 6px; }
+.stepper li.done + li::before, .stepper li.current::before { background: var(--wire); }
+.stepper .node { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--edge-strong); flex: none; }
+.stepper li.done .node { background: var(--sc); border-color: var(--sc); }
+.stepper li.done { color: var(--text); }
+.stepper li.current { color: var(--sc); font-weight: 700; font-size: 13px; }
+.stepper li.current .node { width: 16px; height: 16px; border-color: var(--sc); background: var(--sc);
+                            box-shadow: 0 0 0 4px color-mix(in srgb, var(--sc) 25%, transparent); }
+.flow { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; margin: var(--s4) 0 0; }
+/* ---------- edit page ---------- */
+.edit-head { display: grid; gap: var(--s3); padding: var(--s4); background: var(--panel); border: 1px solid var(--edge);
+             border-radius: var(--r); box-shadow: var(--shadow); margin-bottom: var(--s4); }
+.header { color: var(--muted); margin: 0; font-size: 13px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .header b { color: var(--text); font-weight: 600; }
-.buttons { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.buttons button { font: inherit; padding: 5px 14px; border-radius: 4px; border: 1px solid var(--accent); background: transparent;
-                   color: var(--accent); cursor: pointer; }
-.buttons button.forward { background: var(--accent); color: var(--bg); font-weight: 600; }
-.buttons button:disabled { border-color: var(--edge); background: transparent; color: var(--muted); cursor: not-allowed; }
-.checks { font-size: 13px; margin: 6px 0 10px; }
-.checks h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 4px; }
-.checks .ok { color: var(--added); } .checks .bad { color: var(--deleted); }
-/* M5: Upload / Check, writes, TIA settings */
-.buttons button.tia { border-color: var(--s-Signed); color: var(--s-Signed); font-weight: 600; }
-.buttons button.tia.check { border-color: var(--s-Checked); color: var(--s-Checked); }
-.buttons .fblock { font-size: 12px; color: var(--warning); align-self: center; }
-.progress { font-size: 12px; color: var(--muted); align-self: center; }
-.writes ol { margin: 2px 0 6px 18px; padding: 0; color: var(--muted); font-size: 12px; }
+.header .state { margin: 0; }
+.buttons { display: flex; gap: var(--s2); margin: 0; flex-wrap: wrap; align-items: center; }
+.buttons .sep { width: 1px; align-self: stretch; background: var(--edge); margin: 0 var(--s1); }
+.buttons button.tia { border-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+.buttons .fblock { font-size: 12px; color: var(--warning); }
+.progress { font-size: 12px; color: var(--muted); }
+.mark-errors { color: var(--warning); font-weight: 600; }
+details.panel { border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); margin: 0 0 var(--s3); }
+details.panel > summary { list-style: none; cursor: pointer; display: flex; gap: var(--s2); align-items: center; padding: var(--s2) var(--s3);
+                          font-weight: 600; font-size: 13px; border-radius: var(--r); }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary::before { content: ''; width: 6px; height: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+                                  transform: rotate(-45deg); transition: transform .15s; margin: 0 4px 0 2px; flex: none; }
+details.panel[open] > summary::before { transform: rotate(45deg); }
+details.panel > summary .sum { color: var(--muted); font-weight: 400; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.panel > summary .legend, details.panel > summary .end { margin-left: auto; }
+details.panel > .body { padding: 0 var(--s3) var(--s3); font-size: 13px; }
+details.panel > .body.canvas-body { padding: 0 var(--s2) var(--s2); }
+details.panel > .body.canvas-body .canvas { border-radius: var(--r-sm); }
+.checks > div { padding: 2px 0; }
+.checks .ok { color: var(--added); font-weight: 600; } .checks .bad { color: var(--deleted); font-weight: 600; }
+.writes ol { margin: 2px 0 var(--s2) 22px; padding: 0; color: var(--muted); font-size: 12px; }
 .writes ol li.bad { color: var(--deleted); }
-details.tia-settings { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
-details.tia-settings input { font: 12px Consolas, monospace; width: 150px; margin: 2px 6px 2px 2px; background: transparent;
-                         color: var(--text); border: 1px solid var(--edge); border-radius: 3px; padding: 2px 4px; }
-.legend { font-size: 12px; color: var(--muted); margin: 4px 0; display: flex; gap: 14px; }
-.legend span::before { content: '■ '; } .legend .p { color: var(--added); } .legend .z { color: var(--changed); }
-.legend .s { color: var(--deleted); }
-.states-leg { font-size: 11px; color: var(--muted); margin: 4px 0; } .states-leg .state { margin: 0 3px; opacity: .55; }
-.states-leg .state.active { opacity: 1; background: color-mix(in srgb, var(--sc) 18%, transparent); }
-/* M3: editor */
-.main.edit { grid-template-columns: 280px 1fr 250px; }
+.procedure ol { margin: var(--s1) 0 0; padding-left: 22px; }
+.procedure li { margin: var(--s1) 0; }
+.procedure code { font: 12px var(--mono); color: var(--accent); background: var(--accent-soft); padding: 0 4px; border-radius: 3px; }
+.procedure .header { margin-bottom: var(--s1); }
+details.tia-settings .body input { font: 12px var(--mono); width: 150px; margin: 2px 6px 2px 2px; }
+details.tia-settings .body label { color: var(--muted); font-size: 12px; }
+/* ---------- editor ---------- */
+.main.edit { grid-template-columns: 290px 1fr 260px; }
 #palette { border-left: 1px solid var(--edge); border-right: 0; }
-#palette input { width: calc(100% - 24px); margin: 4px 12px 6px; font: inherit; padding: 4px 8px; background: var(--bg);
-                color: var(--text); border: 1px solid var(--edge); border-radius: 4px; }
-#palette .item { display: flex; gap: 8px; align-items: baseline; padding: 4px 12px; cursor: grab; border-left: 3px solid transparent;
+#palette input { width: calc(100% - 24px); margin: var(--s1) var(--s3) var(--s2); }
+#palette .item { display: flex; gap: var(--s2); align-items: center; padding: 4px var(--s3); cursor: grab; border-left: 3px solid transparent;
                white-space: nowrap; overflow: hidden; }
 #palette .item:hover { background: var(--select); }
 #palette .item.active { border-left-color: var(--accent); background: var(--select); }
-#palette .item b { font: 600 12px Consolas, monospace; color: var(--accent); min-width: 64px; }
+#palette .item b { font: 600 12px var(--mono); color: var(--accent); min-width: 58px; }
 #palette .item span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-.tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
-.tools button { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 4px; border: 1px solid var(--edge);
-                   background: var(--panel); color: var(--text); cursor: pointer; }
-.tools button:hover:not(:disabled) { border-color: var(--accent); }
-.tools button.active { border-color: var(--accent); color: var(--accent); }
-.tools button.hl { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
-.tools button:disabled { color: var(--muted); cursor: not-allowed; }
-.tools input { font: inherit; font-size: 13px; padding: 3px 8px; width: 110px; background: var(--bg); color: var(--text);
-                  border: 1px solid var(--edge); border-radius: 4px; }
-.mode { color: var(--accent); font-size: 13px; min-height: 19px; }
+#palette .item .glyph { flex: none; width: 28px; height: 16px; }
+#palette .glyph * { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+#palette .glyph text { fill: var(--accent); stroke: none; font: bold 8px var(--mono); }
+#palette .empty { color: var(--muted); padding: 0 var(--s3); font-size: 12px; }
+.tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 var(--s2); }
+.tools .sep { width: 1px; height: 22px; background: var(--edge); margin: 0 var(--s1); }
+.tools button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.tools input { font-size: 13px; padding: 4px 8px; width: 110px; }
+.tools label { color: var(--muted); font-size: 13px; }
+.mode { color: var(--accent); font-size: 13px; min-height: 20px; margin: 0 0 var(--s2); }
 .mode.message { color: var(--added); }
-svg .place { fill: var(--accent); fill-opacity: .25; stroke: var(--accent); stroke-width: 2; cursor: pointer; }
-svg .place:hover, svg .place.near { fill-opacity: .9; }
-svg .place.chosen { fill: var(--changed); stroke: var(--changed); fill-opacity: .9; }
+svg .place { fill: var(--accent); fill-opacity: .3; stroke: var(--accent); stroke-width: 2; cursor: pointer; }
+svg .place:hover, svg .place.near { fill-opacity: .95; }
+svg .place.chosen { fill: var(--changed); stroke: var(--changed); fill-opacity: .95; }
 svg .hit { fill: transparent; cursor: pointer; }
-svg .frame-select { fill: var(--accent); fill-opacity: .10; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
-svg .frame-error { fill: none; stroke: var(--warning); stroke-width: 2; }
-.editor-bottom { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: 16px; margin-top: 10px; }
-.editor-bottom h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+svg g[data-id]:hover > .hit { fill: var(--accent); fill-opacity: .06; }
+svg .frame-select { fill: var(--accent); fill-opacity: .12; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); stroke: var(--warning); stroke-width: 2; }
+.editor-bottom { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr); gap: var(--s4); margin-top: var(--s3); }
+.editor-bottom > div { min-width: 0; border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); padding: var(--s3); }
+.editor-bottom h3 { font-size: 13px; font-weight: 600; margin: 0 0 var(--s2); }
 .errors div { color: var(--warning); padding: 3px 0; cursor: pointer; font-size: 13px; }
 .errors .ok { color: var(--added); cursor: default; }
-.editor-bottom > div { min-width: 0; }
+.errors .var { color: var(--muted); }
 .properties table { border-collapse: collapse; width: 100%; font-size: 13px; table-layout: fixed; }
-.properties td { padding: 2px 6px 2px 0; }
-.properties td:first-child { color: var(--muted); font-family: Consolas, monospace; white-space: nowrap; width: 96px; overflow: hidden; text-overflow: ellipsis; }
-.properties input, .properties select { width: 100%; font: 13px Consolas, monospace; padding: 3px 6px; background: var(--bg);
-                    color: var(--text); border: 1px solid var(--edge); border-radius: 3px; }
-.properties input:focus { border-color: var(--accent); outline: none; }
-.properties .section td { color: var(--accent); font-family: inherit; padding-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
-.mark-errors { color: var(--warning); font-weight: 600; margin-left: 8px; }
-/* D1: status bar, home page */
-header a { color: var(--muted); text-decoration: none; }
-header a:hover { color: var(--accent); }
-.status { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
-.chip { border: 1px solid var(--edge); border-radius: 10px; padding: 1px 9px; color: var(--muted); white-space: nowrap;
-        max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
-.chip b { color: var(--text); font-weight: 600; }
-.chip.ok { border-color: var(--added); } .chip.ok b { color: var(--added); }
-.chip.warn { border-color: var(--warning); } .chip.warn b { color: var(--warning); }
-.chip.bad { border-color: var(--deleted); } .chip.bad b { color: var(--deleted); }
-.status button, .status select, .home button, .home input[type=text] {
-  font: inherit; font-size: 12px; padding: 2px 10px; border-radius: 4px; border: 1px solid var(--edge);
-  background: var(--panel); color: var(--text); }
-.status button, .home button { cursor: pointer; }
-.status button:hover, .home button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.home button:disabled { color: var(--muted); cursor: not-allowed; }
+.properties td { padding: 3px 6px 3px 0; }
+.properties td:first-child { color: var(--muted); font-family: var(--mono); white-space: nowrap; width: 96px; overflow: hidden; text-overflow: ellipsis; }
+.properties input, .properties select { width: 100%; font: 13px var(--mono); padding: 3px 6px; }
+.properties .section td { color: var(--accent); font-family: inherit; font-weight: 600; padding-top: var(--s2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: auto; }
+/* ---------- edit tree ---------- */
+.tree { padding-bottom: var(--s2); border-bottom: 1px solid var(--edge); }
+.tree .u0, .tree .u1, .tree .u2 { padding: 3px var(--s3); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree .u0 { color: var(--text); font-weight: 600; font-size: 13px; }
+.tree .u1 { padding-left: 22px; }
+.tree .u2 { padding-left: 32px; font-family: var(--mono); }
+.tree a.u3 { padding-left: 42px; }
+.tree a.u4 { padding-left: 54px; }
+.tree a.u4 .state { margin: 0 2px; }
+.tree a.u4 .note { overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.tree a.u4.active .note { color: var(--text); }
+.tree .empty { padding: 3px var(--s3); color: var(--muted); font-size: 12px; margin: 0; }
+/* ---------- home ---------- */
 .main.home { grid-template-columns: 1fr; }
 .main.home #nw { display: none; }
-.home { max-width: 1100px; }
-.home h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.card { border: 1px solid var(--edge); border-radius: 6px; background: var(--panel); padding: 10px 12px; min-width: 0; }
-.card h3 { margin: 0 0 2px; font-size: 15px; display: flex; gap: 8px; align-items: baseline; }
+.home { max-width: 1120px; margin: 0 auto; }
+.hero { padding: var(--s3) 0 var(--s4); }
+.hero h1 { font-size: 24px; letter-spacing: -.01em; margin-bottom: var(--s2); }
+.hero p { color: var(--muted); margin: 0; max-width: 72ch; font-size: 15px; }
+.home h2 { font-size: 16px; font-weight: 600; margin: var(--s5) 0 var(--s3); }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--s4); }
+.card { border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); padding: var(--s4); min-width: 0;
+        box-shadow: var(--shadow); display: flex; flex-direction: column; gap: var(--s2); }
+.card h3 { margin: 0; font-size: 17px; display: flex; gap: var(--s2); align-items: center; }
 .card h3 a { color: var(--text); text-decoration: none; } .card h3 a:hover { color: var(--accent); }
-.card .src { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 9px; padding: 0 7px; font-weight: 600; }
-.card .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.card .meta b { color: var(--text); font-weight: 600; }
-.card .edits { margin: 6px 0; font-size: 12px; color: var(--muted); }
-.card .edits .state { margin: 0 4px 0 0; }
-.card .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.home button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
-.home button.primary:hover:not(:disabled) { color: var(--bg); }
-.job { font-size: 12px; margin-top: 8px; border-top: 1px dashed var(--edge); padding-top: 6px; }
+.card .src { font-size: 11px; color: var(--muted); border: 1px solid var(--edge-strong); border-radius: 999px; padding: 0 8px; font-weight: 600; }
+.card dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--s3); margin: 0; font-size: 12px; }
+.card dt { color: var(--muted); } .card dd { margin: 0; overflow-wrap: anywhere; } .card dd.path { font-family: var(--mono); color: var(--muted); }
+.card .edits { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.card .edits .state { margin: 0; }
+.card .row, .row { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: var(--s1); align-items: center; }
+.card .row a { text-decoration: none; }
+.job { font-size: 12px; margin-top: var(--s2); border-top: 1px dashed var(--edge); padding-top: var(--s2); }
 .job .head { color: var(--accent); font-weight: 600; } .job.error .head { color: var(--deleted); } .job.done .head { color: var(--added); }
-.job ol { margin: 4px 0 0 18px; padding: 0; color: var(--muted); }
+.job ol { margin: var(--s1) 0 0 18px; padding: 0; color: var(--muted); }
 .job ol li { overflow-wrap: anywhere; } .job ol li.bad { color: var(--deleted); }
 .job .err { color: var(--deleted); overflow-wrap: anywhere; }
-.add { border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; display: grid; gap: 12px; }
-.add .opt { display: grid; grid-template-columns: 230px 1fr; gap: 10px; align-items: start; }
-.add .opt > div:first-child b { display: block; } .add .opt > div:first-child span { color: var(--muted); font-size: 12px; }
+.job .fix { color: var(--muted); }
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); align-items: start; }
+.duo > section { border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); padding: var(--s4); box-shadow: var(--shadow); min-width: 0; }
+.duo h2 { margin: 0 0 var(--s1); }
+.duo .lead { color: var(--muted); font-size: 13px; margin: 0 0 var(--s3); }
+.add { display: grid; gap: var(--s4); }
+.add .opt { display: grid; gap: 6px; }
+.add .opt > div:first-child > b { display: block; font-size: 13px; } .add .opt > div:first-child > span { color: var(--muted); font-size: 12px; }
 .add .line { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.add input[type=text] { flex: 1; min-width: 220px; font-family: Consolas, monospace; padding: 4px 8px; }
-.add .note { color: var(--warning); font-size: 12px; margin-top: 4px; }
-.add .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
-.add pre { margin: 0 0 4px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--edge); border-radius: 4px;
-            font: 12px Consolas, monospace; overflow-x: auto; white-space: pre; }
-.add code { font-family: Consolas, monospace; }
-.empty-state { border: 1px dashed var(--edge); border-radius: 6px; padding: 18px; color: var(--muted); }
-.empty-state b { color: var(--text); }
-@media (max-width: 700px) { .add .opt { grid-template-columns: 1fr; } .status { margin-left: 0; } header { flex-wrap: wrap; } }
+.add input[type=text] { flex: 1; min-width: 200px; font-family: var(--mono); font-size: 12px; }
+.add label { font-size: 12px; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
+.add .note { color: var(--warning); font-size: 12px; }
+.add .hint, .hint { color: var(--muted); font-size: 12px; }
+.code { position: relative; }
+.code pre { margin: 0; padding: var(--s2) 64px var(--s2) var(--s3); background: var(--bg); border: 1px solid var(--edge); border-radius: var(--r-sm);
+            font: 12px/1.5 var(--mono); overflow-x: auto; white-space: pre; }
+.code button { position: absolute; top: 6px; right: 6px; font-size: 12px; padding: 2px 8px; }
+.add code, .hint code { font-family: var(--mono); }
+.empty-state { border: 1px dashed var(--edge-strong); border-radius: var(--r); padding: var(--s5); display: grid; grid-template-columns: auto 1fr;
+               gap: var(--s5); align-items: center; background: var(--panel); }
+.empty-state b { display: block; font-size: 16px; margin-bottom: var(--s1); }
+.empty-state p { color: var(--muted); margin: 0 0 var(--s3); }
+.empty-state ol { margin: 0; padding: 0; list-style: none; display: flex; gap: var(--s3); flex-wrap: wrap; counter-reset: k; }
+.empty-state li { counter-increment: k; display: flex; gap: var(--s2); align-items: center; font-weight: 600; }
+.empty-state li::before { content: counter(k); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+                          background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.empty-state li + li::after { content: none; }
+.empty-state svg { color: var(--accent); }
+@media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .status { margin-left: 0; } header { flex-wrap: wrap; } .main, .main.edit { grid-template-columns: 1fr; }
+                            aside { max-height: 40vh; } .empty-state { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
+<script>
+// theme before first paint: ?theme= > saved choice > system preference
+(() => {
+  let t = new URLSearchParams(location.search).get('theme');
+  if (t !== 'light' && t !== 'dark') { try { t = localStorage.getItem('tiac-theme'); } catch (e) { t = null; } }
+  if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 </head>
 <body>
-<header><a href="/"><b>TIAC_Editor</b></a><a href="/" id="home-link">Home</a><span class="info" id="info">viewer and editor</span><span class="status" id="status"></span></header>
+<header><a href="/" class="brand" aria-label="BetterTIA Editor, home"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 2v18" stroke="var(--accent)" stroke-width="3"/><path d="M3 11h5M14 11h5M8 6v10M14 6v10" stroke="var(--accent)" stroke-width="2" fill="none"/></svg>BetterTIA Editor</a><a href="/" id="home-link">Home</a><span class="info" id="info">viewer and editor</span><span class="status" id="status"></span><button id="theme" title="switch light / dark theme" aria-label="switch theme">&#9680;</button></header>
 <div class="main">
   <aside id="nw"></aside>
   <main id="content"></main>
@@ -225,8 +304,6 @@ header a:hover { color: var(--accent); }
 <script>
 'use strict';
 const q = new URLSearchParams(location.search);
-if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
-if (q.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark';
 const $ = id => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
 const L = 18, MAX_CHARS = 30;
@@ -365,7 +442,7 @@ function drawFBD(net, diff) {
       if (v.pin) quiet(el(g, 'text', {x: d.x + d.w - 4, y: v.y + 4, 'text-anchor': 'end', class: 'pin'}, v.pin), chg);
     }
   }
-  if (k.empty) el(svg, 'text', {x: 16, y: k.height / 2 + 4, class: 'empty'}, '(empty network)');
+  if (k.empty) el(svg, 'text', {x: 16, y: k.height / 2 + 4, class: 'empty'}, 'Empty network — nothing to draw.');
   return svg;
 }
 function draw(net, diff) {
@@ -389,7 +466,7 @@ function draw(net, diff) {
     else box(g, d, p);
   }
   el(svg, 'line', {class: 'rail', x1: k.rail.x, y1: k.rail.y1, x2: k.rail.x, y2: k.rail.y2});
-  if (k.empty) el(svg, 'text', {x: k.rail.x + 14, y: k.height / 2 + 4, class: 'empty'}, '(empty network)');
+  if (k.empty) el(svg, 'text', {x: k.rail.x + 14, y: k.height / 2 + 4, class: 'empty'}, 'Empty network — nothing to draw.');
   return svg;
 }
 function elementDescription(p) {
@@ -423,7 +500,8 @@ async function showExports(project) {
     h += `<h2>${esc(p.project)}</h2><ul class="select">` +
       p.blocks.map(b => `<li><a href="${link({project: p.project, block: b.block, nw: null})}">${esc(b.block)}</a></li>`).join('') + '</ul>';
   }
-  $('content').innerHTML = h || 'No exports.';
+  $('content').innerHTML = h !== '<h1>Exports</h1>' ? h : `<div class="notice"><b>No exports for this project</b>` +
+    `<span>Take a New snapshot on the <a href="/">home page</a>, or add a folder with a Reader export.</span></div>`;
 }
 const enc = encodeURIComponent;
 const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // coils at the right edge of the window, as in TIA
@@ -431,7 +509,7 @@ const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // coi
 // edit tree: project → round → block → NW → edit
 function treeHtml(st, activeId) {
   let h = '<h2>Edits</h2><div class="tree">';
-  if (!st.projects.length) h += '<p class="empty">No edits yet.</p>';
+  if (!st.projects.length) h += '<p class="empty">No edits yet — open a network and press Propose edit, or let an AI agent propose one.</p>';
   const group = (field, key) => {
     const m = new Map();
     for (const x of field) { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
@@ -449,7 +527,7 @@ function treeHtml(st, activeId) {
           h += `<a class="u3" href="?project=${enc(p.project)}&block=${enc(block)}&nw=${nw}"><span class="c">NW ${nw}</span>${esc(un[0].title || '')}</a>`;
           for (const u of un) {
             h += `<a class="u4 ${u.id === activeId ? 'active' : ''}" href="?edit=${enc(u.id)}"><span class="c">${esc(u.id)}</span>` +
-                 `<span class="state s-${esc(u.state)}">${esc(u.state)}</span>${esc(u.note || '')}</a>`;
+                 `<span class="state s-${esc(u.state)}">${esc(u.state)}</span><span class="note">${esc(u.note || '')}</span></a>`;
           }
         }
       }
@@ -486,7 +564,7 @@ async function showNetwork(project, block) {
   const nw = parseInt(q.get('nw') || '1', 10);
   const [tree, b] = await Promise.all([loadTree(null), api(`/api/block?project=${enc(project)}&block=${enc(block)}`)]);
   $('info').textContent = `${b.project} · export ${b.ts} · ${b.kind}${b.number != null ? b.number : ''} "${b.block}"`;
-  document.title = `TIAC_Editor — ${b.block} NW${nw}`;
+  document.title = `BetterTIA Editor — ${b.block} NW${nw}`;
   $('nw').innerHTML = tree + networksHtml(b, nw, n => link({nw: n}));
   const net = await api(`/api/network?project=${enc(project)}&block=${enc(block)}&nw=${nw}&width=${canvasWidth()}`);
   const m = $('content');
@@ -539,7 +617,7 @@ async function showEdit(uid, error) {
   const d = await api(`/api/edits/${enc(uid)}?width=${canvasWidth()}`);
   const u = d.edit;
   $('info').textContent = `${u.project} · edit ${u.id} · base export ${u.before.export_ts}`;
-  document.title = `TIAC_Editor — ${u.id} ${u.block} NW${u.nw}`;
+  document.title = `BetterTIA Editor — ${u.id} ${u.block} NW${u.nw}`;
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
@@ -549,37 +627,43 @@ async function showEdit(uid, error) {
   const m = $('content');
   const btnChecked = d.next === 'Checked' && !d.checked_allowed;
   const language = d.language || 'LAD';
+  const at = STATES.indexOf(u.state);
+  const checks = u.checks || [], last = checks[checks.length - 1];
   m.innerHTML =
+    `<div class="edit-head">` +
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
     `<div class="header"><span class="state s-${esc(u.state)}">${esc(u.state)}</span>${d.errors.length ? `<span class="mark-errors">⚠ ${errorCount(d.errors.length, language)}</span> · ` : ''} round <b>${esc(u.round)}</b> · author <b>${esc(u.author)}</b> · ${esc(u.time.replace('T', ' '))}</div>` +
     (u.note ? `<p class="comment">${esc(u.note)}</p>` : '') +
     `<div class="buttons">` +
-    (d.previous ? `<button data-state="${esc(d.previous)}">← ${esc(d.previous)}</button>` : '') +
+    (d.previous ? `<button data-state="${esc(d.previous)}" title="back to ${esc(d.previous)}">← ${esc(d.previous)}</button>` : '') +
+    `<ol class="stepper" aria-label="state">${STATES.map((x, i) => `<li class="s-${x}${i < at ? ' done' : i === at ? ' current' : ''}"${i === at ? ' aria-current="step"' : ''}><span class="node"></span>${x}</li>`).join('')}</ol>` +
     (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked only after the latest export check matches (Check / Check export)"' : ''}>${esc(d.next)} →</button>` : '') +
+    `</div><div class="buttons">` +
+    (u.state === 'Approved' ? (u.f ? `<span class="fblock">⚠ F-block: change it by hand following the TIA steps below</span>`
+      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed' : 'fill in the TIA settings for the project first'}">Upload to TIA</button>`) : '') +
+    (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exports the block and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
     (u.state === 'Proposal' ? `<button id="edit_mode">Edit</button>` : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
-    (u.state === 'Approved' ? (u.f ? `<span class="fblock">F-block: change it by hand following the TIA steps</span>`
-      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed' : 'fill in the TIA settings for the project first'}">Upload →</button>`) : '') +
-    (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exports the block and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check →</button>` : '') +
     `<span class="progress" id="progress"></span>` +
-    `</div>` +
-    `<details class="tia-settings"${d.tia ? '' : ' open'}><summary>TIA settings for project ${esc(u.project)}: ${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'not set (Upload/Check will fail)'}</summary>` +
-    `softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1">` +
-    `plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1">` +
-    `groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(Writer looks it up)">` +
-    `<button id="tia-save">Save</button></details>` +
-    (d.errors.length ? `<div class="warning">⚠ The proposal breaks ${language} rules (${d.errors.length}):<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
-    (error ? `<div class="warning">⚠ ${esc(error)}</div>` : '') +
-    `<div class="checks"><h3>Export checks</h3>` +
-    (u.checks && u.checks.length ? u.checks.map(k =>
-      `<div><span class="${k.match ? 'ok' : 'bad'}">${k.match ? '✓ match' : '✗ mismatch'}</span> · ${esc(k.time.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.note ? ' · ' + esc(k.note) : ''}</div>`).join('')
-      : '<div>None yet — Checked unlocks when the latest check is a match.</div>') + `</div>` +
-    (u.writes && u.writes.length ? `<div class="checks writes"><h3>Upload / Check (Writer, Reader)</h3>` + u.writes.map(z =>
-      `<div><span class="${z.ok ? 'ok' : 'bad'}">${z.ok ? '✓' : '✗'} ${esc(z.tool)}</span> · ${esc(z.time.replace('T', ' '))} · ${esc(z.message)}</div>` +
-      `<ol>${(z.steps || []).map(k => `<li class="${k.ok ? '' : 'bad'}" title="${esc(k.message)}">${esc(k.step)}${k.ok ? '' : ': ' + esc(k.message)}</li>`).join('')}</ol>`).join('') + `</div>` : '') +
-    `<div class="checks procedure" id="procedure"></div>` +
+    `</div></div>` +
+    (d.errors.length ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.length})</b> — open it in the editor and fix:<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
+    (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
     d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
-    `<div class="states-leg">States: ${STATES.map(x => `<span class="state s-${x}${x === u.state ? ' active' : ''}">${x}</span>`).join('→')}</div>` +
-    `<div class="legend">Model "after" against the export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></div>`;
+    `<details class="panel" open><summary>Model <span class="sum">"after" against the export</span>` +
+    `<span class="legend"><span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></span></summary><div class="body canvas-body" id="model"></div></details>` +
+    `<details class="panel checks" open><summary>Export checks <span class="sum">${checks.length ? `${checks.length} · latest ${last.match ? 'match' : 'mismatch'}` : 'none yet'}</span></summary><div class="body">` +
+    (checks.length ? checks.map(k =>
+      `<div><span class="${k.match ? 'ok' : 'bad'}">${k.match ? '✓ match' : '✗ mismatch'}</span> · ${esc(k.time.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.note ? ' · ' + esc(k.note) : ''}</div>`).join('')
+      : '<div class="hint">No check yet. After the change is in TIA, take a snapshot and press Check export (or Check) — Checked unlocks when the latest check is a match.</div>') + `</div></details>` +
+    (u.writes && u.writes.length ? `<details class="panel checks writes" open><summary>Upload / Check steps <span class="sum">Writer, Reader</span></summary><div class="body">` + u.writes.map(z =>
+      `<div><span class="${z.ok ? 'ok' : 'bad'}">${z.ok ? '✓' : '✗'} ${esc(z.tool)}</span> · ${esc(z.time.replace('T', ' '))} · ${esc(z.message)}</div>` +
+      `<ol>${(z.steps || []).map(k => `<li class="${k.ok ? '' : 'bad'}" title="${esc(k.message)}">${esc(k.step)}${k.ok ? '' : ': ' + esc(k.message)}</li>`).join('')}</ol>`).join('') + `</div></details>` : '') +
+    `<details class="panel" id="procedure-panel" open hidden><summary>TIA steps <span class="sum">to make the same change by hand</span>` +
+    `<span class="end"><button id="procedure-copy" class="small" title="copies the markdown">Copy</button></span></summary><div class="body checks procedure" id="procedure"></div></details>` +
+    `<details class="panel tia-settings"${d.tia ? '' : ' open'}><summary>TIA settings <span class="sum">${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'not set — fill in softwarePath so Upload and Check can find the PLC'}</span></summary><div class="body">` +
+    `<label>softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1"></label>` +
+    `<label>plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1"></label>` +
+    `<label>groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(Writer looks it up)"></label>` +
+    `<button id="tia-save">Save</button></div></details>`;
   if ($('edit_mode')) $('edit_mode').onclick = () => { location.href = `?edit=${enc(u.id)}&edit_mode=1`; };
   if ($('check-export')) $('check-export').onclick = async () => {
     $('check-export').disabled = true;
@@ -617,7 +701,7 @@ async function showEdit(uid, error) {
       catch (e) { await showEdit(uid, e.message); }
     };
   }
-  canvas(m, d, d.diff);
+  canvas($('model'), d, d.diff);
   try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* no TIA steps */ }
 }
 // F2: TIA steps (markdown -> list), with copy to clipboard
@@ -627,11 +711,12 @@ function md(t) {
 function procedurePanel(p) {
   const el_ = $('procedure');
   if (!el_) return;
-  el_.innerHTML = `<h3>TIA steps <button id="procedure-copy" title="copies the markdown">copy</button></h3>` +
-    `<div class="header"><b>${esc(p.header)}</b></div><ol>${p.steps.map(k => `<li>${md(k)}</li>`).join('')}</ol>`;
-  $('procedure-copy').onclick = async () => {
-    try { await navigator.clipboard.writeText(p.markdown); $('procedure-copy').textContent = 'copied'; }
-    catch (e) { $('procedure-copy').textContent = 'cannot copy'; }
+  el_.innerHTML = `<div class="header"><b>${esc(p.header)}</b></div><ol>${p.steps.map(k => `<li>${md(k)}</li>`).join('')}</ol>`;
+  $('procedure-panel').hidden = false;
+  $('procedure-copy').onclick = async e => {
+    e.preventDefault();   // a button in <summary> would otherwise toggle the panel
+    try { await navigator.clipboard.writeText(p.markdown); $('procedure-copy').textContent = 'Copied'; }
+    catch (e) { $('procedure-copy').textContent = 'Cannot copy'; }
   };
 }
 
@@ -653,7 +738,7 @@ async function editor(uid) {
                      hist: [], redo: [], select: null, insert: null, branch: null, changed: false});
   ed.cat = await api(`/api/catalog?project=${enc(u.project)}`);
   $('info').textContent = `${u.project} · editing ${u.id} · base export ${u.before.export_ts}`;
-  document.title = `TIAC_Editor — edit ${u.id}`;
+  document.title = `BetterTIA Editor — edit ${u.id}`;
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
@@ -663,20 +748,19 @@ async function editor(uid) {
   document.querySelector('.main').classList.add('edit');
   palette();
   operands();
-  $('content').innerHTML =
+  $('content').innerHTML = `<div class="edit-head">` +
     `<h1><span class="c">${esc(u.id)}</span> ${esc(u.kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">NW ${u.nw}:</span> ${esc(u.title || '')}</h1>` +
     `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · editing</div>` +
-    `<div class="tools">` +
-    `<button id="ed-undo" title="Ctrl+Z">↶ Undo</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button>` +
+    `<div class="tools" style="margin:0">` +
+    `<button id="ed-undo" title="Ctrl+Z">↶ Undo</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button><span class="sep"></span>` +
     (fbd ? `<button id="ed-plus" title="Insert input (Ctrl+Shift+3 in TIA)">+ input</button><button id="ed-minus" title="removes the selected (otherwise the last) input">− input</button>` +
            `<button id="ed-neg" title="Create a ones complement (Ctrl+Shift+4 in TIA)">Negate input</button>`
          : `<button id="ed-branch" title="pick two places in one rung; element = the one selected in the palette, otherwise an NO contact">Branch</button>`) +
-    `<button id="ed-delete" title="Delete">Delete</button>` +
-    `<button id="ed-save" class="hl">Save proposal</button><button id="ed-close">Close editor</button></div>` +
+    `<button id="ed-delete" title="Delete">Delete</button><span class="sep"></span>` +
+    `<button id="ed-save" class="hl">Save proposal</button><button id="ed-close">Close editor</button></div></div>` +
     `<div class="mode" id="ed-mode"></div>` +
     `<div class="canvas" id="ed-canvas"></div>` +
-    `<div class="legend">Against export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span>` +
-    ` · <span style="color:var(--warning)">■ rule error</span></div>` +
+    `<div class="legend" style="margin-top:var(--s2)">Against the export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span><span class="e">rule error</span></div>` +
     `<div class="editor-bottom"><div><h3>${LANG()} rules${ed.f ? ' · F-block' : ''}</h3><div class="errors" id="ed-errors"></div></div>` +
     `<div><h3>Element properties</h3><div class="properties" id="ed-properties"></div></div></div>`;
   $('ed-undo').onclick = undo;
@@ -768,7 +852,7 @@ function keys(e) {
 function palette() {
   const p = $('palette');
   p.hidden = false;
-  p.innerHTML = `<h2>Palette</h2><input id="pal-search" placeholder="search (TON, FB_…, MOVE)" autocomplete="off"><div id="pal-list"></div>`;
+  p.innerHTML = `<h2>Palette</h2><input id="pal-search" type="search" aria-label="search the palette" placeholder="Search: TON, MOVE, FB_…" autocomplete="off"><div id="pal-list"></div>`;
   $('pal-search').oninput = paletteList;
   paletteList();
 }
@@ -785,14 +869,23 @@ function paletteList() {
     const f = item.filter(x => !h || (x.key + ' ' + x.name + ' ' + (x.description || '')).toLowerCase().includes(h));
     if (!f.length) continue;
     html += `<h2>${esc(group)}</h2>` + f.map(x => `<div class="item" draggable="true" data-key="${esc(x.key)}" title="${esc(x.description || '')}">` +
-      `<b>${esc(x.name)}</b><span>${esc(x.description || '')}</span></div>`).join('');
+      glyph(x.element) + `<b>${esc(x.name)}</b><span>${esc(x.description || '')}</span></div>`).join('');
   }
-  $('pal-list').innerHTML = html || '<p class="empty">Nothing found.</p>';
+  $('pal-list').innerHTML = html || '<p class="empty">Nothing matches — try an instruction (TON) or a block name.</p>';
   for (const el of $('pal-list').querySelectorAll('.item')) {
     el.onclick = () => selectPalette(ed.insert && ed.insert.key === el.dataset.key ? null : el.dataset.key);
     el.ondragstart = e => { e.dataTransfer.setData('text/plain', el.dataset.key); selectPalette(el.dataset.key); };
   }
   markPalette();
+}
+// small symbol preview for a palette item: contact, coil or box (project blocks have no element -> box)
+function glyph(e) {
+  const t = (e && e.type) || 'box', T = {contact_nc: '/', contact_p: 'P', contact_n: 'N', coil_s: 'S', coil_r: 'R', coil_neg: '/'}[t];
+  const mark = T ? (T === '/' ? '<path d="M11 13l6-10"/>' : `<text x="14" y="11" text-anchor="middle">${T}</text>`) : '';
+  const body = /^contact/.test(t) ? '<path d="M0 8h10M18 8h10M10 2v12M18 2v12"/>' + mark
+    : /^coil|^ret$/.test(t) ? '<path d="M0 8h9M19 8h9M11 2a8 8 0 0 0 0 12M17 2a8 8 0 0 1 0 12"/>' + mark
+    : '<rect x="6" y="1" width="16" height="14" rx="1.5"/><path d="M0 5h6M0 11h6M22 8h6"/>';
+  return `<svg class="glyph" viewBox="0 0 28 16" aria-hidden="true">${body}</svg>`;
 }
 function markPalette() {
   for (const el of document.querySelectorAll('#palette .item')) {
@@ -1003,7 +1096,7 @@ function focusProperties() {
 // ---------- status bar (all pages) ----------
 let tiaStatus = {};
 function statusHtml(st) {
-  const chip = (cls, label, value, title) => `<span class="chip ${cls}" title="${esc(title || value)}">${label}: <b>${esc(value)}</b></span>`;
+  const chip = (cls, label, value, title) => `<span class="chip ${cls}" title="${esc(title || value)}">${label} <b>${esc(value)}</b></span>`;
   const tool = v => (v || 'missing').startsWith('error') ? 'bad' : v === 'configured' ? 'ok' : 'warn';
   let tia;
   if (st.tia === 'attached') tia = chip('ok', 'TIA', `attached · ${st.project || '?'}`, st.project_path);
@@ -1045,7 +1138,7 @@ function jobHtml(j, retry) {
     (j.result ? ` · export <b>${esc(j.result.export_ts)}</b>` : '') + `<ol>` +
     j.steps.map(s => `<li class="${s.ok ? '' : 'bad'}">${esc(s.step)}${s.ok ? '' : ': ' + esc(s.message)}</li>`).join('') +
     (j.state === 'running' ? '<li>…</li>' : '') + '</ol>';
-  if (j.error) h += `<div class="err">⚠ ${esc(j.error)}</div>`;
+  if (j.error) h += `<div class="err">⚠ ${esc(j.error)}</div><div class="fix">Fix the cause above and start the snapshot again; existing exports are not touched.</div>`;
   if (j.state === 'error' && j.plc_choices && j.plc_choices.length)
     h += `<div class="row">PLC: ${j.plc_choices.map(p => `<button data-retry="${esc(retry)}" data-sp="${esc(p.softwarePath)}">${esc(p.softwarePath)}</button>`).join('')}</div>`;
   return h + '</div>';
@@ -1053,13 +1146,13 @@ function jobHtml(j, retry) {
 function cardHtml(p) {
   const edits = Object.entries(p.edits || {});
   const running = p.job && p.job.state === 'running';
-  return `<div class="card"><h3><a href="?project=${enc(p.name)}">${esc(p.name)}</a><span class="src">${esc(p.source)}</span></h3>` +
-    `<div class="meta">last snapshot <b>${esc(p.last_snapshot || p.latest_export || '—')}</b> · ${p.exports} export(s)` +
-    (p.tia ? ` · PLC <b>${esc(p.tia.softwarePath)}</b>` : '') + `</div>` +
-    `<div class="meta" title="export root">${esc(p.export_root || '')}</div>` +
-    (p.project_path ? `<div class="meta" title="TIA project">${esc(p.project_path)}</div>` : '') +
-    `<div class="edits">${edits.length ? edits.map(([s, n]) => `<span class="state s-${esc(s)}">${esc(s)} ${n}</span>`).join('') : 'no edits'}</div>` +
-    `<div class="row"><a href="?project=${enc(p.name)}"><button class="primary">Open</button></a>` +
+  return `<div class="card"><h3><a href="?project=${enc(p.name)}">${esc(p.name)}</a><span class="src" title="how the project was added">${esc(p.source)}</span></h3>` +
+    `<dl><dt>Last snapshot</dt><dd><b>${esc(p.last_snapshot || p.latest_export || '—')}</b> · ${p.exports} export${p.exports === 1 ? '' : 's'}</dd>` +
+    (p.tia ? `<dt>PLC</dt><dd>${esc(p.tia.softwarePath)}</dd>` : '') +
+    `<dt>Exports</dt><dd class="path" title="export root">${esc(p.export_root || '')}</dd>` +
+    (p.project_path ? `<dt>TIA project</dt><dd class="path">${esc(p.project_path)}</dd>` : '') + `</dl>` +
+    `<div class="edits">${edits.length ? edits.map(([s, n]) => `<span class="state s-${esc(s)}">${esc(s)} ${n}</span>`).join('') : 'No edits yet'}</div>` +
+    `<div class="row"><button class="primary" data-open="${esc(p.name)}">Open</button>` +
     `<button data-snap="${esc(p.name)}" ${running ? 'disabled' : ''} title="export the whole PLC from TIA Portal through the Reader">New snapshot</button>` +
     `<button data-remove="${esc(p.name)}" ${running ? 'disabled' : ''} title="remove from the list (exports and edits stay on disk)">Remove</button></div>` +
     jobHtml(p.job, p.name) + '</div>';
@@ -1067,48 +1160,67 @@ function cardHtml(p) {
 function addHtml() {
   const t = tiaStatus.tia === 'attached' ? `TIA Portal has <b>${esc(tiaStatus.project || '?')}</b> open.` :
     tiaStatus.tia === 'not running' ? 'TIA Portal is not running — open the project in TIA Portal first.' :
-    tiaStatus.tia === 'choose' ? 'More TIA Portal instances are running — choose one in the status bar.' : 'TIA status not checked yet — press Refresh.';
-  return `<div class="add">
+    tiaStatus.tia === 'choose' ? 'More TIA Portal instances are running — choose one in the status bar.' : 'TIA status not checked yet — press Refresh in the status bar.';
+  return `<section><h2>Add a project</h2><p class="lead">Edits are drawn from a snapshot — a Reader export of the PLC.</p><div class="add">
   <div class="opt"><div><b>Export folder</b><span>a Reader export already on disk</span></div>
-    <div><div class="line"><input type="text" id="add-path" placeholder="folder: &lt;project&gt; with &lt;YYYYMMDD-HHMMSS&gt; subfolders, or an export root">` +
-    `<button id="add-exports">Add</button></div></div></div>
-  <div class="opt"><div><b>Connect to open TIA project</b><span>snapshot of the project open in TIA Portal</span></div>
-    <div><div class="line"><button id="add-tia" class="primary">Connect and take snapshot</button></div><div class="hint">${t}</div></div></div>
-  <div class="opt"><div><b>Open .ap21 file</b><span>TIA Portal opens it, then a snapshot</span></div>
-    <div><div class="line"><input type="text" id="add-ap21" placeholder="full path of the .ap21 project (or .als21 session)">` +
-    `<label><input type="checkbox" id="add-close"> close the project afterwards</label><button id="add-open">Open and take snapshot</button></div>` +
-    `<div class="note">⚠ This may start TIA Portal and take several minutes.</div></div></div>
+    <div class="line"><input type="text" id="add-path" aria-label="export folder" placeholder="&lt;project&gt; folder with &lt;YYYYMMDD-HHMMSS&gt; subfolders, or an export root">` +
+    `<button id="add-exports">Add</button></div></div>
+  <div class="opt"><div><b>Project open in TIA Portal</b><span>${t}</span></div>
+    <div class="line"><button id="add-tia" class="primary">Connect and take snapshot</button></div></div>
+  <div class="opt"><div><b>.ap21 project file</b><span>TIA Portal opens it, then a snapshot is taken</span></div>
+    <div class="line"><input type="text" id="add-ap21" aria-label=".ap21 file" placeholder="full path of the .ap21 project (or .als21 session)"></div>` +
+    `<div class="line"><label><input type="checkbox" id="add-close"> close the project afterwards</label><button id="add-open">Open and take snapshot</button></div>` +
+    `<div class="note">⚠ This may start TIA Portal and take several minutes.</div></div>
   <div id="add-job"></div><div id="add-error"></div>
-</div>`;
+</div></section>`;
 }
 function aiHtml() {
   const server = location.origin;
   const cfg = JSON.stringify({mcpServers: {'bettertia-editor': {command: 'python', args: ['mcp_server.py', '--server', server]}}}, null, 2);
-  const items = [['Claude Code', '.mcp.json in the project folder', cfg], ['Cursor', '.cursor/mcp.json', cfg],
+  const items = [['Claude Code or Cursor', '.mcp.json in the project folder (Cursor: .cursor/mcp.json)', cfg],
                  ['Any MCP client', 'stdio command', `python mcp_server.py --server ${server}`]];
-  return `<div class="add ai">${items.map(([t, sub, text], i) => `<div class="opt"><div><b>${t}</b><span>${sub}</span></div>` +
-    `<div><pre id="ai-cfg-${i}">${esc(text)}</pre><button data-copy="${i}">copy</button></div></div>`).join('')}` +
-    `<div class="hint">The command runs in the client's working folder: use the full path of this repository's <code>mcp_server.py</code> ` +
-    `when the client starts elsewhere. The agent reads projects and networks, proposes edits and checks exports; ` +
-    `approving an edit and writing it to TIA Portal stay with you, here in the editor.</div></div>`;
+  const ai = (tiaStatus.ai_clients || []).map(c => c.name);
+  return `<section><h2>Connect an AI agent</h2><p class="lead">${ai.length ? `<span class="chip ok">AI <b>connected (${esc(ai.join(', '))})</b></span><br>` : ''}` +
+    `The agent reads networks, proposes edits and checks exports. Approving and writing to TIA Portal stay with you.</p><div class="add ai">` +
+    items.map(([t, sub, text], i) => `<div class="opt"><div><b>${t}</b><span>${sub}</span></div>` +
+    `<div class="code"><pre id="ai-cfg-${i}">${esc(text)}</pre><button data-copy="${i}" aria-label="copy ${t} configuration">Copy</button></div></div>`).join('') +
+    `<div class="hint">Use the full path of this repository's <code>mcp_server.py</code> when the client starts in another folder.</div></div></section>`;
+}
+function emptyHtml() {
+  return `<div class="empty-state"><svg width="96" height="72" viewBox="0 0 96 72" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">` +
+    `<path d="M8 6v60M8 24h18M38 24h12M70 24h18M26 14v20M38 14v20M8 52h30"/>` +
+    `<path d="M56 14a12 12 0 0 0 0 20M64 14a12 12 0 0 1 0 20"/>` +
+    `<path d="M44 52h22" stroke-dasharray="4 5" opacity=".6"/><circle cx="76" cy="52" r="6" opacity=".6"/></svg>` +
+    `<div><b>No projects yet</b><p>Add a Reader export or connect to the project open in TIA Portal. ` +
+    `Then propose a change to a network and move it through review.</p>` +
+    `<ol><li>Add a project</li><li>Propose</li><li>Approve</li></ol></div></div>`;
+}
+function connectionHtml() {
+  const miss = [['Writer', tiaStatus.writer], ['Reader', tiaStatus.reader]].filter(([, v]) => v && v !== 'configured');
+  if (!miss.length) return '';
+  return `<div class="warning"><b>⚠ ${miss.map(([n, v]) => `${n}: ${esc(v)}`).join(' · ')}</b><br>` +
+    `Viewing and editing work without them; snapshots, Upload and Check need both. Start the server with ` +
+    `<code>--mcp-json</code> (or <code>--writer-cmd</code> / <code>--reader-cmd</code>) and press Refresh.</div>`;
 }
 let homeJob = null;
 async function showHome() {
   document.querySelector('.main').classList.add('home');
-  $('info').textContent = 'projects';
+  $('info').textContent = '';
   const r = await api('/api/projects');
-  let h = '<div class="home"><h1>Projects</h1>';
-  h += r.projects.length ? `<div class="cards">${r.projects.map(cardHtml).join('')}</div>` :
-    `<div class="empty-state"><b>No projects yet.</b> Add a Reader export folder that is already on disk, connect to the project ` +
-    `open in TIA Portal, or open an .ap21 file. Each project keeps a snapshot (a Reader export) the edits are drawn from.</div>`;
-  h += `<h2>Add project</h2>${addHtml()}<h2>Connect an AI agent</h2>${aiHtml()}</div>`;
+  const flow = `<ol class="stepper flow" aria-label="workflow">${STATES.map(x => `<li class="s-${x} done"><span class="node"></span>${x}</li>`).join('')}</ol>`;
+  let h = `<div class="home"><div class="hero"><h1>Review AI-proposed changes to TIA Portal networks</h1>` +
+    `<p>An AI agent proposes a change to one LAD or FBD network. You see the diff drawn as in TIA Portal, approve it, ` +
+    `and follow it until it is in the project and tested.</p>${flow}</div>` + connectionHtml();
+  h += `<h2>Projects</h2>` + (r.projects.length ? `<div class="cards">${r.projects.map(cardHtml).join('')}</div>` : emptyHtml());
+  h += `<div class="duo" style="margin-top:var(--s5)">${addHtml()}${aiHtml()}</div></div>`;
   $('content').innerHTML = h;
   const job = homeJob || (r.running_job && !r.running_job.project ? r.running_job : null);
   if (job) $('add-job').innerHTML = jobHtml(job, '');
   for (const b of document.querySelectorAll('[data-copy]')) b.onclick = async () => {
-    try { await navigator.clipboard.writeText($('ai-cfg-' + b.dataset.copy).textContent); b.textContent = 'copied'; }
-    catch (e) { b.textContent = 'cannot copy'; }
+    try { await navigator.clipboard.writeText($('ai-cfg-' + b.dataset.copy).textContent); b.textContent = 'Copied'; }
+    catch (e) { b.textContent = 'Cannot copy'; }
   };
+  for (const b of document.querySelectorAll('[data-open]')) b.onclick = () => { location.href = `?project=${enc(b.dataset.open)}`; };
   const fail = e => { $('add-error').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`; };
   $('add-exports').onclick = () => apiJson('POST', '/api/projects', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
   $('add-tia').onclick = () => startJob('/api/projects', {source: 'tia'}).catch(fail);
@@ -1140,6 +1252,11 @@ async function pollJob(id) {
 }
 
 async function start() {
+  $('theme').onclick = () => {
+    const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem('tiac-theme', t); } catch (e) { /* private window: the choice lasts until reload */ }
+  };
   if (q.get('screenshot') === '1') document.body.classList.add('screenshot');
   const project = q.get('project'), block = q.get('block');
   const status = loadStatus(false);
@@ -1160,7 +1277,8 @@ async function start() {
   }, 10000);
 }
 start().catch(e => {
-  $('content').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`;
+  $('content').innerHTML = `<div class="notice"><b>This page could not load</b><span>${esc(e.message)}. ` +
+    `Check that the server is running and the link is complete, then reload — or go back to <a href="/">Home</a>.</span></div>`;
   document.body.dataset.done = '1';
 });
 </script>
