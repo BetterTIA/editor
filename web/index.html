@@ -106,6 +106,16 @@ svg g.d-smazany text, svg g.d-smazany .titul { fill: var(--smazany); text-decora
 .kontroly { font-size: 13px; margin: 6px 0 10px; }
 .kontroly h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--tlum); margin: 0 0 4px; }
 .kontroly .ok { color: var(--pridany); } .kontroly .ne { color: var(--smazany); }
+/* M5: Upload / Check, zápisy, nastavení TIA */
+.tlacitka button.tia { border-color: var(--s-Signed); color: var(--s-Signed); font-weight: 600; }
+.tlacitka button.tia.check { border-color: var(--s-Checked); color: var(--s-Checked); }
+.tlacitka .fblok { font-size: 12px; color: var(--varovani); align-self: center; }
+.prubeh { font-size: 12px; color: var(--tlum); align-self: center; }
+.zapisy ol { margin: 2px 0 6px 18px; padding: 0; color: var(--tlum); font-size: 12px; }
+.zapisy ol li.ne { color: var(--smazany); }
+details.tia-nast { font-size: 12px; color: var(--tlum); margin: 4px 0 8px; }
+details.tia-nast input { font: 12px Consolas, monospace; width: 150px; margin: 2px 6px 2px 2px; background: transparent;
+                         color: var(--text); border: 1px solid var(--hrana); border-radius: 3px; padding: 2px 4px; }
 .legenda { font-size: 12px; color: var(--tlum); margin: 4px 0; display: flex; gap: 14px; }
 .legenda span::before { content: '■ '; } .legenda .p { color: var(--pridany); } .legenda .z { color: var(--zmeneny); }
 .legenda .s { color: var(--smazany); }
@@ -496,13 +506,25 @@ async function zobrazUpravu(uid, chyba) {
     (d.predchozi ? `<button data-stav="${esc(d.predchozi)}">← ${esc(d.predchozi)}</button>` : '') +
     (d.dalsi ? `<button class="vpred" data-stav="${esc(d.dalsi)}" ${tlChecked ? 'disabled title="Checked až po poslední kontrole exportem se shodou (Check / Zkontrolovat exportem)"' : ''}>${esc(d.dalsi)} →</button>` : '') +
     (u.stav === 'Proposal' ? `<button id="upravit">Upravit</button>` : `<button id="kontrola" title="porovná nejnovější export Readeru s návrhem a zapíše kontrolu">Zkontrolovat exportem</button>`) +
+    (u.stav === 'Approved' ? (u.f ? `<span class="fblok">F-blok: zapisuje Honza podle Postupu pro TIA</span>`
+      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer zapíše network do projektu TIA (export bloku → náhrada networku → import Override) → Signed' : 'nejdřív Nastavení TIA projektu'}">Upload →</button>`) : '') +
+    (u.stav === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exportuje blok, porovná s návrhem; při shodě → Checked' : 'nejdřív Nastavení TIA projektu'}">Check →</button>` : '') +
+    `<span class="prubeh" id="prubeh"></span>` +
     `</div>` +
+    `<details class="tia-nast"${d.tia ? '' : ' open'}><summary>Nastavení TIA projektu ${esc(u.projekt)}: ${d.tia ? `softwarePath <b>${esc(d.tia.softwarePath)}</b>${d.tia.plcName ? ' · plcName <b>' + esc(d.tia.plcName) + '</b>' : ''}${d.tia.groupPath ? ' · groupPath <b>' + esc(d.tia.groupPath) + '</b>' : ''}` : 'nenastaveno (Upload/Check nejde)'}</summary>` +
+    `softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1">` +
+    `plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1">` +
+    `groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(dohledá Writer)">` +
+    `<button id="tia-uloz">Uložit</button></details>` +
     (d.chyby.length ? `<div class="varovani">⚠ Návrh porušuje pravidla ${jazyk} (${d.chyby.length}):<br>${d.chyby.map(c => esc(c.chyba)).join('<br>')}</div>` : '') +
     (chyba ? `<div class="varovani">⚠ ${esc(chyba)}</div>` : '') +
     `<div class="kontroly"><h3>Kontroly exportem</h3>` +
     (u.kontroly && u.kontroly.length ? u.kontroly.map(k =>
       `<div><span class="${k.shoda ? 'ok' : 'ne'}">${k.shoda ? '✓ shoda' : '✗ neshoda'}</span> · ${esc(k.cas.replace('T', ' '))} · export ${esc(k.export_ts || '?')}${k.poznamka ? ' · ' + esc(k.poznamka) : ''}</div>`).join('')
       : '<div>Zatím žádná — Checked se odemkne, když poslední kontrola je shoda.</div>') + `</div>` +
+    (u.zapisy && u.zapisy.length ? `<div class="kontroly zapisy"><h3>Upload / Check (Writer, Reader)</h3>` + u.zapisy.map(z =>
+      `<div><span class="${z.ok ? 'ok' : 'ne'}">${z.ok ? '✓' : '✗'} ${esc(z.nastroj)}</span> · ${esc(z.cas.replace('T', ' '))} · ${esc(z.zprava)}</div>` +
+      `<ol>${(z.kroky || []).map(k => `<li class="${k.ok ? '' : 'ne'}" title="${esc(k.zprava)}">${esc(k.krok)}${k.ok ? '' : ': ' + esc(k.zprava)}</li>`).join('')}</ol>`).join('') + `</div>` : '') +
     `<div class="kontroly postup" id="postup"></div>` +
     d.varovani.map(v => `<div class="varovani">⚠ ${esc(v)}</div>`).join('') +
     `<div class="stavy-leg">Stavy: ${STAVY.map(x => `<span class="stav s-${x}${x === u.stav ? ' akt' : ''}">${x}</span>`).join('→')}</div>` +
@@ -514,6 +536,29 @@ async function zobrazUpravu(uid, chyba) {
       const k = await apiJson('POST', `/api/uprava/${enc(u.id)}/kontrola-exportem`, {});
       await zobrazUpravu(uid, k.shoda ? null : `Kontrola exportem ${k.export_ts}: ${k.poznamka}`);
     } catch (e) { await zobrazUpravu(uid, 'Kontrola exportem selhala: ' + e.message); }
+  };
+  // M5: Upload (Writer) / Check (Reader) — běží na serveru, tady jen průběh a výsledek; chyba nesmí shodit stránku
+  for (const [id, cesta, popis] of [['upload', 'upload', 'Upload: TIAC_Writer zapisuje network…'],
+                                    ['check', 'check', 'Check: TIAC_Reader exportuje blok a porovnává…']]) {
+    if (!$(id) || $(id).disabled) continue;
+    $(id).onclick = async () => {
+      for (const b of m.querySelectorAll('.tlacitka button')) b.disabled = true;
+      $('prubeh').textContent = popis;
+      try {
+        const r = await apiJson('POST', `/api/uprava/${enc(u.id)}/${cesta}`, {});
+        await zobrazUpravu(uid, r.ok ? null : r.zprava);
+      } catch (e) { await zobrazUpravu(uid, `${id === 'upload' ? 'Upload' : 'Check'}: ${e.message}`); }
+    };
+  }
+  $('tia-uloz').onclick = async () => {
+    try {
+      const st = await api(`/api/stav?projekt=${enc(u.projekt)}`);
+      const t = {softwarePath: $('tia-sp').value.trim(), plcName: $('tia-plc').value.trim(), groupPath: $('tia-grp').value.trim()};
+      for (const k of Object.keys(t)) if (!t[k]) delete t[k];
+      if (Object.keys(t).length) st.tia = t; else delete st.tia;
+      await apiJson('PUT', `/api/stav?projekt=${enc(u.projekt)}`, st);
+      await zobrazUpravu(uid);
+    } catch (e) { await zobrazUpravu(uid, 'Nastavení TIA: ' + e.message); }
   };
   for (const b of m.querySelectorAll('button[data-stav]')) {
     b.onclick = async () => {

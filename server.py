@@ -3,21 +3,27 @@
 python server.py --port 8765 --export-root "C:\\TIA\\export" --data "<dir>"
 """
 import argparse
+import glob
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import textwrap
+import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 import fbd
 import katalog
 import layout
+import mcp_klient
 import model
 import postup
 import rozdil
 import s7dcl
+import s7dcl_zapis
 import stav
 
 TS = re.compile(r'^\d{8}-\d{6}$')
@@ -327,8 +333,9 @@ def _validuj(po, f=False, root=None, projekt=None):
 
 def api_uprava_detail(data, uid, sirka=0, root=None):
     """Úprava + kresba „po" s rozdílem, chyby pravidel LAD, přechody stavů."""
-    _, _, u = stav.najdi(data, uid)
+    _, s, u = stav.najdi(data, uid)
     vys = _kresba_rozdilu(u['pred'], u['po'], sirka)
+    vys['tia'] = s.get('tia')
     k = u.get('kontroly') or []
     if stav.STAVY.index(u['stav']) >= stav.STAVY.index('Checked') and k and k[-1].get('shoda') is False:
         vys['varovani'].insert(0, 'Poslední kontrola exportem je NESHODA, ale úprava už je %s — stav se sám nevrací, '
@@ -480,9 +487,231 @@ def api_uprava_po(data, uid, body):
     return {'uprava': u, 'chyby': _validuj(po, u.get('f'))}
 
 
+# ---------- M5: Upload (TIAC_Writer) a Check (TIAC_Reader) ----------
+
+ZAMEK_TIA = threading.Lock()          # jedna instance TIA = v jednu chvíli jeden Upload / Check
+CHYBA_SPOJENI = 'TIA zaneprázdněné nebo Writer/Reader nejde spustit: '
+
+
+def _tia(s, projekt):
+    t = s.get('tia') or {}
+    if not t.get('softwarePath'):
+        raise stav.ChybaStavu('projekt %s nemá nastavení TIA (tia: {softwarePath, plcName, groupPath?}) — '
+                              'nastav ho v UI u úpravy („Nastavení TIA") nebo přes PUT /api/stav' % projekt)
+    return t
+
+
+def _klient(mcp, role, timeout):
+    cfg = (mcp or {}).get(role)
+    if not cfg:
+        raise mcp_klient.ChybaMCP('%s není nastaven (--mcp-json / --%s-cmd)' % (role, role))
+    return mcp_klient.Klient(cfg[0], cfg[1], timeout, 'TIAC_Writer' if role == 'writer' else 'TIAC_Reader')
+
+
+def _bez_nazvu_volani(m):
+    """Pro kontrolu serializace: volání FB/FC porovnat podle instance (parser bez exportu název FB nezná)."""
+    m = json.loads(json.dumps(m))
+    for p in m['prvky']:
+        if p.get('volani') == 'fc' and not p.get('instance'):
+            p['instance'] = '"%s"' % p.get('nazev')
+        if p.get('volani') in ('fb', 'fc'):
+            p['nazev'] = None
+            p['volani'] = 'fb'
+    return m
+
+
+def _nahrad_v_souboru(soubor, u):
+    """Nahradí network úpravy (podle titulku, jinak čísla) v exportovaném .s7dcl modelem „po" -> popis.
+    Pojistky: F-blok ani jiný jazyk networku se nepřepíše; text po náhradě se znovu přečte a musí odpovídat návrhu."""
+    with open(soubor, 'rb') as f:
+        surove = f.read()
+    bom = surove.startswith(b'\xef\xbb\xbf')
+    text = surove.decode('utf-8-sig')
+    b = s7dcl.nacti_blok(soubor)
+    if b['atributy'].get('S7_Safety') == 'TRUE':
+        raise s7dcl_zapis.ChybaZapisu('blok je F-blok (S7_Safety) — Upload je jen pro ne-safety, zapisuje Honza')
+    kand = [n for n in b['networky'] if u.get('titulek') and n['titulek'] == u['titulek']]
+    n = next((x for x in kand if x['nw'] == u['nw']), kand[0]) if kand else \
+        (b['networky'][u['nw'] - 1] if u['nw'] <= len(b['networky']) else None)
+    if n is None:
+        raise s7dcl_zapis.ChybaZapisu('network %d („%s") v exportovaném bloku není' % (u['nw'], u.get('titulek') or ''))
+    jazyk = 'FBD' if fbd.je_fbd(u['po']) else 'LAD'
+    if n['jazyk'] != jazyk:
+        raise s7dcl_zapis.ChybaZapisu('NW %d je v projektu %s, návrh je %s' % (n['nw'], n['jazyk'] or '?', jazyk))
+    novy = s7dcl_zapis.nahrad_network(text, n['nw'], s7dcl_zapis.text_networku(u['po']))
+    zpet = s7dcl.parse_blok(novy.replace('\r\n', '\n'))['networky'][n['nw'] - 1]
+    if jazyk == 'FBD':
+        shoda, rozd = fbd.shoda_obsahu(_bez_nazvu_volani(u['po']), _bez_nazvu_volani(zpet))
+    else:
+        shoda, rozd = rozdil.shoda_obsahu(_bez_nazvu_volani(u['po']), _bez_nazvu_volani(zpet))
+    if not shoda:
+        raise s7dcl_zapis.ChybaZapisu('serializace návrhu nesedí s návrhem: ' + '; '.join(rozd))
+    with open(soubor, 'wb') as f:
+        f.write((b'\xef\xbb\xbf' if bom else b'') + novy.encode('utf-8'))
+    return 'NW %d „%s" nahrazen modelem „po"%s' % (n['nw'], n['titulek'], '' if n['nw'] == u['nw'] else
+                                                    ' (v návrhu NW %d — network se posunul)' % u['nw'])
+
+
+def _cesta_z_textu(t):
+    """Odpověď ResolveObjectPath -> 'Skupina/Blok' (JSON s path/objectPath… nebo prostý text)."""
+    try:
+        j = json.loads(t)
+        if isinstance(j, dict):
+            t = next((str(j[k]) for k in ('path', 'objectPath', 'resolvedPath', 'rootRelativePath') if j.get(k)), t)
+        elif isinstance(j, str):
+            t = j
+    except ValueError:
+        pass
+    return t.strip().strip('"').replace('\\', '/')
+
+
+def _zapis(data, uid, zapis, novy_stav, kdo):
+    """Uloží záznam Upload/Check do u['zapisy'] a při úspěchu změní stav (když ho mezitím nikdo nezměnil)."""
+    with stav.ZAMEK:
+        projekt, s, u = stav.najdi(data, uid)
+        u.setdefault('zapisy', []).append(zapis)
+        if novy_stav:
+            try:
+                stav.zmen_stav(u, novy_stav, kdo)
+            except stav.ChybaStavu as e:
+                zapis['zprava'] += ' · stav nezměněn: %s' % e
+        stav.uloz(data, projekt, s)
+    return u
+
+
+def _f_uprava(root, u):
+    if 'f' in u:
+        return bool(u['f'])
+    try:                                              # úpravy před F2: příznak z exportu; neznámý = bereme jako F
+        return _nacti(root, u['projekt'], u['blok'])[1]['atributy'].get('S7_Safety') == 'TRUE'
+    except KeyError:
+        return True
+
+
+def api_upload(root, data, uid, mcp, timeout=300):
+    """Approved ne-safety úprava -> TIAC_Writer: Connect, ResolveObjectPath, export bloku jako dokumenty,
+    náhrada networku, PreviewImport, ImportFromDocuments Override -> Signed (kdo TIAC_Writer)."""
+    _, s, u = stav.najdi(data, uid)
+    if u['stav'] != 'Approved':
+        raise stav.ChybaStavu('Upload jen ve stavu Approved (teď %s)' % u['stav'])
+    if _f_uprava(root, u):
+        raise stav.ChybaStavu('F-blok: Upload není — zapisuje Honza podle Postupu pro TIA')
+    tia = _tia(s, u['projekt'])
+    if not ZAMEK_TIA.acquire(blocking=False):
+        raise stav.ChybaStavu('právě běží jiný Upload / Check — počkej na jeho konec')
+    kroky, prac = [], tempfile.mkdtemp(prefix='tiac_upload_')
+
+    def krok(nazev, fce):
+        try:
+            v = fce()
+        except Exception as e:
+            kroky.append({'krok': nazev, 'ok': False, 'zprava': str(e)[:1000]})
+            raise
+        kroky.append({'krok': nazev, 'ok': True, 'zprava': str(v)[:1000]})
+        return v
+    try:
+        sp, blok = tia['softwarePath'], u['blok']
+        try:
+            with _klient(mcp, 'writer', timeout) as k:
+                krok('Connect', lambda: k.zavolej('Connect', {}))
+                grp = tia.get('groupPath')
+                if not grp:
+                    cesta = _cesta_z_textu(krok('ResolveObjectPath', lambda: k.zavolej(
+                        'ResolveObjectPath', {'softwarePath': sp, 'name': blok, 'kind': 'block'})))
+                    grp = cesta.rsplit('/', 1)[0] if '/' in cesta else ''
+                krok('ExportBlocksAsDocuments', lambda: k.zavolej('ExportBlocksAsDocuments', {
+                    'softwarePath': sp, 'exportPath': prac, 'regexName': '^%s$' % re.escape(blok), 'preservePath': False}))
+                soubory = glob.glob(os.path.join(prac, '**', blok + '.s7dcl'), recursive=True)
+                if not soubory:
+                    raise s7dcl_zapis.ChybaZapisu('Writer nevyexportoval %s.s7dcl' % blok)
+                slozka = os.path.dirname(soubory[0])
+                krok('Náhrada networku v .s7dcl', lambda: _nahrad_v_souboru(soubory[0], u))
+                nahled = krok('PreviewImport', lambda: k.zavolej('PreviewImport', {
+                    'softwarePath': sp, 'importPath': slozka, 'kind': 'block', 'groupPath': grp}))
+                krok('ImportFromDocuments', lambda: k.zavolej('ImportFromDocuments', {
+                    'softwarePath': sp, 'groupPath': grp, 'importPath': slozka, 'fileNameWithoutExtension': blok,
+                    'importOption': 'Override'}))
+            ok, zprava = True, 'zapsáno do projektu (%s, skupina %s) — projekt v TIA ulož (SaveProject Writer nevolá)'                 % (sp, grp or '/')
+        except mcp_klient.ChybaMCP as e:
+            ok, zprava, nahled = False, CHYBA_SPOJENI + str(e), None
+        except (s7dcl_zapis.ChybaZapisu, s7dcl.ChybaParseru, OSError, ValueError) as e:
+            ok, zprava, nahled = False, 'Upload zastaven: %s' % e, None
+        zapis = {'cas': stav.ted(), 'nastroj': 'TIAC_Writer', 'kroky': kroky, 'ok': ok, 'zprava': zprava}
+        if nahled is not None:
+            zapis['preview'] = nahled[:4000]
+        u = _zapis(data, uid, zapis, 'Signed' if ok else None, 'TIAC_Writer')
+    finally:
+        shutil.rmtree(prac, ignore_errors=True)
+        ZAMEK_TIA.release()
+    return {'ok': ok, 'zprava': zapis['zprava'], 'zapis': zapis, 'uprava': u}
+
+
+def _json_nebo_nic(t):
+    try:
+        j = json.loads(t)
+        return j if isinstance(j, dict) else {}
+    except ValueError:
+        return {}
+
+
+def api_check(root, data, uid, mcp, timeout=300):
+    """Signed úprava -> TIAC_Reader export_to_folder (blok do nové složky export rootu) -> kontrola exportem
+    -> při shodě Checked (kdo TIAC_Reader); při neshodě zůstane Signed a kontrola se zapíše jako neshoda."""
+    projekt, s, u = stav.najdi(data, uid)
+    if u['stav'] != 'Signed':
+        raise stav.ChybaStavu('Check jen ve stavu Signed (teď %s)' % u['stav'])
+    tia = _tia(s, projekt)
+    try:                                              # PLC a skupina z dosavadního exportu bloku
+        t0, cesta, _ = najdi_blok(root, projekt, u['blok'])
+        casti = os.path.relpath(cesta, os.path.join(root, projekt, t0))[:-len('.s7dcl')].replace('\\', '/').split('/')
+    except KeyError:
+        casti = [tia.get('plcName') or tia['softwarePath'], 'Blocks', u['blok']]
+    if tia.get('groupPath'):
+        casti = casti[:2] + [x for x in tia['groupPath'].split('/') if x] + [u['blok']]
+    if not ZAMEK_TIA.acquire(blocking=False):
+        raise stav.ChybaStavu('právě běží jiný Upload / Check — počkej na jeho konec')
+    kroky, k_vys = [], None
+    try:
+        pred = set(index_exportu(root).get(projekt, {}))
+        try:
+            with _klient(mcp, 'reader', timeout) as k:
+                arg = {'pathPrefixes': ['/'.join(casti)], 'include': ['blocks'], 'formats': ['documents'],
+                       'plcName': tia.get('plcName') or casti[0]}
+                texty = []
+                for _ in range(50):                   # complete:false -> pokračovat runId + nextOffset
+                    t = k.zavolej('export_to_folder', arg)
+                    texty.append(t)
+                    j = _json_nebo_nic(t)
+                    kroky.append({'krok': 'export_to_folder', 'ok': True, 'zprava': t[:1000]})
+                    if j.get('complete', True) is not False:
+                        break
+                    arg.update(runId=j.get('runId'), nextOffset=j.get('nextOffset'))
+            nove = set(index_exportu(root).get(projekt, {})) - pred
+            ts = [x for x in re.findall(r'\d{8}-\d{6}', ' '.join(texty)) if x in nove] or sorted(nove)
+            if not ts:
+                raise s7dcl_zapis.ChybaZapisu('Reader export v export rootu editoru nenašel (%s\\%s) — odpověď: %s'
+                                              % (root, projekt, texty[-1][:300] if texty else ''))
+            k_vys = api_kontrola_exportem(root, data, uid, {'export_ts': ts[-1]})
+            kroky.append({'krok': 'Kontrola exportem %s' % ts[-1], 'ok': k_vys['shoda'], 'zprava': k_vys['poznamka']})
+            ok, zprava = k_vys['shoda'], ('export = návrh' if k_vys['shoda'] else k_vys['poznamka'])
+        except mcp_klient.ChybaMCP as e:
+            kroky.append({'krok': 'export_to_folder', 'ok': False, 'zprava': str(e)[:1000]})
+            ok, zprava = False, CHYBA_SPOJENI + str(e)
+        except (s7dcl_zapis.ChybaZapisu, s7dcl.ChybaParseru, KeyError, OSError) as e:
+            ok, zprava = False, 'Check zastaven: %s' % str(e).strip("'")
+        zapis = {'cas': stav.ted(), 'nastroj': 'TIAC_Reader', 'kroky': kroky, 'ok': ok, 'zprava': zprava}
+        u = _zapis(data, uid, zapis, 'Checked' if ok else None, 'TIAC_Reader')
+    finally:
+        ZAMEK_TIA.release()
+    return {'ok': ok, 'shoda': bool(k_vys and k_vys['shoda']), 'export_ts': k_vys and k_vys['export_ts'],
+            'zprava': zapis['zprava'], 'zapis': zapis, 'uprava': u}
+
+
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
+    mcp = None                       # {'writer': (příkaz, env) | None, 'reader': …}
+    mcp_timeout = 300
 
     def log_message(self, fmt, *args):
         pass
@@ -543,6 +772,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(api_uprava_po(self.data, c.split('/')[3], self._telo()))
             elif metoda == 'POST' and re.fullmatch(r'/api/uprava/[\w-]+/kontrola-exportem', c):
                 self._json(api_kontrola_exportem(self.root, self.data, c.split('/')[3], self._telo()))
+            elif metoda == 'POST' and re.fullmatch(r'/api/uprava/[\w-]+/upload', c):
+                self._json(api_upload(self.root, self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
+            elif metoda == 'POST' and re.fullmatch(r'/api/uprava/[\w-]+/check', c):
+                self._json(api_check(self.root, self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
             elif metoda == 'POST' and c == '/api/kontrola':
                 self._json(api_kontrola(self.data, self._telo()))
             else:
@@ -564,9 +797,17 @@ class Handler(BaseHTTPRequestHandler):
         self._obsluz('PUT')
 
 
-def vytvor_server(port, root, data, host='127.0.0.1'):
-    h = type('H', (Handler,), {'root': root, 'data': data})
+def vytvor_server(port, root, data, host='127.0.0.1', mcp=None, mcp_timeout=300):
+    h = type('H', (Handler,), {'root': root, 'data': data, 'mcp': mcp, 'mcp_timeout': mcp_timeout})
     return ThreadingHTTPServer((host, port), h)
+
+
+def mcp_konfigurace(mcp_json, writer_cmd=None, reader_cmd=None):
+    """Příkazy Writeru / Readeru: z .mcp.json (klíče TIAC_Writer, tia-portal), přebité --writer-cmd / --reader-cmd."""
+    return {'writer': (mcp_klient.prikaz_z_textu(writer_cmd), None) if writer_cmd
+            else mcp_klient.z_mcp_json(mcp_json, 'TIAC_Writer'),
+            'reader': (mcp_klient.prikaz_z_textu(reader_cmd), None) if reader_cmd
+            else mcp_klient.z_mcp_json(mcp_json, 'tia-portal')}
 
 
 def main():
@@ -574,8 +815,14 @@ def main():
     ap.add_argument('--port', type=int, default=8765)
     ap.add_argument('--export-root', required=True)
     ap.add_argument('--data', required=True, help='složka dat úprav: <data>\\<projekt>\\stav.json')
+    ap.add_argument('--mcp-json', default=r'.mcp.json',
+                    help='odkud vzít příkazy TIAC_Writer a tia-portal (Reader); soubor se jen čte')
+    ap.add_argument('--writer-cmd', help='příkaz Writeru místo .mcp.json (např. "python tests\\falesny_mcp.py writer")')
+    ap.add_argument('--reader-cmd', help='příkaz Readeru místo .mcp.json')
+    ap.add_argument('--mcp-timeout', type=int, default=300, help='timeout jednoho volání nástroje (s)')
     a = ap.parse_args()
-    srv = vytvor_server(a.port, a.export_root, a.data)
+    srv = vytvor_server(a.port, a.export_root, a.data, mcp=mcp_konfigurace(a.mcp_json, a.writer_cmd, a.reader_cmd),
+                        mcp_timeout=a.mcp_timeout)
     print('TIAC_Editor na http://localhost:%d  (export root %s, data %s)' % (a.port, a.export_root, a.data), flush=True)
     try:
         srv.serve_forever()

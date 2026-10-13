@@ -60,6 +60,9 @@ def uloz(data, projekt, obj):
 def over_strukturu(obj):
     if not isinstance(obj, dict) or not isinstance(obj.get('upravy'), list):
         raise ChybaStavu('stav musí být {"upravy": [...]}', 400)
+    t = obj.get('tia')
+    if t is not None and not (isinstance(t, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in t.items())):
+        raise ChybaStavu('tia musí být {softwarePath, plcName, groupPath?} (texty)', 400)
     ids = set()
     for u in obj['upravy']:
         if not isinstance(u, dict) or not isinstance(u.get('id'), str) or u.get('stav') not in STAVY:
