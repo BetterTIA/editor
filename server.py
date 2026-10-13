@@ -410,6 +410,8 @@ def api_layout(root, body):
     before = body.get('before')
     if before is not None:
         verify_model(before)
+        if body.get('align'):                         # two exports of one network: ids follow content, not order
+            after = diff.align(before, after)
     cat = []
 
     def template(key):                                # palette key ('NO', 'fb:FB_Belt') -> element from the catalog
@@ -437,6 +439,8 @@ def _layout_fbd(body, root=None):
     """FBD: operations (fbd.apply; FBD palette and catalog keys), drawing with the diff against before, insertion places, rules."""
     after = _fbd_after(body['after'])
     before = _fbd_after(dict(body['before'], language='FBD')) if isinstance(body.get('before'), dict) else None
+    if before is not None and body.get('align'):
+        after = _fbd_after(diff.align(before, after))
     ops = body.get('ops') or []
     if not isinstance(ops, list):
         raise state.StateError('ops must be a list of operations', 400)
@@ -1229,6 +1233,164 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
     return {'project': project, 'items': items}
 
 
+# ---------- versions (D3): snapshots of the project and their comparison ----------
+
+def _project_at(exp, full, ts):
+    """{block: ts of its copy} — the project as it was at export ts: the newest full export up to ts plus the partial
+    exports after it (a block missing from a full export was removed)."""
+    res = {}
+    for t in sorted(exp):
+        if t > ts:
+            break
+        if full[t]:
+            res = {}
+        res.update({b: t for b in exp[t]})
+    return res
+
+
+def api_snapshots(root, project):
+    exp = project_index(root, project)
+    if not exp:
+        raise KeyError('unknown project')
+    res = []
+    for ts in sorted(exp, reverse=True):
+        x = {'ts': ts, 'time': _ts_time(ts), 'block_count': len(exp[ts]), 'full': _full_export(root, project, ts)}
+        if not x['full']:
+            x['blocks'] = sorted(exp[ts])
+        res.append(x)
+    return {'project': project, 'snapshots': res}
+
+
+def _wording(diffs):
+    """content_match speaks of proposal / export; here it is the older / newer snapshot."""
+    return [d.replace('missing in export', 'removed').replace('extra in export', 'added')
+            .replace('proposal ', 'before ').replace('export ', 'after ') for d in diffs]
+
+
+def _same_network(a, b):
+    """-> (same, [differences]) by content (diff / fbd content_match), other languages by text."""
+    la, lb = a.get('language') or 'LAD', b.get('language') or 'LAD'
+    if la != lb:
+        return False, ['language %s → %s' % (la, lb)]
+    if la == 'FBD' and 'elements' in a and 'elements' in b:
+        same, d = fbd.content_match(a, b)
+    elif la == 'LAD' and all(k in x for x in (a, b) for k in ('elements', 'rungs')):
+        same, d = diff.content_match(a, b)
+    else:
+        t = [textwrap.dedent(x.get('text') or '').strip() for x in (a, b)]
+        same, d = t[0] == t[1], ['the network text differs']
+    return same, ([] if same else _wording(d))
+
+
+def _pair(xa, xb):
+    """Networks of two versions of a block: by a title unique in both, then by equal content, then by number."""
+    left, right, pairs = list(xa), list(xb), []
+    ta, tb = [n['title'] for n in xa], [n['title'] for n in xb]
+
+    def take(cond):
+        for m in list(right):
+            n = next((n for n in left if cond(n, m)), None)
+            if n is not None:
+                pairs.append((n, m))
+                left.remove(n)
+                right.remove(m)
+    take(lambda n, m: m['title'] and n['title'] == m['title'] and ta.count(m['title']) == 1 and tb.count(m['title']) == 1)
+    take(lambda n, m: _same_network(n, m)[0])
+    take(lambda n, m: n['nw'] == m['nw'])
+    pairs += [(n, None) for n in left] + [(None, m) for m in right]
+    return sorted(pairs, key=lambda p: (p[1] or p[0])['nw'] + (0.5 if p[1] is None else 0))
+
+
+def _matches(edits, block, n):
+    """Edits of this block whose "after" model is this network (same title or number, same content)."""
+    return [u['id'] for u in edits if u.get('block') == block
+            and (u.get('title') and u['title'] == n['title'] or u.get('nw') == n['nw'])
+            and _same_network(dict(u['after'], language='FBD' if fbd.is_fbd(u['after']) else 'LAD'), n)[0]]
+
+
+def _compare_block(root, project, name, ta, tb, edits):
+    _, x = _load(root, project, name, ta)
+    _, y = _load(root, project, name, tb)
+    res, notes = [], []
+    for na, nb in _pair(x['networks'], y['networks']):
+        z = {'nw_from': na and na['nw'], 'nw_to': nb and nb['nw'], 'title': (nb or na)['title'],
+             'language': (nb or na)['language'], 'notes': [], 'diffs': [], 'matches': []}
+        if na is None:
+            z['status'] = 'added'
+        elif nb is None:
+            z['status'] = 'removed'
+        else:
+            same, z['diffs'] = _same_network(na, nb)
+            if na['title'] != nb['title']:
+                z['notes'].append('title "%s" → "%s"' % (na['title'], nb['title']))
+            if na.get('comment') != nb.get('comment'):
+                z['notes'].append('comment changed')
+            if na['nw'] != nb['nw']:
+                z['notes'].append('the network moved: NW %d → NW %d' % (na['nw'], nb['nw']))
+            z['status'] = 'changed' if not same or na['title'] != nb['title'] or na.get('comment') != nb.get('comment') \
+                else 'moved' if na['nw'] != nb['nw'] else None
+        if z['status'] is None:
+            continue
+        if nb is not None and z['status'] != 'moved':
+            z['matches'] = _matches(edits, name, nb)
+        res.append(z)
+    va, vb = x.get('variables') or {}, y.get('variables') or {}
+    iface = ['+ %s : %s' % (k, vb[k]) for k in vb if k not in va] + ['− %s : %s' % (k, va[k]) for k in va if k not in vb] + \
+            ['%s : %s → %s' % (k, va[k], vb[k]) for k in va if k in vb and va[k] != vb[k]]
+    if iface:
+        notes.append('interface: ' + ', '.join(iface))
+    if x['attributes'] != y['attributes']:
+        notes.append('block attributes changed')
+    if not res and not notes:
+        notes.append('the export text differs outside the networks')
+    return {'kind': y['kind'], 'number': y['number'], 'networks': res, 'notes': notes}
+
+
+def _same_files(x, y):
+    """Byte-equal files (both missing = equal)."""
+    if not (os.path.exists(x) and os.path.exists(y)):
+        return os.path.exists(x) == os.path.exists(y)
+    with open(x, 'rb') as f, open(y, 'rb') as g:
+        return f.read() == g.read()
+
+
+def api_compare(root, data, project, a, b, block=None):
+    """Two snapshots (export timestamps) -> changed blocks; per block the networks added / removed / changed / moved."""
+    exp = project_index(root, project)
+    if not exp:
+        raise KeyError('unknown project')
+    for t in (a, b):
+        if t not in exp:
+            raise KeyError('project %s has no export %s' % (project, t))
+    full = {t: _full_export(root, project, t) for t in exp}
+    A, B = _project_at(exp, full, a), _project_at(exp, full, b)
+    names = sorted(set(A) | set(B))
+    if block:
+        if block not in names:
+            raise KeyError('block %s is in neither snapshot' % block)
+        names = [block]
+    try:
+        edits = state.load(data, project)['edits'] if data else []
+    except (state.StateError, OSError, ValueError):
+        edits = []
+    blocks = []
+    for name in names:
+        ta, tb = A.get(name), B.get(name)
+        if ta == tb or ta and tb and all(_same_files(exp[ta][name][:-6] + e, exp[tb][name][:-6] + e) for e in ('.s7dcl', '.s7res')):
+            continue
+        z = {'block': name, 'from_ts': ta, 'to_ts': tb, 'status': 'added' if not ta else 'removed' if not tb else 'changed'}
+        try:
+            if ta and tb:
+                z.update(_compare_block(root, project, name, ta, tb, edits))
+            else:
+                k = _load(root, project, name, ta or tb)[1]
+                z.update(kind=k['kind'], number=k['number'], networks=[], notes=[])
+        except (s7dcl.SourceParseError, KeyError, OSError) as e:
+            z.update(networks=[], notes=['cannot be read: %s' % e])
+        blocks.append(z)
+    return {'project': project, 'from': a, 'to': b, 'blocks': blocks}
+
+
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
@@ -1342,6 +1504,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(changelog_markdown(name, r['items']), content_type='text/markdown')
                 else:
                     self._json(r)
+            elif method == 'GET' and re.fullmatch(r'/api/projects/[^/]+/snapshots', c):
+                name = unquote(c.split('/')[3])
+                self._json(api_snapshots(root(name), name))
+            elif method == 'GET' and re.fullmatch(r'/api/projects/[^/]+/compare', c):
+                name = unquote(c.split('/')[3])
+                self._json(api_compare(root(name), self.data, name, q.get('from', ''), q.get('to', ''), q.get('block')))
             elif method == 'GET' and c == '/api/jobs':
                 self._json({'jobs': list(self.jobs.values())})
             elif method == 'GET' and re.fullmatch(r'/api/jobs/[\w-]+', c):

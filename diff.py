@@ -195,3 +195,46 @@ def content_match(proposal, export):
         elif _j(ka) != _j(kb):
             res.append('elements match, but the wiring differs (series / branches)')
     return not res, res
+
+
+# ---------- D3: two exports of one network ----------
+
+def align(before, after):
+    """Ids of "after" taken over from equal elements of "before" (LAD and FBD). Two exports number elements by their
+    order in the text, so one inserted element shifts every id after it and the id pairing of compare() would show
+    them all as changed. Equal content -> the id of "before"; otherwise its own id when "before" has that id free with
+    the same type (= changed); otherwise a new id (= added)."""
+    def key(p):
+        q = {k: v for k, v in p.items() if k != 'id'}
+        if isinstance(q.get('inputs'), list):        # FBD: a signal names a box id, which is what is being renamed
+            q['inputs'] = [{k: v for k, v in x.items() if k != 'signal'} for x in q['inputs']]
+        return _j(q)
+    free = {}
+    for p in before.get('elements', []):
+        free.setdefault(key(p), []).append(p['id'])
+    B = {p['id']: p for p in before.get('elements', [])}
+    ren = {}
+    for q in after.get('elements', []):
+        if free.get(key(q)):
+            ren[q['id']] = free[key(q)].pop(0)
+    used, n = set(ren.values()), 0
+    for q in after.get('elements', []):
+        if q['id'] in ren:
+            continue
+        if q['id'] in B and q['id'] not in used and B[q['id']]['type'] == q['type']:
+            ren[q['id']] = q['id']
+        else:
+            n += 1
+            while 'n%d' % n in B or 'n%d' % n in used:
+                n += 1
+            ren[q['id']] = 'n%d' % n
+        used.add(ren[q['id']])
+    res = copy.deepcopy(after)
+    for q in res.get('elements', []):
+        q['id'] = ren[q['id']]
+        for x in q.get('inputs') or []:
+            if x.get('signal') in ren:
+                x['signal'] = ren[x['signal']]
+    for r in res.get('rungs', []):
+        r['path'] = [ren.get(x, x) for x in r['path']]
+    return res

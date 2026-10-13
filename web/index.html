@@ -275,6 +275,13 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 .log .k.check-bad { color: var(--deleted); border-color: var(--deleted); }
 .log .by { color: var(--muted); font-size: 12px; }
 .log .sum { min-width: 0; overflow-wrap: anywhere; }
+.log a.nw { color: var(--text); text-decoration: none; display: flex; gap: var(--s2); align-items: baseline; flex-wrap: wrap; flex: 1; min-width: 0; }
+.log a.nw:hover b { color: var(--accent); }
+.log > div.active { background: var(--select); border-left: 3px solid var(--accent); padding-left: var(--s2); }
+.log .k.added { color: var(--added); border-color: var(--added); } .log .k.changed { color: var(--changed); border-color: var(--changed); }
+.log .k.removed { color: var(--deleted); border-color: var(--deleted); }
+.log .diffs { color: var(--muted); font-size: 12px; flex-basis: 100%; padding-left: var(--s1); }
+.log .match { font-size: 12px; font-weight: 600; }
 .empty-state { border: 1px dashed var(--edge-strong); border-radius: var(--r); padding: var(--s5); display: grid; grid-template-columns: auto 1fr;
                gap: var(--s5); align-items: center; background: var(--panel); }
 .empty-state b { display: block; font-size: 16px; margin-bottom: var(--s1); }
@@ -765,6 +772,54 @@ async function showChangelog(project) {
       await navigator.clipboard.writeText(t); $('log-copied').textContent = 'Copied';
     } catch (e) { $('log-copied').textContent = 'Cannot copy: ' + e.message; }
   };
+}
+
+// ---------- D3: versions — two snapshots compared, block → network → drawn difference ----------
+async function showVersions(project) {
+  $('info').textContent = project;
+  document.title = `BetterTIA Editor — ${project} versions`;
+  const snaps = (await api(`/api/projects/${enc(project)}/snapshots`)).snapshots;   // newest first
+  const to = q.get('to') || snaps[0]?.ts, from = q.get('from') || (snaps[1] || snaps[0])?.ts;
+  const opt = sel => snaps.map(x => `<option value="${esc(x.ts)}" ${x.ts === sel ? 'selected' : ''}>${esc(x.time.replace('T', ' '))} · ` +
+    `${x.full ? `full, ${x.block_count} blocks` : `partial: ${esc(x.blocks.join(', '))}`}</option>`).join('');
+  let h = projectTabs(project, 'versions') + `<h1>Versions <span class="c">${esc(project)}</span></h1>` +
+    `<p class="comment">Every snapshot is a copy of the project. Compare two of them — no TIA Portal needed. A partial export ` +
+    `(from Check) is laid over the full snapshot before it.</p>` +
+    `<div class="tools"><label>From <select id="v-from">${opt(from)}</select></label><span>→</span>` +
+    `<label>To <select id="v-to">${opt(to)}</select></label></div>`;
+  if (snaps.length < 2) { $('content').innerHTML = h + `<div class="notice"><b>One snapshot only</b><span>Take another snapshot to compare.</span></div>`; return; }
+  const r = await api(`/api/projects/${enc(project)}/compare?from=${enc(from)}&to=${enc(to)}`);
+  const key = (b, n) => `${b.block}:${n.nw_from ?? ''}:${n.nw_to ?? ''}`;
+  const all = r.blocks.flatMap(b => b.networks.map(n => [b, n]));
+  const chosen = all.find(([b, n]) => key(b, n) === q.get('sel')) || all.find(([, n]) => n.status !== 'moved') || all[0];
+  const nwText = n => n.nw_from && n.nw_to ? (n.nw_from === n.nw_to ? `NW ${n.nw_to}` : `NW ${n.nw_from} → NW ${n.nw_to}`) : `NW ${n.nw_to || n.nw_from}`;
+  h += r.blocks.length ? r.blocks.map(b => `<details class="panel" open><summary><span class="c">${esc(b.kind || '')}${b.number ?? ''}</span> "${esc(b.block)}"` +
+      `<span class="log"><span class="k ${esc(b.status)}">${esc(b.status)}</span></span><span class="sum">${esc(b.from_ts || '—')} → ${esc(b.to_ts || '—')}` +
+      `${b.notes.length ? ' · ' + esc(b.notes.join(' · ')) : ''}</span></summary><div class="body log">` +
+      (b.networks.length ? b.networks.map(n => `<div class="${chosen && chosen[1] === n ? 'active' : ''}">` +
+        `<a class="nw" href="${link({from, to, sel: key(b, n)})}"><span class="c">${nwText(n)}</span><b>${esc(n.title || '(no title)')}</b>` +
+        `<span class="k ${esc(n.status)}">${esc(n.status)}</span>${n.language !== 'LAD' ? `<span class="hint">${esc(n.language || '?')}</span>` : ''}</a>` +
+        n.matches.map(id => `<a class="match" href="?edit=${enc(id)}" title="the network in this snapshot is the &quot;after&quot; of the edit">matches edit ${esc(id)}</a>`).join('') +
+        (n.diffs.length || n.notes.length ? `<span class="diffs">${esc(n.notes.concat(n.diffs).join(' · '))}</span>` : '') + `</div>`).join('')
+        : '<div class="hint">No network changed.</div>') + `</div></details>`).join('')
+    : `<div class="notice"><b>No differences</b><span>The two snapshots have the same blocks and networks.</span></div>`;
+  if (chosen) h += `<details class="panel" open><summary>Difference <span class="sum">${esc(chosen[0].block)} · ${nwText(chosen[1])}: ${esc(chosen[1].title || '(no title)')}</span>` +
+    `<span class="legend"><span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></span></summary><div class="body canvas-body" id="v-canvas"></div></details>`;
+  $('content').innerHTML = h;
+  const go = () => { location.href = link({from: $('v-from').value, to: $('v-to').value, sel: null}); };
+  $('v-from').onchange = go; $('v-to').onchange = go;
+  if (!chosen) return;
+  const [b, n] = chosen, w = canvasWidth();
+  const get = (ts, nw) => nw ? api(`/api/network?project=${enc(project)}&block=${enc(b.block)}&nw=${nw}&ts=${enc(ts)}&width=${w}`) : null;
+  const [x, y] = await Promise.all([get(b.from_ts, n.nw_from), get(b.to_ts, n.nw_to)]);
+  const model = v => v.language === 'FBD' ? {language: 'FBD', elements: v.elements} : {elements: v.elements, rungs: v.rungs};
+  if (x && y && x.drawing && y.drawing && x.language === y.language) {     // the same diff as an edit, ids paired by content
+    const d = await apiJson('POST', '/api/layout', {project, before: model(x), after: model(y), align: true, width: w});
+    canvas($('v-canvas'), d, d.diff);
+  } else {
+    const v = y || x;
+    canvas($('v-canvas'), v, v.drawing ? Object.fromEntries(v.elements.map(p => [p.id, y ? 'added' : 'deleted'])) : {});
+  }
 }
 
 // ---------- M3: editor ----------
