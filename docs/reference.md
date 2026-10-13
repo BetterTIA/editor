@@ -24,7 +24,9 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
 ## Page
 `http://localhost:8765/?project=<project>&block=<block>&nw=<n>[&screenshot=1][&theme=light|dark]`
 - without parameters = the home page (projects, Add project, see [Home, projects and TIA](#home-projects-and-tia)),
-- `?project=<project>` without `block` = block picker over that project's exports,
+- `?project=<project>` without `block` = the project page with three tabs: block picker over that project's exports,
+  `&view=changelog` (filters `&state=`, `&block_filter=`) and `&view=versions` (`&from=`, `&to=`, `&sel=<block>:<nw from>:<nw to>`),
+  see [Changelog and versions](#changelog-and-versions),
 - every page has the status bar (TIA, Writer, Reader, AI with a state dot each, Refresh), a Home link and a theme
   toggle (light / dark, remembered in the browser's `localStorage`) in the header,
 - left: the block's networks (number + title, language when not LAD); right: the network drawn as in TIA Portal,
@@ -203,6 +205,10 @@ Operations (`ops` are applied in order):
 `element` is a palette key or a whole element (dict). New elements get `n1, n2…`, new nodes `wire#wN` (the diff pairs
 by id). Typical flow: `GET /api/network` → `POST /api/layout` with `after = {elements, rungs}` and `ops` → check
 `errors` → `POST /api/edits` (new) or `POST /api/edits/<id>/after` (Proposal) with the returned `after`.
+
+`align: true` (with `before`): the ids of "after" are first taken over from equal elements of "before" (`diff.align`) —
+for two exports of one network, which number their elements by order, so one inserted element does not shift every id
+after it. Used by the Versions tab.
 
 **Scenario in the URL** (screenshots; headless has no mouse):
 `?edit=<id>&edit_mode=1&ops=<URL-encoded JSON list of operations>&select=<id>&palette=<key>&branch=<r>,<k>` — the
@@ -426,6 +432,54 @@ and replacing a network with itself gives a block the parser reads the same (FB_
   `portalId`, `projectPath`/`path`/`name`, `softwarePath` anywhere in the JSON); how long `OpenTiaProject` takes when it
   has to start TIA (timeout 30 min); that the Reader's folder name equals the TIA project name.
 
+## Changelog and versions
+The project page (`?project=<name>`) has the tabs **Blocks**, **Changelog** and **Versions**; the home page card links
+to the changelog. Nothing new is stored: both are computed from `state.json`, the export folders and the jobs of the
+running server.
+
+**Changelog** — `GET /api/projects/<name>/changelog[?since=&until=&state=&block=&format=md]` → `{project, items}`,
+oldest first. An item: `{time, kind, edit?, block, nw, title, by, summary, block_kind?, block_number?, state?}`.
+
+| kind | from | by | summary |
+|---|---|---|---|
+| `proposed` | edit `time`, `author` | the author | the note |
+| `state` | each `history` entry after the first | `by` of the entry | `Approved → Signed` |
+| `upload` / `write` | `writes` (a Reader write that ran an export check is left out — its check is the item) | the tool | `✓`/`✗` + message |
+| `check` | `checks` | `TIAC_Reader` (Check) or `export check` | `match`/`MISMATCH · export <ts> · note` |
+| `snapshot` | export folders; snapshot jobs of this server run (a failed one too) | `TIAC_Reader` when a job or a check names the export | `snapshot: full export, N blocks (job J001)` / `partial export: <blocks> (Check U001)` |
+
+`since` / `until` take `YYYY-MM-DD[THH:MM:SS]` or `YYYYMMDD-HHMMSS`; `until` is inclusive at its precision (`until=2026-10-12`
+= the whole day). `state` / `block` keep the items of edits in that **current** state / of that block (snapshots drop
+out). Within one second the items follow the causal order (a write, then the state it set; an export, then its check).
+`format=md` → `text/markdown`: a table per day `| Time | Event | Block · network | By | Details |`, the block column of
+an edit is `FB10 "FB_Conveyor" · NW 1: <title>` (the header of the TIA steps), so a reader can find it in TIA Portal.
+UI: filters by state and block, **Copy as Markdown** (copies the filtered list).
+
+**Snapshots** — `GET /api/projects/<name>/snapshots` → `{project, snapshots: [{ts, time, block_count, full, blocks?}]}`
+newest first. `full` = the export has a `<PLC>\Tags` folder (a snapshot exports blocks and tag tables, a Check only
+the block); a partial export lists its `blocks`.
+
+**Compare** — `GET /api/projects/<name>/compare?from=<ts>&to=<ts>[&block=]` → `{project, from, to, blocks: [{block,
+status: added|removed|changed, from_ts, to_ts, kind, number, notes, networks: [{nw_from, nw_to, title, language,
+status: added|removed|changed|moved, notes, diffs, matches}]}]}`.
+- The project at a snapshot = the newest **full** export up to it plus the partial exports after it; a block missing
+  from a full export was removed. `from_ts` / `to_ts` = the export the block's copy comes from (use it as `ts` in
+  `/api/network`). Byte-equal `.s7dcl` + `.s7res` = unchanged.
+- Networks are paired by a title unique in both versions, then by equal content, then by number. Content = the export
+  check comparison (`diff.content_match` for LAD, `fbd.content_match` for FBD, text for other languages), with
+  "before/after" wording. A changed title or comment makes a network `changed`; a pair with another number is `moved`
+  (note "the network moved: NW 1 → NW 2").
+- Block notes: interface variables added / removed / with another type, block attributes, or "the export text differs
+  outside the networks".
+- `matches` = edits of the block (same title or number) whose "after" model equals the network in `to` by content —
+  the link between the changelog and the versions.
+
+UI (**Versions**): From / To (default: the second newest → the newest snapshot), the changed blocks with their
+networks (differences, notes, *matches edit Uxxx* link to the edit), a click on a network → **Difference**: both
+networks from `/api/network?ts=` and `POST /api/layout {before, after, align: true}`, drawn as an edit (added green,
+changed orange, deleted red); an added / removed network is drawn whole in green / red. Screenshots:
+`tests\screenshots\project_changelog.png`, `project_versions.png`.
+
 ## MCP server
 `mcp_server.py` makes the editor an MCP server for AI agents (Claude Code, Cursor, any MCP client). The client starts
 it as a stdio server (JSON-RPC 2.0, one message per line, protocol `2025-06-18`); it talks to an **already running**
@@ -536,7 +590,8 @@ testing through a browser automation extension: when the tab is hidden (`documen
 - `python -m unittest discover -s tests` — parser, layout (element positions), API through `http.client` against a
   server on a free port, LAD/FBD editor operations, export check, Upload/Check against the fake servers
   (`tests\test_upload_check.py`), MCP client (`tests\test_mcp_client.py`), the editor's MCP server
-  driven through the MCP client (`tests\test_mcp_server.py`), states (`tests\test_state.py`),
+  driven through the MCP client (`tests\test_mcp_server.py`), states (`tests\test_state.py`), changelog
+  (`tests\test_changelog.py`), snapshot comparison incl. a moved network and the MCP tools (`tests\test_compare.py`),
   serialization, real clicks and screenshots (skipped without Chrome).
 - `tests\screenshots\` — screenshots of sample networks and of the main home/editor/change/upload views, and
   `docs\demo.gif`; all regenerated by `python tools\screenshots.py` (temp folders, fake Writer/Reader, port 8765).

@@ -48,8 +48,20 @@ It is the third tool of the BetterTIA set:
 - "Export = proposal" check: compares a fresh export with the approved change.
 - Optional `Upload` (through the writer) and `Check` (through the reader) for non-safety blocks. Networks of
   fail-safe blocks are never uploaded; they are changed by hand.
+- A changelog of the project and a comparison of two snapshots (versions), see below.
 - An MCP server (`mcp_server.py`), so an AI agent can read projects and networks, propose a change, check an export
   and take a screenshot — on top of a small HTTP API.
+
+## Changelog and versions
+
+The editor keeps a copy of the project: every snapshot is a Reader export with a timestamp. The project page has two
+more tabs. **Changelog** lists what changed and when — who proposed an edit, who approved it, what the writer wrote,
+what the reader checked, and every snapshot — per day, filtered by state or block, and copies it as Markdown with
+block, number and network title on every row. **Versions** compares two snapshots without TIA Portal: the changed
+blocks, in each the networks added, removed, changed or moved, and the difference drawn as for an edit. A network that
+is the "after" of an edit links to it (*matches edit U001*).
+
+![Versions: two snapshots compared, a network that matches an edit](tests/screenshots/project_versions.png)
 
 ## Requirements
 

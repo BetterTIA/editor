@@ -752,7 +752,7 @@ async function showChangelog(project) {
   for (const x of r.items) { const d = x.time.slice(0, 10); if (!days.has(d)) days.set(d, []); days.get(d).push(x); }
   const row = x => `<div><span class="t">${esc(x.time.slice(11, 19))}</span>` +
     `<span class="k${x.kind === 'check' && x.summary.startsWith('MISMATCH') ? ' check-bad' : ''}">${esc(KIND_TEXT[x.kind] || x.kind)}</span>` +
-    (x.edit ? `<a class="c" href="?edit=${enc(x.edit)}">${esc(x.edit)}</a><span class="state s-${esc(x.state)}">${esc(x.state)}</span>` +
+    (x.edit ? `<a class="c" href="?edit=${enc(x.edit)}">${esc(x.edit)}</a><span class="state s-${esc(x.state)}" title="current state of the edit">${esc(x.state)}</span>` +
       `<b>${esc(x.block_kind || '')}${x.block_number ?? ''} "${esc(x.block)}" · NW ${x.nw}: ${esc(x.title || '(no title)')}</b>` : '') +
     `<span class="sum">${esc(x.summary)}</span>${x.by ? `<span class="by">by ${esc(x.by)}</span>` : ''}</div>`;
   $('content').innerHTML = projectTabs(project, 'changelog') +
@@ -1249,13 +1249,13 @@ function cardHtml(p) {
   const edits = Object.entries(p.edits || {});
   const running = p.job && p.job.state === 'running';
   return `<div class="card"><h3><a href="?project=${enc(p.name)}">${esc(p.name)}</a><span class="src" title="how the project was added">${esc(p.source)}</span></h3>` +
-    `<dl><dt>Last snapshot</dt><dd><b>${esc(p.last_snapshot || p.latest_export || '—')}</b> · ${p.exports} export${p.exports === 1 ? '' : 's'}</dd>` +
+    `<dl><dt>Last snapshot</dt><dd><b>${esc(p.last_snapshot || p.latest_export || '—')}</b> · ${p.exports} export${p.exports === 1 ? '' : 's'} · ` +
+    `<a href="?project=${enc(p.name)}&view=changelog" title="what changed in the project and when">changelog</a></dd>` +
     (p.tia ? `<dt>PLC</dt><dd>${esc(p.tia.softwarePath)}</dd>` : '') +
     `<dt>Exports</dt><dd class="path" title="export root">${esc(p.export_root || '')}</dd>` +
     (p.project_path ? `<dt>TIA project</dt><dd class="path">${esc(p.project_path)}</dd>` : '') + `</dl>` +
     `<div class="edits">${edits.length ? edits.map(([s, n]) => `<span class="state s-${esc(s)}">${esc(s)} ${n}</span>`).join('') : 'No edits yet'}</div>` +
     `<div class="row"><button class="primary" data-open="${esc(p.name)}">Open</button>` +
-    `<button data-log="${esc(p.name)}" title="what changed in the project and when">Changelog</button>` +
     `<button data-snap="${esc(p.name)}" ${running ? 'disabled' : ''} title="export the whole PLC from TIA Portal through the Reader">New snapshot</button>` +
     `<button data-remove="${esc(p.name)}" ${running ? 'disabled' : ''} title="remove from the list (exports and edits stay on disk)">Remove</button></div>` +
     jobHtml(p.job, p.name) + '</div>';
@@ -1324,7 +1324,6 @@ async function showHome() {
     catch (e) { b.textContent = 'Cannot copy'; }
   };
   for (const b of document.querySelectorAll('[data-open]')) b.onclick = () => { location.href = `?project=${enc(b.dataset.open)}`; };
-  for (const b of document.querySelectorAll('[data-log]')) b.onclick = () => { location.href = `?project=${enc(b.dataset.log)}&view=changelog`; };
   const fail = e => { $('add-error').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`; };
   $('add-exports').onclick = () => apiJson('POST', '/api/projects', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
   $('add-tia').onclick = () => startJob('/api/projects', {source: 'tia'}).catch(fail);

@@ -123,6 +123,8 @@ def main():
         d.req('POST', '/api/edits/%s/upload' % u1, {})
         d.req('POST', '/api/edits/%s/check' % u1, {})
         d.shot('?edit=' + u1, 'edit_checked_upload_check.png', 1400, 1000)
+        d.shot('?project=%s&view=changelog' % PROJECT, 'project_changelog.png', 1400, 900)
+        d.shot('?project=%s&view=versions&sel=FB_Conveyor:2:2' % PROJECT, 'project_versions.png', 1400, 900)   # TS2 -> Check export
         frames.append(d.shot('?edit=' + u1, 'f5.png', 1280, 800, out=tmp))
         page = '?edit=%s&edit_mode=1&select=b2&input=4' % u2
         d.shot(page, 'fbd_editor.png', 1500, 900)
