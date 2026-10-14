@@ -17,10 +17,11 @@ The first input is the chain input (in1, EN, CLK, S …); a call without power (
 """
 import copy
 import hashlib
-import json
 import re
 
 import s7dcl
+from diff import _j
+from layout import CHAR_W, _tw
 
 LOGIC = {'A': 'and', 'O': 'or', 'X': 'xor'}
 ASSIGNMENT = {'Coil': 'assign', 'S_Coil': 's', 'R_Coil': 'r'}
@@ -49,57 +50,6 @@ def _value(s):
     if s.startswith('NOT '):
         neg, s = True, s[4:].strip()
     return s, neg
-
-
-def _rungs(content):
-    """-> [{'from': text|None, 'items': [('box', target, args, attrs) | ('wire', 'wN')], 'to': 'wN'|None}]"""
-    rungs, active, attrs, i, t = [], None, {}, 0, content
-    while i < len(t):
-        if t[i].isspace():
-            i += 1
-            continue
-        row_k = t.find('\n', i)
-        row_k = len(t) if row_k < 0 else row_k
-        line = t[i:row_k].strip()
-        if re.match(r'RUNG\b', line):
-            if active is not None:
-                raise s7dcl.SourceParseError('RUNG inside RUNG')
-            active = {'from': line[4:].strip() or None, 'items': [], 'to': None}
-            i = row_k
-        elif re.match(r'END_RUNG\b', line):
-            if active is None:
-                raise s7dcl.SourceParseError('END_RUNG without RUNG')
-            d = line[8:].strip()
-            if d and not d.startswith('wire#'):
-                raise s7dcl.SourceParseError('END_RUNG with an operand')
-            active['to'] = d[5:] if d else None
-            rungs.append(active)
-            active = None
-            i = row_k
-        elif t[i] == '{':
-            k = s7dcl._paired(t, i, '{', '}')
-            attrs = _attrs(t[i:k])
-            i = k
-        elif re.match(r'wire#\w+$', line):
-            if active is None:
-                raise s7dcl.SourceParseError('wire outside RUNG')
-            active['items'].append(('wire', line[5:]))
-            i = row_k
-        else:
-            if active is None:
-                raise s7dcl.SourceParseError('element outside RUNG: ' + line[:40])
-            j = i
-            while j < len(t) and t[j] not in '(\n':
-                j = s7dcl._string_end(t, j) if t[j] in '"\'' else j + 1
-            if j >= len(t) or t[j] != '(':
-                raise s7dcl.SourceParseError('FBD element without parentheses: ' + line[:40])
-            k = s7dcl._paired(t, j, '(', ')')
-            active['items'].append(('box', t[i:j].strip(), t[j + 1:k - 1], attrs))
-            attrs = {}
-            i = k
-    if active is not None:
-        raise s7dcl.SourceParseError('RUNG without END_RUNG')
-    return rungs
 
 
 def _input(pin, value):
@@ -149,7 +99,9 @@ def parse(content):
         op, neg = _value(z)
         return ('op', op, neg)
 
-    for r in _rungs(content):
+    for r in s7dcl.split_rungs(content):
+        if r['to'] and not r['to'].startswith('wire#'):
+            raise s7dcl.SourceParseError('END_RUNG with an operand')
         before = source(r['from'])
         for item in r['items']:
             if item[0] == 'wire':
@@ -157,7 +109,9 @@ def parse(content):
                     raise s7dcl.SourceParseError('tap wire#%s without a source' % item[1])
                 wire[item[1]] = before
                 continue
-            b, pin, neg = _box(*item[1:])
+            if item[2] is None:
+                raise s7dcl.SourceParseError('FBD element without parentheses: ' + item[1][:40])
+            b, pin, neg = _box(item[1], item[2], _attrs(item[3]))
             b['id'] = 'b%d' % (len(elements) + 1)
             for v in b['inputs']:
                 if v['operand'].startswith('wire#'):
@@ -174,8 +128,8 @@ def parse(content):
             before = ('box', b['id'])
         if r['to']:
             if before is None:
-                raise s7dcl.SourceParseError('END_RUNG wire#%s without a source' % r['to'])
-            wire[r['to']] = before
+                raise s7dcl.SourceParseError('END_RUNG %s without a source' % r['to'])
+            wire[r['to'][5:]] = before
     for v, z in waiting:
         seen = set()
         while z[0] == 'wire':
@@ -551,10 +505,6 @@ def places(m, drawing):
 COMMUTATIVE = {'and', 'or', 'xor'}
 
 
-def _j(x):
-    return json.dumps(x, sort_keys=True, ensure_ascii=False)
-
-
 def _content(p, source):
     """Box content without id; input = [pin, neg, operand | source(signal)]; for &/>=1/x without pin and sorted;
     empty call pins are ignored."""
@@ -738,14 +688,8 @@ def pin_changes(before, after, changed):
 # ---------- layout ----------
 
 L = 18
-CHAR_W = 7.2
-MAX_CHARS = 30
 CHANNEL = 14       # free strip on the left of a column for vertical signal wires
 UP = 8
-
-
-def _tw(s):
-    return min(len(s or '...'), MAX_CHARS) * CHAR_W
 
 
 def _right(p):

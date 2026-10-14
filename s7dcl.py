@@ -223,11 +223,10 @@ def _networks(body):
 
 # ---------- LAD network ----------
 
-def parse_lad(content):
-    """-> (rungs, elements). rung = {'from': node, 'path': [element id | 'wire#wN'], 'to': node|None}.
-    Node = 'powerrail' | 'wN'; an FBD-like start with an operand is 'op:<text>'."""
-    rungs, elements = [], []
-    active, attrs, i, t = None, {}, 0, content
+def split_rungs(content):
+    """RUNG … END_RUNG of a LAD or FBD network -> [{'from': text | None, 'items': [('element', target, args | None,
+    attribute text) | ('wire', 'wN')], 'to': text | None}]; args None = an element without parentheses."""
+    rungs, active, attrs, i, t = [], None, '', 0, content
     while i < len(t):
         if t[i].isspace():
             i += 1
@@ -238,46 +237,55 @@ def parse_lad(content):
         if re.match(r'RUNG\b', line):
             if active is not None:
                 raise SourceParseError('RUNG inside RUNG')
-            z = line[4:].strip()
-            active = {'from': _node(z) if z else 'powerrail', 'path': [], 'to': None}
+            active = {'from': line[4:].strip() or None, 'items': [], 'to': None}
             i = row_k
         elif re.match(r'END_RUNG\b', line):
             if active is None:
                 raise SourceParseError('END_RUNG without RUNG')
-            d = line[8:].strip()
-            active['to'] = _node(d) if d else None
+            active['to'] = line[8:].strip() or None
             rungs.append(active)
             active = None
             i = row_k
         elif t[i] == '{':
             k = _paired(t, i, '{', '}')
-            attrs = attributes(t[i:k])
+            attrs = t[i:k]
             i = k
         elif re.match(r'wire#\w+$', line):
             if active is None:
                 raise SourceParseError('wire outside RUNG')
-            active['path'].append(line)
+            active['items'].append(('wire', line[5:]))
             i = row_k
         else:
             if active is None:
                 raise SourceParseError('element outside RUNG: ' + line[:40])
-            # call target = text before the first '(' outside quotes
-            j = i
+            j = i                                       # call target = text before the first '(' outside quotes
             while j < len(t) and t[j] not in '(\n':
                 j = _string_end(t, j) if t[j] in '"\'' else j + 1
-            if j < len(t) and t[j] == '(':
-                k = _paired(t, j, '(', ')')
-                target, args = t[i:j].strip(), t[j + 1:k - 1]
-            else:
-                k, target, args = j, t[i:j].strip(), None
-            p = element(target, args, attrs)
-            p['id'] = 'p%d' % (len(elements) + 1)
-            elements.append(p)
-            active['path'].append(p['id'])
-            attrs = {}
+            k = _paired(t, j, '(', ')') if j < len(t) and t[j] == '(' else j
+            active['items'].append(('element', t[i:j].strip(), t[j + 1:k - 1] if k > j else None, attrs))
+            attrs = ''
             i = k
     if active is not None:
         raise SourceParseError('RUNG without END_RUNG')
+    return rungs
+
+
+def parse_lad(content):
+    """-> (rungs, elements). rung = {'from': node, 'path': [element id | 'wire#wN'], 'to': node|None}.
+    Node = 'powerrail' | 'wN'; an FBD-like start with an operand is 'op:<text>'."""
+    rungs, elements = [], []
+    for r in split_rungs(content):
+        path = []
+        for item in r['items']:
+            if item[0] == 'wire':
+                path.append('wire#' + item[1])
+                continue
+            p = element(item[1], item[2], attributes(item[3]))
+            p['id'] = 'p%d' % (len(elements) + 1)
+            elements.append(p)
+            path.append(p['id'])
+        rungs.append({'from': _node(r['from']) if r['from'] else 'powerrail', 'path': path,
+                      'to': _node(r['to']) if r['to'] else None})
     return rungs, elements
 
 

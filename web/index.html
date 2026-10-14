@@ -351,8 +351,8 @@ const NS = 'http://www.w3.org/2000/svg';
 const L = 18, MAX_CHARS = 30;
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
-async function api(path) {
-  const r = await fetch(path);
+async function api(path, method = 'GET', body) {
+  const r = await fetch(path, method === 'GET' ? {} : {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || r.status);
   return j;
@@ -583,7 +583,7 @@ function treeHtml(st, activeId) {
           const x = un[0];
           h += !x.kind || x.kind === 'network'
             ? `<a class="u3" href="?project=${enc(p.project)}&block=${enc(block)}&nw=${x.nw}"><span class="c">NW ${x.nw}</span>${esc(x.title || '')}</a>`
-            : `<a class="u3" href="?edit=${enc(x.id)}"><span class="c">${esc(editWhere(x).split(':')[0])}:</span>${esc(editWhere(x).split(':').slice(1).join(':'))}</a>`;
+            : `<a class="u3" href="?edit=${enc(x.id)}">${whereHtml(x)}</a>`;
           for (const u of un) {
             h += `<a class="u4 ${u.id === activeId ? 'active' : ''}" href="?edit=${enc(u.id)}"><span class="c">${esc(u.id)}</span>` +
                  `<span class="state s-${esc(u.state)}">${esc(u.state)}</span><span class="note">${esc(u.note || '')}</span></a>`;
@@ -593,6 +593,14 @@ function treeHtml(st, activeId) {
     }
   }
   return h + '</div>';
+}
+// editWhere(u) with the part before the first colon in the code style
+function whereHtml(u) {
+  const [head, ...rest] = editWhere(u).split(':');
+  return `<span class="c">${esc(head)}:</span>${esc(rest.join(':'))}`;
+}
+function editTitleHtml(u) {
+  return `<h1><span class="c">${esc(u.id)}</span> ${esc(u.block_kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · ${whereHtml(u)}</h1>`;
 }
 // what an edit changes: "NW 2: title", "Interface: +4 Static", "NW 3+ (new): title"
 function editWhere(u) {
@@ -654,7 +662,7 @@ async function showNetwork(project, block) {
     if ($('as-lad')) $('as-lad').onclick = () => { location.href = link({lad: q.get('lad') === '1' ? null : '1'}); };
     $('proposal').onclick = async () => {
       try {
-        const u = await apiJson('POST', '/api/edits', {project, round: $('proposal-round').value.trim() || 'Round 1', block, nw,
+        const u = await api('/api/edits', 'POST', {project, round: $('proposal-round').value.trim() || 'Round 1', block, nw,
                                  after: fbd ? {language: 'FBD', elements: net.elements} : {elements: net.elements, rungs: net.rungs}, note: ''});
         location.href = `?edit=${enc(u.id)}&edit_mode=1`;
       } catch (e) { $('proposal-error').textContent = '⚠ ' + e.message; }
@@ -663,7 +671,7 @@ async function showNetwork(project, block) {
       const title = $('proposal-title').value.trim();
       if (!title) { $('proposal-error').textContent = '⚠ give the new network a title (it finds the network in the export)'; $('proposal-title').focus(); return; }
       try {
-        const u = await apiJson('POST', '/api/edits', {project, round: $('proposal-round').value.trim() || 'Round 1', block, kind: 'new_network',
+        const u = await api('/api/edits', 'POST', {project, round: $('proposal-round').value.trim() || 'Round 1', block, kind: 'new_network',
                                  after_nw: nw, title, language: net.language,
                                  after: fbd ? {language: 'FBD', elements: []} : {elements: [], rungs: [{from: 'powerrail', path: [], to: null}]}, note: ''});
         location.href = `?edit=${enc(u.id)}&edit_mode=1`;
@@ -675,20 +683,6 @@ async function showNetwork(project, block) {
     canvas(m, {drawing: net.as_lad.drawing, elements: net.as_lad.elements, rungs: net.as_lad.rungs});
   } else canvas(m, net);
 }
-async function apiJson(method, path, body) {
-  const r = await fetch(path, {method: method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || r.status);
-  return j;
-}
-
-async function changeState(uid, state) {
-  const r = await fetch(`/api/edits/${enc(uid)}/state`, {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({state, by: 'user'})});
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || r.status);
-}
-
 // Signed = written into the project (by hand / Upload through the Writer), Checked = Reader export matches the proposal (Check)
 const STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested'];
 
@@ -710,7 +704,7 @@ async function showEdit(uid, error) {
   const checks = u.checks || [], last = checks[checks.length - 1];
   m.innerHTML =
     `<div class="edit-head">` +
-    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.block_kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">${esc(editWhere(u).split(':')[0])}:</span>${esc(editWhere(u).split(':').slice(1).join(':'))}</h1>` +
+    editTitleHtml(u) +
     `<div class="header"><span class="state s-${esc(u.state)}">${esc(u.state)}</span>${d.errors.length ? `<span class="mark-errors">⚠ ${errorCount(d.errors.length, language)}</span> · ` : ''} round <b>${esc(u.round)}</b> · author <b>${esc(u.author)}</b> · ${esc(u.time.replace('T', ' '))}</div>` +
     (u.note ? `<p class="comment">${esc(u.note)}</p>` : '') +
     (u.group ? `<div class="group-of">Member ${u.group.order} of group <a href="?group=${enc(u.group.id)}">${esc(u.group.id)}${u.group.name ? ' · ' + esc(u.group.name) : ''}</a> — states, Upload and Check of the whole change are on the group page</div>` : '') +
@@ -753,7 +747,7 @@ async function showEdit(uid, error) {
   if ($('check-export')) $('check-export').onclick = async () => {
     $('check-export').disabled = true;
     try {
-      const k = await apiJson('POST', `/api/edits/${enc(u.id)}/check-export`, {});
+      const k = await api(`/api/edits/${enc(u.id)}/check-export`, 'POST', {});
       await showEdit(uid, k.match ? null : `Check export ${k.export_ts}: ${k.note}`);
     } catch (e) { await showEdit(uid, 'Export check failed: ' + e.message); }
   };
@@ -765,21 +759,21 @@ async function showEdit(uid, error) {
       for (const b of m.querySelectorAll('.buttons button')) b.disabled = true;
       $('progress').textContent = description;
       try {
-        const r = await apiJson('POST', `/api/edits/${enc(u.id)}/${path}`, {});
+        const r = await api(`/api/edits/${enc(u.id)}/${path}`, 'POST', {});
         await showEdit(uid, r.ok ? null : r.message);
       } catch (e) { await showEdit(uid, `${id === 'upload' ? 'Upload' : 'Check'}: ${e.message}`); }
     };
   }
   $('tia-save').onclick = async () => {
     try {
-      await apiJson('PUT', `/api/state/tia?project=${enc(u.project)}`,
+      await api(`/api/state/tia?project=${enc(u.project)}`, 'PUT',
                     {softwarePath: $('tia-sp').value, plcName: $('tia-plc').value, groupPath: $('tia-grp').value});
       await showEdit(uid);
     } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
   };
   for (const b of m.querySelectorAll('button[data-state]')) {
     b.onclick = async () => {
-      try { await changeState(u.id, b.dataset.state); await showEdit(uid); }
+      try { await api(`/api/edits/${enc(u.id)}/state`, 'POST', {state: b.dataset.state, by: 'user'}); await showEdit(uid); }
       catch (e) { await showEdit(uid, e.message); }
     };
   }
@@ -811,13 +805,13 @@ async function showGroup(gid, message) {
     `<details class="panel" id="procedure-panel" open hidden><summary>TIA steps <span class="sum">all members, in order</span>` +
     `<span class="end"><button id="procedure-copy" class="small" title="copies the markdown">Copy</button></span></summary><div class="body checks procedure" id="procedure"></div></details>`;
   for (const b of document.querySelectorAll('button[data-gstate]')) b.onclick = async () => {
-    try { await apiJson('POST', `/api/groups/${enc(gid)}/state`, {state: b.dataset.gstate, by: 'user'}); await showGroup(gid); }
+    try { await api(`/api/groups/${enc(gid)}/state`, 'POST', {state: b.dataset.gstate, by: 'user'}); await showGroup(gid); }
     catch (e) { await showGroup(gid, e.message); }
   };
   const run = (id, path, text, done) => { if ($(id)) $(id).onclick = async () => {
     for (const b of $('content').querySelectorAll('.buttons button')) b.disabled = true;
     $('progress').textContent = text;
-    try { const x = await apiJson('POST', `/api/groups/${enc(gid)}/${path}`, {}); await showGroup(gid, done(x)); }
+    try { const x = await api(`/api/groups/${enc(gid)}/${path}`, 'POST', {}); await showGroup(gid, done(x)); }
     catch (e) { await showGroup(gid, e.message); }
   }; };
   run('g-upload', 'upload', 'Upload: TIAC_Writer is writing the members one by one…',
@@ -938,7 +932,7 @@ async function showVersions(project) {
   const [x, y] = await Promise.all([get(b.from_ts, n.nw_from), get(b.to_ts, n.nw_to)]);
   const model = v => v.language === 'FBD' ? {language: 'FBD', elements: v.elements} : {elements: v.elements, rungs: v.rungs};
   if (x && y && x.drawing && y.drawing && x.language === y.language) {     // the same diff as an edit, ids paired by content
-    const d = await apiJson('POST', '/api/layout', {project, before: model(x), after: model(y), align: true, width: w});
+    const d = await api('/api/layout', 'POST', {project, before: model(x), after: model(y), align: true, width: w});
     canvas($('v-canvas'), d, d.diff);
   } else {
     const v = y || x;
@@ -977,7 +971,7 @@ async function editor(uid) {
   palette();
   operands();
   $('content').innerHTML = `<div class="edit-head">` +
-    `<h1><span class="c">${esc(u.id)}</span> ${esc(u.block_kind || '')}${u.block_number ?? ''} "${esc(u.block)}" · <span class="c">${esc(editWhere(u).split(':')[0])}:</span>${esc(editWhere(u).split(':').slice(1).join(':'))}</h1>` +
+    editTitleHtml(u) +
     `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · editing</div>` +
     `<div class="tools" style="margin:0">` +
     `<button id="ed-undo" title="Ctrl+Z">↶ Undo</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button><span class="sep"></span>` +
@@ -1025,7 +1019,7 @@ async function editor(uid) {
 }
 
 async function recompute(ops, noHistory) {
-  const res = await apiJson('POST', '/api/layout', {project: ed.u.project, before: ed.before, after: ed.after, ops, f: ed.f, width: canvasWidth()});
+  const res = await api('/api/layout', 'POST', {project: ed.u.project, before: ed.before, after: ed.after, ops, f: ed.f, width: canvasWidth()});
   if (ops.length && !noHistory) { ed.hist.push(ed.after); ed.redo = []; ed.changed = true; }
   if (ops.length) mode('');
   ed.after = res.after;
@@ -1057,7 +1051,7 @@ async function save() {
   try {
     const texts = ed.u.kind === 'new_network' ? {title: $('ed-title').value, comment: $('ed-comment').value}
                                               : {title_after: $('ed-title').value, comment_after: $('ed-comment').value};
-    const r = await apiJson('POST', `/api/edits/${enc(ed.u.id)}/after`, Object.assign({after: ed.after}, texts));
+    const r = await api(`/api/edits/${enc(ed.u.id)}/after`, 'POST', Object.assign({after: ed.after}, texts));
     ed.changed = false;
     mode(`Saved ${new Date().toLocaleTimeString()}` + (r.errors.length ? ` — ${errorCount(r.errors.length, LANG())} (flagged in the edit header)` : ' — no errors'), true);
   } catch (e) { mode('⚠ Save failed: ' + e.message); }
@@ -1356,7 +1350,7 @@ function aiChip(st, chip) {
 async function loadStatus(refresh, portalId) {
   if (refresh) $('status').innerHTML = statusHtml(Object.assign({}, tiaStatus, {busy: true}));
   try {
-    tiaStatus = refresh ? await apiJson('POST', '/api/tia/status', {portalId}) : await api('/api/tia/status');
+    tiaStatus = refresh ? await api('/api/tia/status', 'POST', {portalId}) : await api('/api/tia/status');
   } catch (e) { tiaStatus = {tia: 'unknown', writer: 'error: ' + e.message}; }
   $('status').innerHTML = statusHtml(tiaStatus);
   $('status-refresh').onclick = () => loadStatus(true).then(statusChanged);
@@ -1459,13 +1453,13 @@ async function showHome() {
   };
   for (const b of document.querySelectorAll('[data-open]')) b.onclick = () => { location.href = `?project=${enc(b.dataset.open)}`; };
   const fail = e => { $('add-error').innerHTML = `<div class="warning">⚠ ${esc(e.message)}</div>`; };
-  $('add-exports').onclick = () => apiJson('POST', '/api/projects', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
+  $('add-exports').onclick = () => api('/api/projects', 'POST', {source: 'exports', path: $('add-path').value}).then(showHome, fail);
   $('add-tia').onclick = () => startJob('/api/projects', {source: 'tia'}).catch(fail);
   $('add-open').onclick = () => startJob('/api/projects', {source: 'ap21', path: $('add-ap21').value, close: $('add-close').checked}).catch(fail);
   for (const b of document.querySelectorAll('[data-snap]')) b.onclick = () => startJob(`/api/projects/${enc(b.dataset.snap)}/snapshot`, {}).catch(fail);
   for (const b of document.querySelectorAll('[data-remove]')) b.onclick = () => {
     if (confirm(`Remove ${b.dataset.remove} from the list? Its exports and edits stay on disk.`))
-      apiJson('DELETE', `/api/projects/${enc(b.dataset.remove)}`).then(showHome, fail);
+      api(`/api/projects/${enc(b.dataset.remove)}`, 'DELETE').then(showHome, fail);
   };
   for (const b of document.querySelectorAll('[data-sp]')) b.onclick = () => (b.dataset.retry
     ? startJob(`/api/projects/${enc(b.dataset.retry)}/snapshot`, {softwarePath: b.dataset.sp})
@@ -1474,7 +1468,7 @@ async function showHome() {
   if (running) setTimeout(() => pollJob(running.id), 700);
 }
 async function startJob(path, body) {
-  const r = await apiJson('POST', path, body);
+  const r = await api(path, 'POST', body);
   if (path === '/api/projects') homeJob = Object.assign(r.job, {request: body});
   await showHome();
 }

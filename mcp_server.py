@@ -25,6 +25,8 @@ import urllib.request
 import uuid
 
 import screenshot as shot
+from procedure import where
+from state import STATES
 
 PROTOCOL = '2025-06-18'
 VERSION = '0.1'
@@ -111,15 +113,6 @@ def get_edit(e, a):
             'next': d.get('next'), 'previous': d.get('previous'), 'checked_allowed': d.get('checked_allowed'),
             'tia': d.get('tia'), 'procedure': e.get('/api/edits/%s/procedure' % q(a['id']))['markdown'],
             'url': '%s/?edit=%s' % (e.url, q(a['id']))}
-
-
-def where(u):
-    """Short description of what an edit changes (the editor's tree label)."""
-    if u.get('kind') == 'interface':
-        return 'Interface: +%d %s' % (len(u.get('members') or []), u.get('section'))
-    if u.get('kind') == 'new_network':
-        return 'NW %s+ (new): %s' % (u.get('after_nw'), u.get('title') or '')
-    return 'NW %s: %s' % (u.get('nw'), u.get('title') or '')
 
 
 KIND_FIELDS = {'network': ('nw',), 'interface': ('section', 'members'), 'new_network': ('after_nw', 'title', 'after')}
@@ -230,7 +223,6 @@ S, I, B = {'type': 'string'}, {'type': 'integer', 'minimum': 1}, {'type': 'boole
 MODEL = {'type': 'object', 'description': 'network model: LAD {elements, rungs} or FBD {language: "FBD", elements}; '
                                           'start from get_network, keep the ids of kept elements, new ids for new ones'}
 TS = {'type': 'string', 'description': 'export timestamp YYYYMMDD-HHMMSS (default: the newest export of the block)'}
-STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
 KIND = {'type': 'string', 'enum': ['network', 'interface', 'new_network'],
         'description': 'what the edit changes (default network)'}
 TITLE_AFTER = {'type': 'string', 'description': 'network edit: the new network title ("" = keep the current one)'}
