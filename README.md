@@ -88,7 +88,8 @@ is the "after" of an edit links to it (*matches edit U001*).
 python server.py --port 8765 --export-root tests\samples --data data
 ```
 
-Then open `http://localhost:8765/`. The server listens on `127.0.0.1` only.
+Then open `http://localhost:8765/`. The server listens on `127.0.0.1` only and answers only requests addressed to
+`localhost` or `127.0.0.1` with its port.
 
 - `--export-root` is a folder laid out as `<project>\<timestamp>\<PLC>\Blocks\…\<block>.s7dcl`, which is
   what the reader's `export_to_folder` produces. `tests\samples` holds a made-up sample project.

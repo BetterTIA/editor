@@ -19,9 +19,11 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
   snapshots, Upload and Check; see [Upload and Check](#upload-and-check)).
 - `--no-autoconnect` = do not check TIA Portal at start and when the home page opens (only the Refresh button does).
 - `--demo` = a demo instance (see [Demo mode](#demo-mode)); implied when `--writer-cmd` / `--reader-cmd` (or the
-  `.mcp.json` entries) run `testsake_mcp.py`.
+  `.mcp.json` entries) run `tests\fake_mcp.py`.
 - `--ai-timeout` (60 s) = an AI client (see [MCP server](#mcp-server)) without a heartbeat for this long is forgotten.
-- The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403.
+- The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403,
+  and so does every request whose `Host` is not `localhost:<port>` / `127.0.0.1:<port>` (a page of another name that
+  resolves to 127.0.0.1 cannot read the API). A `project` from the URL is a folder name, never a path (400 otherwise).
 
 ## Page
 `http://localhost:8765/?project=<project>&block=<block>&nw=<n>[&screenshot=1][&theme=light|dark]`
@@ -70,8 +72,9 @@ is still there. `tia` from the registry is used by Upload/Check when `state.json
 | POST | `/api/projects` | `{source: "exports", path}` → 201 `{projects: [entry]}`; `{source: "tia", portalId?, softwarePath?}` or `{source: "ap21", path, close?, softwarePath?}` → 202 `{job}` |
 | DELETE | `/api/projects/<name>` | removes the entry only (exports and edits stay on disk) |
 | POST | `/api/projects/<name>/snapshot` | `{portalId?, softwarePath?, close?}` → 202 `{job}` |
-| GET | `/api/jobs`, `/api/jobs/<id>` | jobs of this server run: `{id, kind, project, state: running|done|error, steps: [{step, ok, message}], chunks, exported, plc, plc_choices?, portal_choices?, error, result: {project, export_ts, export_folder}}` |
-| GET | `/api/tia/status[?refresh=1][&portalId=]` | cached status; `refresh=1` checks again, `portalId` chooses an instance |
+| GET | `/api/jobs`, `/api/jobs/<id>` | jobs of this server run (running ones and the last 50 finished): `{id, kind, project, state: running|done|error, steps: [{step, ok, message}], chunks, exported, plc, plc_choices?, portal_choices?, error, result: {project, export_ts, export_folder}}` |
+| GET | `/api/tia/status` | the cached status |
+| POST | `/api/tia/status` | `{portalId?}` — checks TIA again (starts the Writer; while an Upload / Check / snapshot runs, the cached status with `busy: true`); `portalId` chooses an instance |
 
 **TIA status** (`GET /api/tia/status`): `{tia: "unknown"|"not running"|"running"|"attached"|"choose", project,
 project_path, portalId, instances: [{portalId, project, path, attached}], writer, reader: "configured"|"missing"|"error: …",
@@ -108,6 +111,7 @@ project) to the Reader's export root. The status bar shows the Reader's export r
 | GET | Returns |
 |---|---|
 | `/api/exports` | `{export_root, projects: [{project, exports: [{ts, block_count}], blocks: [{block, ts}]}]}` — exports with their block count, blocks with their newest `ts` |
+| `/api/blocks?project=[&ts=]` | `{project, export_ts, blocks: [{block, name, kind, number, language, title, networks, export_ts}]}` — the header of every block (its newest copy, or the blocks of export `ts`) in one request; a block that cannot be read has `error` |
 | `/api/block?project=&block=[&ts=]` | `{project, ts, block, file, kind, number, language, title, networks: [{nw, language, title}]}` |
 | `/api/network?project=&block=&nw=[&ts=][&width=px]` | network model: `elements`, `rungs`, `wires`, `layout {id: {r, c}}`, `drawing` (SVG geometry), `warnings`, plus `kind`, `number`, `title`, `comment`, `f` (F-block) |
 
@@ -123,7 +127,7 @@ Networks in other languages (SCL, STL) or that cannot be laid out come with a wa
 
 ## Changes and states
 **Storage:** `<--data>\<project>\state.json` (e.g. `data\editor\Demo_Line\state.json`). **Only the server** writes
-it (lock + temporary file + `os.replace`); while the server runs, do not edit the file by hand — use `PUT /api/state`.
+it (lock + temporary file + `os.replace`, reads under the same lock); while the server runs, do not edit the file by hand.
 
 Change (edit) of a network: `{id (U001…, unique across projects), project, round, kind: "network", block, block_kind,
 block_number, nw, title, language, f, author, time, state, note, history: [{state, time, by}], before: {elements, rungs,
@@ -141,7 +145,7 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/state[?project=]` | the whole `state.json` of a project; without a project `{projects: [{project, edits}]}` |
-| PUT | `/api/state?project=` | replaces the whole file (structure, ids and states are validated) |
+| PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
 | POST | `/api/edits` | new change `{project, round, block, nw, after, note}` → 201, state Proposal, author `editor` |
 | GET | `/api/edits/<id>[?width=]` | change + drawing of "after" with `diff` marks (`added` / `changed`, ghosts `x:<id>` = `deleted`), `next`, `previous`, `checked_allowed`, `errors`, `tia`, `warnings` |
 | POST | `/api/edits/<id>/state` | `{state, by}` — one step forward/back; Checked only after a matching check, otherwise 409 with the reason |
@@ -378,8 +382,9 @@ The `/api/layout` response for FBD also carries `places` (`{x, y, to, new_input?
 **FBD rules** (`fbd.validate`): missing operand (=, S, R, SR/RS, edge bit), missing instance, an unconnected input
 without an operand, an &/>=1/x/edge box whose output leads nowhere (warning). In an **F-block** (`S7_Safety := "TRUE"`
 in the header → `f` on the change; a client may also send `f: true` in `POST /api/edits`): a call of a block that is
-not F (catalog `blocks[].f`) and a connected EN are errors. The 1st input of `=`/S/R boxes taken from the export is not
-reported (the export has `RUNG` + `Coil(x)` without an input, see below).
+not F (catalog `blocks[].f`) and a connected EN are errors. An empty 1st input of `=`/S/R boxes taken from the export
+is not reported (the export has `RUNG` + `Coil(x)` without an input, see below) — unless the edit emptied it, which is
+a warning (the box would be "always 1").
 
 **FBD editor in the UI** (`?edit=<id>&edit_mode=1`, same frame as LAD): palette (bit logic, assignment, memory,
 edges, instructions, project blocks marked `F-`), insertion points (a circle on every input, below the last input of
@@ -390,8 +395,9 @@ scenario: `&ops=…&select=n1&input=2&palette=AND`.
 
 **FBD export check** (`fbd.content_match`, the button as well as `check.py --edit`): boxes by content (type, operand,
 name, instance, inputs operand/negation/"signal"; empty call pins are ignored); for **&, >=1, x the input order does
-not matter**, for the others it does; when the boxes match, the wiring is compared (trees from the outputs) → "boxes
-match but the signal wiring differs". Output as for LAD (match / mismatch + note, the last match unlocks Checked).
+not matter**, for the others it does; a negated main output (`neg_output`) counts as negated inputs of the boxes it
+feeds (that is how it is written and exported); when the boxes match, the wiring is compared (trees from the outputs)
+→ "boxes match but the signal wiring differs". Output as for LAD (match / mismatch + note, the last match unlocks Checked).
 
 ## TIA steps (procedure)
 `procedure.py`, LAD and FBD: `GET /api/edits/<id>/procedure` → `{header, steps, markdown, sources, edit}`; header
@@ -421,8 +427,12 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 2. `ResolveObjectPath {softwarePath, name: block, kind: "block"}` → `groupPath` (skipped when `tia.groupPath` is set),
 3. `ExportBlocksAsDocuments {softwarePath, exportPath: <temp>, regexName: "^block$", preservePath: false}`,
 4. replaces the network in `.s7dcl` (`s7dcl_write.py`): the network by **title** (otherwise number); safeguards: a block
-   with `S7_Safety` is never rewritten, the network language must match, the text after replacement is parsed again
-   and must match the proposal by content (otherwise stop before import); `.s7res` is not changed, BOM and CRLF are kept,
+   with `S7_Safety` is never rewritten, the network language must match, the network in the project must still match
+   the proposal's "before" by content (otherwise "changed in the project since the proposal" — propose again from a
+   fresh snapshot), the text after replacement is parsed again and must match the proposal by content (otherwise stop
+   before import); `S7_Templates` texts are copied from the exported block, a template the block has no example of is
+   written only for a comparison or TON (other instructions: stop, make it by hand); a title / comment-only edit leaves
+   the network text as it is; `.s7res` is not changed, BOM and CRLF are kept,
 5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (the text is stored in the record as `preview`),
 6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`.
 
@@ -451,7 +461,7 @@ python check.py --check U003      # CHECKED|MISMATCH|ERROR <id> · state … · 
 
 **TIA settings per project** (in `state.json` next to `edits`): `"tia": {"softwarePath": "PLC_1", "plcName": "PLC_1",
 "groupPath": "Conveyor"}` (`groupPath` is optional — otherwise the Writer resolves it). Set through
-`PUT /api/state?project=` or in the UI in the collapsible TIA settings on a change. Without it the buttons are greyed
+`PUT /api/state/tia?project=` or in the UI in the collapsible TIA settings on a change. Without it the buttons are greyed
 out and the API returns 409 with a hint.
 
 **Where the server takes the Writer and the Reader from:** `--mcp-json` (default `.mcp.json`, only read) — keys
@@ -465,7 +475,7 @@ message), an error also as a warning at the top (the page does not break). A "St
 with the current one highlighted.
 
 ### Demo mode
-A server whose Writer or Reader runs `testsake_mcp.py` (or that is started with `--demo`) is a **demo instance**:
+A server whose Writer or Reader runs `tests\fake_mcp.py` (or that is started with `--demo`) is a **demo instance**:
 - every page shows a striped banner "DEMO — fake TIA, nothing is written to a real project", the status bar says
   `attached (fake)` / `configured (fake)`, and `GET /api/tia/status` returns `demo: true`;
 - `POST /api/projects {source: "exports", path}` with a path **outside** the default `--export-root` → **409**
@@ -510,8 +520,7 @@ and replacing a network with itself gives a block the parser reads the same (FB_
 - the behaviour of `ImportFromDocuments` Override on an existing block (instance DB, interface, network numbers,
   comments), whether TIA renumbers networks or changes the `MLC_x` titles after import;
 - `.s7dcl` encoding from the Writer (BOM, CRLF) — both are kept as received;
-- serialization: order of call pins (inputs, then outputs), `S7_Templates` keys outside the comparison and TON
-  (`SrcType`/`DestType` guessed), the shape of `P_Contact`/`N_Contact`, `ReturnTrue()`, a negated call output
+- serialization: order of call pins (inputs, then outputs), the shape of `P_Contact`/`N_Contact`, `ReturnTrue()`, a negated call output
   `Q => NOT x`, an empty FBD rung without an operand;
 - F-blocks have no Upload (409 + the `S7_Safety` safeguard in the export) — nothing here changes the F-signature;
   this holds for every kind of edit and for groups;
@@ -604,7 +613,7 @@ error of the editor = `isError: true` with its message):
 | Tool | Arguments | Returns / does |
 |---|---|---|
 | `list_projects` | — | projects (`name, source, latest_export, exports, edits` by state, `tia`) + TIA status (`tia, project, writer, reader, ai`) |
-| `list_blocks` | `project`, `export_ts?` | blocks of the newest export of each block (or of one export): `block` (file name — use it as `block`), `name`, `kind`, `number`, `language`, `title`, `networks`, `export_ts` |
+| `list_blocks` | `project`, `export_ts?` | `GET /api/blocks`: blocks of the newest export of each block (or of one export): `block` (file name — use it as `block`), `name`, `kind`, `number`, `language`, `title`, `networks`, `export_ts` |
 | `get_network` | `project`, `block`, `nw`, `export_ts?` | `/api/network` without the SVG geometry: `elements`, `rungs`/`wires` (LAD) or `signals` (FBD), `title`, `comment`, `language`, `f`, `as_lad?` |
 | `list_edits` | `project?`, `state?` | edit summaries `{id, project, round, block, nw, title, language, f, state, author, time, note, last_check}` |
 | `get_edit` | `id` | `edit` (before/after, checks, writes, history), `diff`, `errors`, `warnings`, `next`/`previous`, `checked_allowed`, `tia`, `procedure` (markdown), `url` |
@@ -614,7 +623,7 @@ error of the editor = `isError: true` with its message):
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
 | `get_procedure` | `id` | the TIA steps as markdown text |
-| `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` checks TIA Portal again) |
+| `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` = `POST /api/tia/status`, checks TIA Portal again) |
 | `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |
 | `get_job` | `id` | the job record (steps, chunks, result, error) |
 | `get_changelog` | `project`, `format?` (`json`/`md`), `since?`, `until?` | the project changelog (see [Changelog and versions](#changelog-and-versions)); `md` = the Markdown text |
@@ -721,5 +730,4 @@ testing through a browser automation extension: when the tab is hidden (`documen
   a return value is offered without `Ret_Val`.
 - ❌ Moving an element by dragging on the canvas (only delete + insert), manual layout adjustments; FBD: rewiring a
   signal with the mouse (only insertion on an input and deletion), `pin → wire#` from a call's output pin; timers and
-  counters in FBD have EN/ENO instead of IN/Q; a negated main output is not canonicalized against a negated input of
-  the successor (two notations of the same logic = mismatch).
+  counters in FBD have EN/ENO instead of IN/Q.
