@@ -340,13 +340,16 @@ def block_interface(root, project, block, ts=None):
     return t, {inv[k]: v for k, v in r['section'].items() if k in inv}
 
 
-def _text_field(m, k, bad=''):
-    v = m.get(k)
+def _text(v, what, n=300, required=False, multiline=False, bad=''):
+    """Text from the API: None / '' = None (or an error when required); one line unless multiline, at most n characters."""
     if v is None or v == '':
+        if required:
+            raise state.StateError('%s is required' % what, 400)
         return None
-    if not isinstance(v, str) or len(v) > 500 or any(c in v for c in '\r\n' + bad):
-        raise state.StateError('member %s: %s must be one line of text' % (m.get('name'), k), 400)
-    return v.strip()
+    if not isinstance(v, str) or len(v) > n or '\r' in v or '\n' in v and not multiline or any(c in v for c in bad):
+        raise state.StateError('%s must be text%s (at most %d characters%s)' % (
+            what, '' if multiline else ' on one line', n, ', without %s' % bad if bad else ''), 400)
+    return v.strip('\r\n') if multiline else v.strip()
 
 
 def _members(v, taken):
@@ -363,7 +366,7 @@ def _members(v, taken):
         seen.add(m['name'].lower())
         x = {'name': m['name'], 'type': m['type'].strip()}
         for k, bad in (('comment', ''), ('initial', ';')):
-            t = _text_field(m, k, bad)
+            t = _text(m.get(k), 'member %s: %s' % (m['name'], k), 500, bad=bad)
             if t:
                 x[k] = t
         res.append(x)
@@ -430,16 +433,6 @@ def _new_interface(root, project, block, body):
             'before': {'interface': iface, 'export_ts': t}, '_block': b}
 
 
-def _one_line(v, what, required=False, n=300):
-    if v is None or v == '':
-        if required:
-            raise state.StateError('%s is required' % what, 400)
-        return None
-    if not isinstance(v, str) or len(v) > n or '\r' in v or ('\n' in v and what != 'comment'):
-        raise state.StateError('%s must be text%s (at most %d characters)' % (what, '' if what == 'comment' else ' on one line', n), 400)
-    return v.strip() if what != 'comment' else v.strip('\r\n')
-
-
 def _new_net(root, project, block, body):
     """New network after NW after_nw (0 = at the start): title, comment?, language (LAD|FBD, default the block's), after."""
     t, b = _load(root, project, block)
@@ -454,9 +447,9 @@ def _new_net(root, project, block, body):
         raise state.StateError('language must be LAD or FBD (the block language is %s)' % (b['language'] or '?'), 400)
     u = {'block': block, 'nw': after_nw + 1, 'after_nw': after_nw,
          'after_title': b['networks'][after_nw - 1]['title'] if after_nw else '',
-         'title': _one_line(body.get('title'), 'title', True), 'language': language,
+         'title': _text(body.get('title'), 'title', required=True), 'language': language,
          'after': _after_model(body.get('after'), language), 'before': {'export_ts': t}, '_block': b}
-    comment = _one_line(body.get('comment'), 'comment', n=2000)
+    comment = _text(body.get('comment'), 'comment', 2000, multiline=True)
     if comment:
         u['comment'] = comment
     if any(n['title'] == u['title'] for n in b['networks']):
@@ -488,7 +481,7 @@ def _texts_after(u, body):
     for k, old, what, n in (('title_after', 'title', 'title', 300), ('comment_after', 'comment_before', 'comment', 2000)):
         if k not in body or body[k] is None:
             continue
-        v = _one_line(body[k], what, n=n)
+        v = _text(body[k], what, n, multiline=what == 'comment')
         if v and v != (u.get(old) or ''):
             u[k] = v
         else:
@@ -738,41 +731,25 @@ def api_check_export(root, data, uid, body):
     if u.get('kind') == 'interface':
         return _check_interface(root, data, uid, u, body)
     t, b = _load(root, u['project'], u['block'], str(body['export_ts']) if body.get('export_ts') else None)
-    notes = []
-    cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
-    if u.get('title_after'):                          # after writing the network carries the new title
-        cand = [n for n in b['networks'] if n['title'] == u['title_after']] or cand
-    if u.get('kind') == 'new_network':                # found only by its title (and language); its number is a note
-        cand = [n for n in cand if n['language'] == u['language']] or cand
-        n = next((x for x in cand if x['nw'] == u['nw']), cand[0] if cand else None)
-        if n:
-            notes.append('the new network is NW %d in the export%s' % (
-                n['nw'], '' if n['nw'] == u['nw'] else ' (expected NW %d, after NW %d)' % (u['nw'], u['after_nw'])))
-        if len(cand) > 1:
-            notes.append('the title occurs %d× in the block, compared NW %d' % (len(cand), n['nw']))
-    elif cand:
-        n = next((x for x in cand if x['nw'] == u['nw']), cand[0])
-        if n['nw'] != u['nw']:
-            notes.append('the network moved: NW %d → NW %d (by title "%s")' % (u['nw'], n['nw'], n['title']))
-        if len(cand) > 1:
-            notes.append('the title occurs %d× in the block, compared NW %d' % (len(cand), n['nw']))
-    else:
-        n = b['networks'][u['nw'] - 1] if u['nw'] <= len(b['networks']) else None
-        if u.get('title'):
-            notes.append('title "%s" is not in the export — compared by number NW %d' % (u['title'], u['nw']))
+    n, cand = _find_network(b['networks'], u)
+    notes, new, language = [], u.get('kind') == 'new_network', 'FBD' if fbd.is_fbd(u['after']) else 'LAD'
+    if new and n:                                     # a new network is found only by its title; its number is a note
+        notes.append('the new network is NW %d in the export%s' % (
+            n['nw'], '' if n['nw'] == u['nw'] else ' (expected NW %d, after NW %d)' % (u['nw'], u['after_nw'])))
+    elif cand and n['nw'] != u['nw']:
+        notes.append('the network moved: NW %d → NW %d (by title "%s")' % (u['nw'], n['nw'], n['title']))
+    elif not cand and not new and u.get('title'):
+        notes.append('title "%s" is not in the export — compared by number NW %d' % (u['title'], u['nw']))
+    if len(cand) > 1:
+        notes.append('the title occurs %d× in the block, compared NW %d' % (len(cand), n['nw']))
     if n is None:
-        match, diffs = False, ['network %d is not in the export' % u['nw'] if u.get('kind') != 'new_network'
-                               else 'no network titled "%s" in the export' % u['title']]
-    elif fbd.is_fbd(u['after']):
-        if n['language'] != 'FBD' or 'elements' not in n:
-            match, diffs = False, ['NW %d in the export is in %s' % (n['nw'], n['language']) if n['language'] != 'FBD'
-                                  else 'NW %d in the export is unreadable (%s)' % (n['nw'], n.get('error'))]
-        else:
-            match, diffs = fbd.content_match(u['after'], n)
-    elif n['language'] != 'LAD':
-        match, diffs = False, ['NW %d in the export is in %s' % (n['nw'], n['language'] or '?')]
+        match, diffs = False, ['no network titled "%s" in the export' % u['title'] if new
+                               else 'network %d is not in the export' % u['nw']]
+    elif n['language'] != language or 'elements' not in n:
+        match, diffs = False, ['NW %d in the export is %s' % (n['nw'], 'in %s' % (n['language'] or '?') if n['language'] != language
+                                                              else 'unreadable (%s)' % n.get('error'))]
     else:
-        match, diffs = diff.content_match(u['after'], n)
+        match, diffs = _matcher(u['after'])(u['after'], n)
     if n is not None:
         for k, have, what in (('title_after', n['title'], 'title'), ('comment_after', n.get('comment') or '', 'comment')):
             if k in u and _lines(have) != _lines(u[k]):
@@ -784,6 +761,29 @@ def api_check_export(root, data, uid, body):
     u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note})
     return {'match': match, 'export_ts': t, 'nw_export': n['nw'] if n else None, 'note': note,
             'diffs': diffs, 'edit': u}
+
+
+def _find_network(networks, u):
+    """The edit's network in a block -> (network | None, [networks with its title]): by title (after writing a title edit:
+    the new title; a new network also by language), the one at the edit's number first; otherwise by number."""
+    cand = [n for n in networks if u.get('title') and n['title'] == u['title']]
+    if u.get('title_after'):
+        cand = [n for n in networks if n['title'] == u['title_after']] or cand
+    if u.get('kind') == 'new_network':
+        cand = [n for n in cand if n['language'] == u['language']] or cand
+    if cand:
+        return next((x for x in cand if x['nw'] == u['nw']), cand[0]), cand
+    return (networks[u['nw'] - 1] if u.get('kind') != 'new_network' and u['nw'] <= len(networks) else None), cand
+
+
+def _matcher(m):
+    """content_match for the language of a model."""
+    return fbd.content_match if fbd.is_fbd(m) else diff.content_match
+
+
+def _write_text(file, bom, text):
+    with open(file, 'wb') as f:
+        f.write((b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8'))
 
 
 def _lines(t):
@@ -817,9 +817,9 @@ def api_edit_after(data, uid, body, root=None):
             _texts_after(u, body)
         if u.get('kind') == 'new_network':
             if body.get('title') is not None:
-                u['title'] = _one_line(body['title'], 'title', True)
+                u['title'] = _text(body['title'], 'title', required=True)
             if body.get('comment') is not None:
-                u['comment'] = _one_line(body['comment'], 'comment', n=2000) or ''
+                u['comment'] = _text(body['comment'], 'comment', 2000, multiline=True) or ''
         u['edited'] = state.now()
         if body.get('note') is not None:
             u['note'] = str(body['note'])
@@ -868,8 +868,7 @@ def _add_members_in_file(file, bom, text, u):
     missing = [m['name'] for m in u['members'] if (m['name'].lower(), _norm_type(m['type'])) not in have]
     if missing:
         raise s7dcl_write.WriteError('the written interface does not read back with %s' % ', '.join(missing))
-    with open(file, 'wb') as f:
-        f.write((b'\xef\xbb\xbf' if bom else b'') + new_value.encode('utf-8'))
+    _write_text(file, bom, new_value)
     comments = [m['name'] for m in u['members'] if m.get('comment')]
     return '%d member(s) added to section %s%s' % (len(u['members']), u['section'], (
         ' — comments are not written to the document (%s): add them in TIA' % ', '.join(comments)) if comments else '')
@@ -888,11 +887,10 @@ def _insert_in_file(file, bom, text, b, u):
     if len(nets) != len(b['networks']) + 1:
         raise s7dcl_write.WriteError('the block does not have one network more after the insertion')
     back = nets[u['after_nw']]
-    m = (fbd.content_match if u['language'] == 'FBD' else diff.content_match)(_without_call_names(u['after']), _without_call_names(back))
+    m = _matcher(u['after'])(_without_call_names(u['after']), _without_call_names(back))
     if not m[0]:
         raise s7dcl_write.WriteError('the serialized proposal does not match the proposal: %s' % '; '.join(m[1]))
-    with open(file, 'wb') as f:
-        f.write((b'\xef\xbb\xbf' if bom else b'') + new_value.encode('utf-8'))
+    _write_text(file, bom, new_value)
     return 'new %s network inserted as NW %d (after NW %d)' % (u['language'], u['after_nw'] + 1, u['after_nw'])
 
 
@@ -900,10 +898,10 @@ def _network_texts(u, file):
     """(network number, title, comment) to set through SetNetworkText after the import, or None."""
     if u.get('kind') == 'new_network':
         return u['after_nw'] + 1, u['title'], u.get('comment') or None
-    if 'title_after' in u or 'comment_after' in u:   # the network as _replace_in_file found it (by title, else number)
-        nets = s7dcl.load_block(file)['networks']
-        n = next((x for x in nets if u.get('title') and x['title'] == u['title'] and x['nw'] == u['nw']), None) or \
-            next((x for x in nets if u.get('title') and x['title'] == u['title']), None) or nets[u['nw'] - 1]
+    if 'title_after' in u or 'comment_after' in u:   # the network as _replace_in_file found it
+        n = _find_network(s7dcl.load_block(file)['networks'], u)[0]
+        if n is None:
+            raise s7dcl_write.WriteError('network %d is not in the written block' % u['nw'])
         return n['nw'], u.get('title_after'), u.get('comment_after')
     return None
 
@@ -922,15 +920,13 @@ def _replace_in_file(file, u):
         return _add_members_in_file(file, bom, text, u)
     if u.get('kind') == 'new_network':
         return _insert_in_file(file, bom, text, b, u)
-    cand = [n for n in b['networks'] if u.get('title') and n['title'] == u['title']]
-    n = next((x for x in cand if x['nw'] == u['nw']), cand[0]) if cand else \
-        (b['networks'][u['nw'] - 1] if u['nw'] <= len(b['networks']) else None)
+    n = _find_network(b['networks'], u)[0]
     if n is None:
         raise s7dcl_write.WriteError('network %d ("%s") is not in the exported block' % (u['nw'], u.get('title') or ''))
     language = 'FBD' if fbd.is_fbd(u['after']) else 'LAD'
     if n['language'] != language:
         raise s7dcl_write.WriteError('NW %d is %s in the project, the proposal is %s' % (n['nw'], n['language'] or '?', language))
-    match = fbd.content_match if language == 'FBD' else diff.content_match
+    match = _matcher(u['after'])
     if match(_without_call_names(u['after']), _without_call_names(u['before']))[0]:   # only the title / comment changes
         return 'NW %d "%s": the logic is unchanged, only the network text is set' % (n['nw'], n['title'])
     if 'elements' not in n or not match(_without_call_names(u['before']), _without_call_names(n))[0]:
@@ -942,8 +938,7 @@ def _replace_in_file(file, u):
     ok, diffs = match(_without_call_names(u['after']), _without_call_names(back))
     if not ok:
         raise s7dcl_write.WriteError('the serialized proposal does not match the proposal: %s' % '; '.join(diffs))
-    with open(file, 'wb') as f:
-        f.write((b'\xef\xbb\xbf' if bom else b'') + new_value.encode('utf-8'))
+    _write_text(file, bom, new_value)
     return 'NW %d "%s" replaced with the "after" model%s' % (n['nw'], n['title'], '' if n['nw'] == u['nw'] else
                                                                   ' (NW %d in the proposal — the network moved)' % u['nw'])
 
@@ -959,6 +954,22 @@ def _path_from_text(t):
     except ValueError:
         pass
     return t.strip().strip('"').replace('\\', '/')
+
+
+def _step(steps, name, fn):
+    """Run one Writer / Reader call and record it in steps, also when it fails."""
+    try:
+        v = fn()
+    except Exception as e:
+        steps.append({'step': name, 'ok': False, 'message': str(e)[:1000]})
+        raise
+    steps.append({'step': name, 'ok': True, 'message': str(v)[:1000]})
+    return v
+
+
+def _pick_portal(inst, wanted=None):
+    """The wanted TIA Portal instance, else the only one running; None = the user has to choose."""
+    return next((x for x in inst if wanted and str(x['portalId']) == str(wanted)), None) or (inst[0] if len(inst) == 1 else None)
 
 
 def _write(data, uid, write, new_state, by):
@@ -998,13 +1009,7 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
     steps, work = [], tempfile.mkdtemp(prefix='tiac_upload_')
 
     def step(name, fn):
-        try:
-            v = fn()
-        except Exception as e:
-            steps.append({'step': name, 'ok': False, 'message': str(e)[:1000]})
-            raise
-        steps.append({'step': name, 'ok': True, 'message': str(v)[:1000]})
-        return v
+        return _step(steps, name, fn)
     try:
         sp, block = tia['softwarePath'], u['block']
         try:
@@ -1014,11 +1019,10 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
                 if not inst:
                     raise SnapshotError('TIA Portal is not running — open the project in TIA Portal first '
                                         '(Upload does not start TIA)')
-                chosen = next((x for x in inst if str(x['portalId']) == str(portal)), None) if portal else None
-                if chosen is None and len(inst) > 1:
+                chosen = _pick_portal(inst, portal)
+                if chosen is None:
                     raise SnapshotError('More than one TIA Portal instance is running — choose one in the status bar')
-                pid = (chosen or inst[0])['portalId']
-                step('Connect', lambda: k.call('Connect', {'portalId': pid}))
+                step('Connect', lambda: k.call('Connect', {'portalId': chosen['portalId']}))
                 grp = tia.get('groupPath')
                 if not grp:
                     fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
@@ -1062,14 +1066,6 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
     return {'ok': ok, 'message': write['message'], 'write': write, 'edit': u}
 
 
-def _json_or_empty(t):
-    try:
-        j = json.loads(t)
-        return j if isinstance(j, dict) else {}
-    except ValueError:
-        return {}
-
-
 def api_check(root, data, uid, mcp, timeout=300):
     """Signed change -> TIAC_Reader export_to_folder (block into a new export root folder) -> export check
     -> on a match Checked (by TIAC_Reader); on a mismatch it stays Signed and the check is recorded as a mismatch."""
@@ -1091,17 +1087,8 @@ def api_check(root, data, uid, mcp, timeout=300):
         before = set(project_index(root, project))
         try:
             with _client(mcp, 'reader', timeout) as k:
-                arg = {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
-                       'plcName': tia.get('plcName') or parts[0]}
-                texts = []
-                for _ in range(50):                   # complete:false -> continue with runId + nextOffset
-                    t = k.call('export_to_folder', arg)
-                    texts.append(t)
-                    j = _json_or_empty(t)
-                    steps.append({'step': 'export_to_folder', 'ok': True, 'message': t[:1000]})
-                    if j.get('complete', True) is not False:
-                        break
-                    arg.update(runId=j.get('runId'), offset=j.get('nextOffset'))
+                texts = _reader_export(k, {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
+                                           'plcName': tia.get('plcName') or parts[0]}, steps)
             new_items = set(project_index(root, project)) - before
             ts = [x for x in re.findall(r'\d{8}-\d{6}', ' '.join(texts)) if x in new_items] or sorted(new_items)
             if not ts:
@@ -1111,9 +1098,8 @@ def api_check(root, data, uid, mcp, timeout=300):
             steps.append({'step': 'Export check %s' % ts[-1], 'ok': k_res['match'], 'message': k_res['note']})
             ok, message = k_res['match'], ('export = proposal' if k_res['match'] else k_res['note'])
         except mcp_client.MCPError as e:
-            steps.append({'step': 'export_to_folder', 'ok': False, 'message': str(e)[:1000]})
             ok, message = False, CONNECTION_ERROR + str(e)
-        except (s7dcl_write.WriteError, s7dcl.SourceParseError, KeyError, OSError) as e:
+        except (SnapshotError, s7dcl_write.WriteError, s7dcl.SourceParseError, KeyError, OSError) as e:
             ok, message = False, 'Check stopped: %s' % str(e).strip("'")
         write = {'time': state.now(), 'tool': 'TIAC_Reader', 'steps': steps, 'ok': ok, 'message': message}
         u = _write(data, uid, write, 'Checked' if ok else None, 'TIAC_Reader')
@@ -1228,8 +1214,7 @@ def api_tia_status(mcp, portal_id=None, timeout=STATUS_TIMEOUT):
             if not inst:
                 res['tia'] = 'not running'
                 return res
-            chosen = next((x for x in inst if str(x['portalId']) == str(portal_id)), None) if portal_id \
-                else (inst[0] if len(inst) == 1 else None)
+            chosen = _pick_portal(inst, portal_id)
             if chosen is None:
                 res['tia'] = 'choose'
                 return res
@@ -1375,6 +1360,24 @@ def start_job(jobs, kind, project, fn):
     return job
 
 
+def _reader_export(r, arg, steps, chunk=None):
+    """Reader export_to_folder in chunks (complete: false -> continue with runId + offset=nextOffset) -> the answers;
+    chunk(answer as a dict) is called after each one."""
+    texts = []
+    while True:
+        t = _step(steps, 'export_to_folder #%d' % (len(texts) + 1), lambda: r.call('export_to_folder', arg))
+        texts.append(t)
+        j = _json_any(t)
+        j = j if isinstance(j, dict) else {}
+        if chunk:
+            chunk(j)
+        if j.get('complete', True) is not False:
+            return texts
+        if j.get('nextOffset') is None or len(texts) > 10000:
+            raise SnapshotError('the Reader export is not complete and gives no nextOffset: %s' % t[:300])
+        arg.update(runId=j.get('runId'), offset=j['nextOffset'])
+
+
 def _export_folder(j):
     """Reader answer -> (export root, project folder, ts) from the first string with a …\\<project>\\<YYYYMMDD-HHMMSS> part."""
     for d in _dicts(j):
@@ -1418,13 +1421,7 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
     steps = job['steps']
 
     def step(label, fn):
-        try:
-            v = fn()
-        except Exception as e:
-            steps.append({'step': label, 'ok': False, 'message': str(e)[:1000]})
-            raise
-        steps.append({'step': label, 'ok': True, 'message': str(v)[:1000]})
-        return v
+        return _step(steps, label, fn)
     if isinstance(portal, str):
         portal = int(portal) if portal.isdigit() else (portal or None)   # the Writer's portalId is a process id (integer)
     with _client(mcp, 'writer', timeout) as w:
@@ -1442,7 +1439,7 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
                 if not inst:
                     raise SnapshotError('TIA Portal is not running — open the project in TIA Portal first '
                                         '(the editor does not start TIA for an open project)')
-                if len(inst) > 1:
+                if _pick_portal(inst) is None:
                     job['portal_choices'] = inst
                     raise SnapshotError('%d TIA Portal instances are running — choose one in the status bar' % len(inst))
                 portal = inst[0]['portalId']
@@ -1471,19 +1468,14 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
                    'timeBudgetSeconds': 120}
             if source == 'ap21' and path:
                 arg['projectPath'] = path
-            folder, t = None, ''
-            while True:                               # complete:false -> continue with runId + offset=nextOffset
-                t = step('export_to_folder #%d' % (job['chunks'] + 1), lambda: r.call('export_to_folder', arg))
-                j = _json_any(t)
-                j = j if isinstance(j, dict) else {}
+            folders = []
+
+            def chunk(j):                             # progress of the job while it runs
                 job['chunks'] += 1
                 job['exported'] += next((j[k] for k in ('exported', 'exportedCount', 'count') if isinstance(j.get(k), int)), 0)
-                folder = folder or _export_folder(j)
-                if j.get('complete', True) is not False:
-                    break
-                if j.get('nextOffset') is None or job['chunks'] > 10000:
-                    raise SnapshotError('the Reader export is not complete and gives no nextOffset: %s' % t[:300])
-                arg.update(runId=j.get('runId'), offset=j['nextOffset'])
+                folders.append(_export_folder(j))
+            t = _reader_export(r, arg, steps, chunk)[-1]
+        folder = next((f for f in folders if f), None)
         if folder is None:                            # no folder in the answer -> a new timestamp in the project's root
             new = sorted(set(project_index(target, name)) - before) if target else []
             if not new:
@@ -1662,10 +1654,8 @@ def _same_network(a, b):
     la, lb = a.get('language') or 'LAD', b.get('language') or 'LAD'
     if la != lb:
         return False, ['language %s → %s' % (la, lb)]
-    if la == 'FBD' and 'elements' in a and 'elements' in b:
-        same, d = fbd.content_match(a, b)
-    elif la == 'LAD' and all(k in x for x in (a, b) for k in ('elements', 'rungs')):
-        same, d = diff.content_match(a, b)
+    if la in ('LAD', 'FBD') and all('elements' in x and (la == 'FBD' or 'rungs' in x) for x in (a, b)):
+        same, d = _matcher(a)(a, b)
     else:
         t = [textwrap.dedent(x.get('text') or '').strip() for x in (a, b)]
         same, d = t[0] == t[1], ['the network text differs']
@@ -1924,6 +1914,110 @@ def api_group_upload(root_of, data, gid, upload):
     return {'group': gid, 'ok': ok, 'results': res, 'view': api_group(data, gid)}
 
 
+# ---------- HTTP routes ----------
+
+def _portal(h):
+    """The attached TIA Portal instance of the status bar, if any."""
+    return h.tia_status.get('portalId') if h.tia_status.get('tia') == 'attached' else None
+
+
+def _demo_guard(h, uid):
+    """Upload / Check of a real project through fake servers is refused."""
+    if h.demo and not _inside(h.root_of(uid), h.root):
+        raise state.StateError(DEMO_REFUSED)
+
+
+def _index_html(h):
+    with open(os.path.join(WEB, 'index.html'), 'rb') as f:
+        return f.read(), 200, 'text/html'
+
+
+def _add_project(h):
+    b = h._body() if isinstance(h._body(), dict) else {}
+    if b.get('source') == 'exports':
+        path = str(b.get('path') or '').strip().strip('"')
+        if h.demo and path and not b.get('force') and not _inside(path, h.root):
+            raise state.StateError(DEMO_REFUSED)
+        return api_project_add_exports(h.data, b), 201
+    if b.get('source') in ('tia', 'ap21'):
+        return {'job': api_snapshot(h, None, b, b['source'])}, 202
+    raise state.StateError('source must be exports | tia | ap21', 400)
+
+
+def _group_upload(h, gid):
+    _demo_guard(h, _group_members(h.data, gid)[2][0]['id'])
+    return api_group_upload(h.root_of, h.data, gid, lambda uid: api_upload(
+        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h)))
+
+
+def _changelog(h, name):
+    r = api_changelog(h.root_for(name), h.data, name, h.jobs, *(h.q.get(k) for k in ('since', 'until', 'state', 'block')))
+    return (changelog_markdown(name, r['items']), 200, 'text/markdown') if h.q.get('format') == 'md' else r
+
+
+def _tia_status(h):
+    """GET = the cached status; POST {portalId?} checks TIA again (it starts the Writer)."""
+    b = h._body() if h.command == 'POST' else None
+    st = refresh_status(h, b.get('portalId') if isinstance(b, dict) else None) if h.command == 'POST' else dict(h.tia_status)
+    return dict(st, demo=h.demo, **ai_status(h))
+
+
+def _project(h):
+    """(export root, project) of the routes with ?project="""
+    return h.root_for(h.q.get('project')), h.q.get('project', '')
+
+
+def _ai_client_gone(h, cid):
+    h.ai_clients.pop(cid, None)
+    return ai_status(h)
+
+
+E, G, P = r'/api/edits/([\w-]+)', r'/api/groups/([\w-]+)', r'/api/projects/([^/]+)'
+# (methods, path, handler(h, *path groups) -> body | (body, status[, content type]))
+ROUTES = [
+    ('GET', r'/(?:index\.html)?', _index_html),
+    ('GET', r'/api/exports', lambda h: api_exports(h.root, h.data)),
+    ('GET', r'/api/blocks', lambda h: api_blocks(*_project(h), h.q.get('ts'))),
+    ('GET', r'/api/block', lambda h: api_block(*_project(h), h.q.get('block', ''), h.q.get('ts'))),
+    ('GET', r'/api/network', lambda h: api_network(*_project(h), h.q.get('block', ''), int(h.q.get('nw', '1')), h.q.get('ts'),
+                                                   int(h.q.get('width', '0')))),
+    ('GET', r'/api/catalog', lambda h: api_catalog(*_project(h))),
+    ('POST', r'/api/layout', lambda h: api_layout(h.root_for(h.body_project()), h._body())),
+    ('GET', r'/api/state', lambda h: api_state(h.data, h.q.get('project'))),
+    ('PUT', r'/api/state/tia', lambda h: api_state_tia(_project(h)[0], h.data, _project(h)[1], h._body())),
+    ('POST', r'/api/edits', lambda h: (api_edit_create(h.root_for(h.body_project()), h.data, h._body()), 201)),
+    ('GET', E, lambda h, uid: api_edit_detail(h.data, uid, int(h.q.get('width', '0')), h.root_of(uid))),
+    ('POST', E + '/state', lambda h, uid: api_edit_state(h.data, uid, h._body())),
+    ('GET', E + '/procedure', lambda h, uid: api_procedure(h.data, uid, h.root_of(uid))),
+    ('POST PUT', E + '/after', lambda h, uid: api_edit_after(h.data, uid, h._body(), h.root_of(uid))),
+    ('POST', E + '/check-export', lambda h, uid: api_check_export(h.root_of(uid), h.data, uid, h._body())),
+    ('POST', E + '/upload', lambda h, uid: _demo_guard(h, uid) or api_upload(
+        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h))),
+    ('POST', E + '/check', lambda h, uid: _demo_guard(h, uid) or api_check(h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout)),
+    ('POST', r'/api/check', lambda h: api_add_check(h.data, h._body())),
+    ('POST', r'/api/groups', lambda h: (api_group_create(h.data, h._body()), 201)),
+    ('GET', G, lambda h, gid: api_group(h.data, gid)),
+    ('POST', G + '/state', lambda h, gid: api_group_state(h.data, gid, h._body())),
+    ('GET', G + '/procedure', lambda h, gid: api_group_procedure(h.data, gid, h.root_for(_group_members(h.data, gid)[0]))),
+    ('POST', G + '/check-export', lambda h, gid: api_group_check(h.root_of, h.data, gid)),
+    ('POST', G + '/upload', _group_upload),
+    ('GET', r'/api/projects', lambda h: api_projects(h.root, h.data, h.jobs)),
+    ('POST', r'/api/projects', _add_project),
+    ('DELETE', P, lambda h, name: api_project_delete(h.data, name)),
+    ('POST', P + '/snapshot', lambda h, name: ({'job': api_snapshot(h, name, h._body())}, 202)),
+    ('GET', P + '/changelog', _changelog),
+    ('GET', P + '/snapshots', lambda h, name: api_snapshots(h.root_for(name), name)),
+    ('GET', P + '/compare', lambda h, name: api_compare(h.root_for(name), h.data, name, h.q.get('from', ''), h.q.get('to', ''),
+                                                        h.q.get('block'))),
+    ('GET', r'/api/jobs', lambda h: {'jobs': list(h.jobs.values())}),
+    ('GET', r'/api/jobs/([\w-]+)', lambda h, jid: h.jobs[jid]),
+    ('GET POST', r'/api/tia/status', _tia_status),
+    ('GET', r'/api/ai/clients', ai_status),
+    ('POST', r'/api/ai/clients', lambda h: api_ai_heartbeat(h, h._body())),
+    ('DELETE', r'/api/ai/clients/([\w-]+)', _ai_client_gone),
+]
+
+
 class Handler(BaseHTTPRequestHandler):
     root = ''
     data = ''
@@ -1939,7 +2033,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _json(self, obj, code=200, content_type='application/json'):
-        b = (obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)).encode('utf-8')
+        b = obj if isinstance(obj, bytes) else (obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', content_type + '; charset=utf-8')
         self.send_header('Content-Length', str(len(b)))
@@ -1955,25 +2049,20 @@ class Handler(BaseHTTPRequestHandler):
             self._b = [json.loads(self.rfile.read(n).decode('utf-8') or 'null')]
         return self._b[0]
 
+    def body_project(self):
+        b = self._body()
+        return b.get('project') if isinstance(b, dict) else ''
+
+    def root_for(self, project):
+        """Export root of the project (registry or --export-root)."""
+        return project_root(self.root, self.data, str(project or ''))
+
+    def root_of(self, uid):
+        return self.root_for(state.find(self.data, uid)[0])
+
     def _handle(self, method):
         u = urlparse(self.path)
-        q = {k: v[0] for k, v in parse_qs(u.query).items()}
-        c = u.path
-        self._b = None
-
-        def root(project):                                # export root of the project (registry or --export-root)
-            return project_root(self.root, self.data, str(project or ''))
-
-        def root_of(uid):
-            return root(state.find(self.data, uid)[0])
-
-        def body_project():
-            b = self._body()
-            return b.get('project') if isinstance(b, dict) else ''
-
-        def demo_guard(uid):                              # Upload / Check of a real project through fake servers
-            if self.demo and not _inside(root_of(uid), self.root):
-                raise state.StateError(DEMO_REFUSED)
+        self.q, self._b = {k: v[0] for k, v in parse_qs(u.query).items()}, None
         origin = self.headers.get('Origin')
         if method != 'GET' and origin and urlparse(origin).hostname not in ('localhost', '127.0.0.1'):
             self._json({'error': 'cross-origin request refused'}, 403)   # another web page must not drive TIA
@@ -1982,119 +2071,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'error': 'host refused — open the editor at http://localhost:%d/' % self.server.server_port}, 403)
             return                                    # DNS rebinding: a foreign name pointing at 127.0.0.1
         try:
-            if method == 'GET' and c in ('/', '/index.html'):
-                with open(os.path.join(WEB, 'index.html'), 'rb') as f:
-                    b = f.read()
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/html; charset=utf-8')
-                self.send_header('Content-Length', str(len(b)))
-                self.send_header('Cache-Control', 'no-store')
-                self.end_headers()
-                self.wfile.write(b)
-            elif method == 'GET' and c == '/api/exports':
-                self._json(api_exports(self.root, self.data))
-            elif method == 'GET' and c == '/api/blocks':
-                self._json(api_blocks(root(q.get('project')), q.get('project', ''), q.get('ts')))
-            elif method == 'GET' and c == '/api/block':
-                self._json(api_block(root(q.get('project')), q.get('project', ''), q.get('block', ''), q.get('ts')))
-            elif method == 'GET' and c == '/api/network':
-                self._json(api_network(root(q.get('project')), q.get('project', ''), q.get('block', ''),
-                                       int(q.get('nw', '1')), q.get('ts'), int(q.get('width', '0'))))
-            elif method == 'GET' and c == '/api/state':
-                self._json(api_state(self.data, q.get('project')))
-            elif method == 'PUT' and c == '/api/state/tia':
-                self._json(api_state_tia(root(q.get('project')), self.data, q.get('project', ''), self._body()))
-            elif method == 'POST' and c == '/api/edits':
-                self._json(api_edit_create(root(body_project()), self.data, self._body()), 201)
-            elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/state', c):
-                self._json(api_edit_state(self.data, c.split('/')[3], self._body()))
-            elif method == 'GET' and re.fullmatch(r'/api/edits/[\w-]+', c):
-                self._json(api_edit_detail(self.data, c.split('/')[3], int(q.get('width', '0')), root_of(c.split('/')[3])))
-            elif method == 'GET' and re.fullmatch(r'/api/edits/[\w-]+/procedure', c):
-                self._json(api_procedure(self.data, c.split('/')[3], root_of(c.split('/')[3])))
-            elif method == 'POST' and c == '/api/groups':
-                self._json(api_group_create(self.data, self._body()), 201)
-            elif method == 'GET' and re.fullmatch(r'/api/groups/[\w-]+', c):
-                self._json(api_group(self.data, c.split('/')[3]))
-            elif method == 'POST' and re.fullmatch(r'/api/groups/[\w-]+/state', c):
-                self._json(api_group_state(self.data, c.split('/')[3], self._body()))
-            elif method == 'GET' and re.fullmatch(r'/api/groups/[\w-]+/procedure', c):
-                gid = c.split('/')[3]
-                self._json(api_group_procedure(self.data, gid, root(_group_members(self.data, gid)[0])))
-            elif method == 'POST' and re.fullmatch(r'/api/groups/[\w-]+/check-export', c):
-                self._json(api_group_check(root_of, self.data, c.split('/')[3]))
-            elif method == 'POST' and re.fullmatch(r'/api/groups/[\w-]+/upload', c):
-                gid = c.split('/')[3]
-                demo_guard(_group_members(self.data, gid)[2][0]['id'])
-                portal = self.tia_status.get('portalId') if self.tia_status.get('tia') == 'attached' else None
-                self._json(api_group_upload(root_of, self.data, gid, lambda uid: api_upload(
-                    root_of(uid), self.data, uid, self.mcp, self.mcp_timeout, portal)))
-            elif method == 'GET' and c == '/api/catalog':
-                self._json(api_catalog(root(q.get('project')), q.get('project', '')))
-            elif method == 'POST' and c == '/api/layout':
-                self._json(api_layout(root(body_project()), self._body()))
-            elif method in ('POST', 'PUT') and re.fullmatch(r'/api/edits/[\w-]+/after', c):
-                self._json(api_edit_after(self.data, c.split('/')[3], self._body(), root_of(c.split('/')[3])))
-            elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check-export', c):
-                self._json(api_check_export(root_of(c.split('/')[3]), self.data, c.split('/')[3], self._body()))
-            elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/upload', c):
-                demo_guard(c.split('/')[3])
-                self._json(api_upload(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout,
-                                      self.tia_status.get('portalId') if self.tia_status.get('tia') == 'attached' else None))
-            elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check', c):
-                demo_guard(c.split('/')[3])
-                self._json(api_check(root_of(c.split('/')[3]), self.data, c.split('/')[3], self.mcp, self.mcp_timeout))
-            elif method == 'GET' and c == '/api/projects':
-                self._json(api_projects(self.root, self.data, self.jobs))
-            elif method == 'POST' and c == '/api/projects':
-                b = self._body() if isinstance(self._body(), dict) else {}
-                if b.get('source') == 'exports':
-                    path = str(b.get('path') or '').strip().strip('"')
-                    if self.demo and path and not b.get('force') and not _inside(path, self.root):
-                        raise state.StateError(DEMO_REFUSED)
-                    self._json(api_project_add_exports(self.data, b), 201)
-                elif b.get('source') in ('tia', 'ap21'):
-                    self._json({'job': api_snapshot(self, None, b, b['source'])}, 202)
-                else:
-                    raise state.StateError('source must be exports | tia | ap21', 400)
-            elif method == 'DELETE' and re.fullmatch(r'/api/projects/[^/]+', c):
-                self._json(api_project_delete(self.data, unquote(c.split('/')[3])))
-            elif method == 'POST' and re.fullmatch(r'/api/projects/[^/]+/snapshot', c):
-                self._json({'job': api_snapshot(self, unquote(c.split('/')[3]), self._body())}, 202)
-            elif method == 'GET' and re.fullmatch(r'/api/projects/[^/]+/changelog', c):
-                name = unquote(c.split('/')[3])
-                r = api_changelog(root(name), self.data, name, self.jobs, q.get('since'), q.get('until'), q.get('state'),
-                                  q.get('block'))
-                if q.get('format') == 'md':
-                    self._json(changelog_markdown(name, r['items']), content_type='text/markdown')
-                else:
-                    self._json(r)
-            elif method == 'GET' and re.fullmatch(r'/api/projects/[^/]+/snapshots', c):
-                name = unquote(c.split('/')[3])
-                self._json(api_snapshots(root(name), name))
-            elif method == 'GET' and re.fullmatch(r'/api/projects/[^/]+/compare', c):
-                name = unquote(c.split('/')[3])
-                self._json(api_compare(root(name), self.data, name, q.get('from', ''), q.get('to', ''), q.get('block')))
-            elif method == 'GET' and c == '/api/jobs':
-                self._json({'jobs': list(self.jobs.values())})
-            elif method == 'GET' and re.fullmatch(r'/api/jobs/[\w-]+', c):
-                self._json(self.jobs[c.split('/')[3]])
-            elif method in ('GET', 'POST') and c == '/api/tia/status':      # POST checks TIA again (starts the Writer)
-                b = self._body() if method == 'POST' else None
-                st = refresh_status(self, b.get('portalId') if isinstance(b, dict) else None) if method == 'POST' \
-                    else dict(self.tia_status)
-                self._json(dict(st, demo=self.demo, **ai_status(self)))
-            elif method == 'GET' and c == '/api/ai/clients':
-                self._json(ai_status(self))
-            elif method == 'POST' and c == '/api/ai/clients':
-                self._json(api_ai_heartbeat(self, self._body()))
-            elif method == 'DELETE' and re.fullmatch(r'/api/ai/clients/[\w-]+', c):
-                self.ai_clients.pop(c.split('/')[4], None)
-                self._json(ai_status(self))
-            elif method == 'POST' and c == '/api/check':
-                self._json(api_add_check(self.data, self._body()))
-            else:
-                self._json({'error': 'not found'}, 404)
+            r = {'error': 'not found'}, 404
+            for methods, path, fn in ROUTES:
+                m = re.fullmatch(path, u.path)
+                if m and method in methods.split():
+                    r = fn(self, *map(unquote, m.groups()))
+                    break
+            self._json(*(r if isinstance(r, tuple) else (r,)))
         except state.StateError as e:
             self._json({'error': str(e)}, e.code)
         except KeyError as e:
