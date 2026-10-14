@@ -43,21 +43,29 @@ def export_index(root):
     return res
 
 
+_INDEX = {}                          # snapshot folder -> (mtime, {block: path})
+
+
 def project_index(root, project):
-    """{ts: {block: path}} of one project folder <root>/<project>."""
+    """{ts: {block: path}} of one project folder <root>/<project> (do not change the dicts: they are cached).
+    shortcut: a snapshot folder other than the newest is walked again only when its own mtime changes (not a deeper one)
+    — exports always go into a new folder; drop the cache if snapshots are ever edited in place."""
     res, pd = {}, os.path.join(root, project)
     if not os.path.isdir(pd):
         return res
-    for ts in sorted(os.listdir(pd)):
-        if not TS.match(ts):
-            continue
-        blocks = {}
-        for dp, _, files in os.walk(os.path.join(pd, ts)):
-            for f in files:
-                if f.endswith('.s7dcl'):
-                    blocks.setdefault(f[:-6], os.path.join(dp, f))
-        if blocks:
-            res[ts] = blocks
+    folders = sorted(ts for ts in os.listdir(pd) if TS.match(ts))
+    for ts in folders:
+        folder = os.path.join(pd, ts)
+        mt, c = os.path.getmtime(folder), _INDEX.get(folder)
+        if not c or c[0] != mt or ts == folders[-1]:  # the newest one may still be being written
+            blocks = {}
+            for dp, _, files in os.walk(folder):
+                for f in files:
+                    if f.endswith('.s7dcl'):
+                        blocks.setdefault(f[:-6], os.path.join(dp, f))
+            c = _INDEX[folder] = (mt, blocks)
+        if c[1]:
+            res[ts] = c[1]
     return res
 
 
@@ -112,15 +120,11 @@ def _load(root, project, block, ts=None):
     fc = set()
 
     def find_db(display_name):
-        c = blocks.get(display_name)
-        if c:
-            try:
-                x = s7dcl.parse_block(s7dcl.read(c))
-            except s7dcl.SourceParseError:
-                return None
+        x = blocks.get(display_name) and catalog._read_cache(blocks[display_name], lambda c: catalog.interface(s7dcl.read(c)))
+        if x:
             if x['kind'] == 'FC':
                 fc.add(display_name)
-            return x.get('instance_type')
+            return x['instance_type']
     s7dcl.fill_fb_types(b, find_db)
     for nw in b['networks']:                          # "FC"(…) is an FC call, not an FB instance
         for p in nw.get('elements', []):
@@ -147,6 +151,33 @@ def api_block(root, project, block, ts=None):
     return {'project': project, 'ts': t, 'block': b['name'], 'file': block, 'kind': b['kind'],
             'number': b['number'], 'language': b['language'], 'title': b['title'],
             'networks': [{'nw': n['nw'], 'language': n['language'], 'title': n['title']} for n in b['networks']]}
+
+
+def api_blocks(root, project, ts=None):
+    """Headers of all blocks (the newest copy of each, or the blocks of export ts) in one request (MCP list_blocks);
+    only the block header is parsed."""
+    exp = project_index(root, project)
+    if not exp:
+        raise KeyError('unknown project')
+    if ts and ts not in exp:
+        raise KeyError('project %s has no export %s (exports: %s)' % (project, ts, ', '.join(sorted(exp))))
+    files = {}
+    for t in sorted(exp):
+        if not ts or t == ts:
+            files.update({b: (t, f) for b, f in exp[t].items()})
+    res = []
+    for block, (t, fpath) in sorted(files.items()):
+        try:
+            text = s7dcl.read(fpath)
+            m = re.search(r'^[ \t]*(?:NETWORK|BEGIN)[ \t]*$', text, re.M)
+            b = s7dcl.parse_block(text[:m.start()] if m else text)
+        except (s7dcl.SourceParseError, OSError, UnicodeDecodeError) as e:
+            res.append({'block': block, 'error': str(e)})
+            continue
+        res.append({'block': block, 'name': b['name'], 'kind': b['kind'], 'number': b['number'], 'language': b['language'],
+                    'title': s7dcl.text_mlc(s7dcl.load_s7res(fpath[:-6] + '.s7res'), b['attributes'].get('S7_BlockTitle')),
+                    'networks': len(re.findall(r'^[ \t]*NETWORK[ \t]*$', text, re.M)), 'export_ts': t})
+    return {'project': project, 'export_ts': ts or 'newest export of each block', 'blocks': res}
 
 
 def api_network(root, project, block, nw, ts=None, width=0):
@@ -1258,7 +1289,7 @@ def api_projects(root, data, jobs):
                 pass
         job = next((j for j in reversed(list(jobs.values())) if j.get('project') == p['name']), None)
         p.update(exports=len(idx), latest_export=max(idx) if idx else None, edits=counts, job=job)
-    running = [j for j in jobs.values() if j['state'] == 'running']
+    running = [j for j in list(jobs.values()) if j['state'] == 'running']
     return {'projects': items, 'default_export_root': root, 'running_job': running[-1] if running else None}
 
 
@@ -1317,11 +1348,16 @@ class SnapshotError(Exception):
     pass
 
 
+JOBS_KEPT = 50                       # finished jobs kept in memory (GET /api/jobs, changelog)
+
+
 def start_job(jobs, kind, project, fn):
     """Background job under TIA_LOCK (one Upload / Check / snapshot at a time) -> job record (GET /api/jobs/<id>)."""
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check / snapshot is running — wait until it ends')
-    job = {'id': 'J%03d' % (len(jobs) + 1), 'kind': kind, 'project': project, 'state': 'running', 'steps': [],
+    for k in [k for k, j in list(jobs.items()) if j['state'] != 'running'][:-JOBS_KEPT]:
+        jobs.pop(k, None)
+    job = {'id': 'J%03d' % (max((int(k[1:]) for k in list(jobs)), default=0) + 1), 'kind': kind, 'project': project, 'state': 'running', 'steps': [],
            'exported': 0, 'chunks': 0, 'error': None, 'started': state.now(), 'finished': None}
     jobs[job['id']] = job
 
@@ -1555,7 +1591,7 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
             add(k.get('time'), 'check', '%s · export %s%s' % ('match' if k.get('match') else 'MISMATCH', k.get('export_ts') or '?',
                                                              ' · ' + k['note'] if k.get('note') else ''),
                 u, 'TIAC_Reader' if k.get('export_ts') in reader_ts else 'export check')
-    snap_jobs = [j for j in (jobs or {}).values() if j.get('kind') == 'snapshot' and j.get('project') == project]
+    snap_jobs = [j for j in list((jobs or {}).values()) if j.get('kind') == 'snapshot' and j.get('project') == project]
     by_job = {j['result']['export_ts']: j for j in snap_jobs if j.get('result')}
     for ts in sorted(exp):
         if _full_export(root, project, ts):
@@ -1957,6 +1993,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(b)
             elif method == 'GET' and c == '/api/exports':
                 self._json(api_exports(self.root, self.data))
+            elif method == 'GET' and c == '/api/blocks':
+                self._json(api_blocks(root(q.get('project')), q.get('project', ''), q.get('ts')))
             elif method == 'GET' and c == '/api/block':
                 self._json(api_block(root(q.get('project')), q.get('project', ''), q.get('block', ''), q.get('ts')))
             elif method == 'GET' and c == '/api/network':

@@ -229,5 +229,19 @@ class TestProjects(unittest.TestCase):
         self.assertEqual((p['source'], p['project_path']), ('ap21', path))
 
 
+class TestJobs(unittest.TestCase):
+    def test_finished_jobs_are_dropped(self):
+        jobs = {'J%03d' % i: {'id': 'J%03d' % i, 'state': 'done'} for i in range(1, 81)}
+        j = server.start_job(jobs, 'test', None, lambda job: 'ok')
+        for _ in range(100):
+            if j['state'] != 'running':
+                break
+            time.sleep(0.05)
+        with server.TIA_LOCK:                                                  # the job thread has let it go
+            pass
+        self.assertEqual((j['id'], j['state'], len(jobs)), ('J081', 'done', server.JOBS_KEPT + 1))
+        self.assertNotIn('J001', jobs)
+
+
 if __name__ == '__main__':
     unittest.main()

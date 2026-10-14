@@ -16,6 +16,7 @@ The first input is the chain input (in1, EN, CLK, S …); a call without power (
 `signals` are derived from the inputs (the server computes them) — the client sends only `elements`.
 """
 import copy
+import hashlib
 import json
 import re
 
@@ -237,18 +238,27 @@ def verify_model(after):
 
 
 def _cycle(elements):
+    """Do the signals form a cycle? (iterative depth-first search: a network may have thousands of boxes)"""
     P = {p['id']: p for p in elements}
-    state = {}
-
-    def dfs(i):
-        state[i] = 1
-        for v in P[i]['inputs']:
-            s = v.get('signal')
-            if s in P and (state.get(s) == 1 or (s not in state and dfs(s))):
-                return True
-        state[i] = 2
-        return False
-    return any(i not in state and dfs(i) for i in P)
+    state = {}                                       # 1 = on the path, 2 = done
+    for start in P:
+        if start in state:
+            continue
+        state[start], stack = 1, [(start, iter(P[start]['inputs']))]
+        while stack:
+            i, inputs = stack[-1]
+            for v in inputs:
+                s = v.get('signal')
+                if s in P and state.get(s) == 1:
+                    return True
+                if s in P and s not in state:
+                    state[s] = 1
+                    stack.append((s, iter(P[s]['inputs'])))
+                    break
+            else:
+                state[i] = 2
+                stack.pop()
+    return False
 
 
 # ---------- operations (API and editor) ----------
@@ -570,13 +580,17 @@ def fold_neg_output(elements):
 
 
 def canon(elements):
-    """Wiring as a sorted list of trees from the outputs (boxes without a consumer); a shared source is repeated."""
+    """Wiring as a sorted list of trees from the outputs (boxes without a consumer); a shared source stands for its
+    whole tree by a digest (computed once, so shared sources do not repeat exponentially)."""
     P = {p['id']: p for p in elements}
     consumers = {v['signal'] for p in elements for v in p['inputs'] if v.get('signal')}
+    memo = {}
 
     def k(i):
-        return _content(P[i], k) if i in P else '?'
-    return sorted((_j(k(p['id'])) for p in elements if p['id'] not in consumers))
+        if i not in memo:
+            memo[i] = hashlib.sha1(_j(_content(P[i], k)).encode()).hexdigest() if i in P else '?'
+        return memo[i]
+    return sorted(k(p['id']) for p in elements if p['id'] not in consumers)
 
 
 def description(p):

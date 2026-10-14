@@ -187,6 +187,22 @@ class TestOperationsAndDiffFBD(unittest.TestCase):
         self.assertIn('x:b4', r)
 
 
+class TestLargeFBD(unittest.TestCase):
+    def test_long_chain_and_shared_sources(self):
+        """A chain of 3000 boxes (no recursion limit) and a ladder of shared sources (no exponential repetition)."""
+        def box(i, *signals):
+            return {'id': 'b%d' % i, 'type': 'and', 'outputs': [],
+                    'inputs': [{'n': k + 1, 'pin': 'in%d' % (k + 1), 'operand': '' if s else '#x', 'signal': s, 'neg': False}
+                               for k, s in enumerate(signals)]}
+        chain = [box(0, None)] + [box(i, 'b%d' % (i - 1)) for i in range(1, 3000)]
+        fbd.verify_model({'elements': chain})
+        chain[0]['inputs'][0]['signal'] = 'b2999'
+        with self.assertRaises(ValueError):
+            fbd.verify_model({'elements': chain})
+        ladder = [box(0, None, None)] + [box(i, 'b%d' % (i - 1), 'b%d' % (i - 1)) for i in range(1, 60)]
+        self.assertEqual(fbd.content_match({'elements': ladder}, {'elements': copy.deepcopy(ladder)}), (True, []))
+
+
 class TestApiFBD(unittest.TestCase):
     def setUp(self):
         self.data = tempfile.mkdtemp()

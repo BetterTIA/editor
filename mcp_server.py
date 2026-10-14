@@ -76,26 +76,7 @@ def list_projects(e, a):
 
 
 def list_blocks(e, a):
-    ex = next((x for x in e.get('/api/exports')['projects'] if x['project'] == a['project']), None)
-    if not ex:
-        raise ToolError('unknown project %s (see list_projects)' % a['project'])
-    ts = a.get('export_ts')
-    if ts and ts not in [x['ts'] for x in ex['exports']]:
-        raise ToolError('project %s has no export %s (exports: %s)' % (a['project'], ts,
-                                                                       ', '.join(x['ts'] for x in ex['exports'])))
-    blocks = []
-    for b in ex['blocks']:
-        try:
-            k = e.get('/api/block', project=a['project'], block=b['block'], ts=ts)
-        except ToolError as err:
-            if ts and 'HTTP 404' in str(err):
-                continue                                  # the block is not in that (partial) export
-            blocks.append({'block': b['block'], 'error': str(err)})
-            continue
-        blocks.append({'block': k['file'], 'name': k['block'], 'kind': k['kind'], 'number': k['number'],
-                       'language': k['language'], 'title': k['title'], 'networks': len(k['networks']),
-                       'export_ts': k['ts']})
-    return {'project': a['project'], 'export_ts': ts or 'newest export of each block', 'blocks': blocks}
+    return e.get('/api/blocks', project=a['project'], ts=a.get('export_ts'))
 
 
 def get_network(e, a):

@@ -195,25 +195,29 @@ def variable_types(text):
     return res
 
 
+NETWORK_OR_ATTRIBUTES = re.compile(r'(?:^|(?<=\}))[ \t]*(\{|NETWORK[ \t]*$)', re.M)
+END_NETWORK = re.compile(r'^[ \t]*END_NETWORK[ \t]*$', re.M)
+
+
 def _networks(body):
     """Returns [(attributes, content)] for each NETWORK ... END_NETWORK."""
     res, i, last_attr = [], 0, ''
     while True:
-        m = re.search(r'^[ \t]*(\{|NETWORK[ \t]*$)', body[i:], re.M)
+        m = NETWORK_OR_ATTRIBUTES.search(body, i)
         if not m:
             break
-        start = i + m.start(1)
+        start = m.start(1)
         if body[start] == '{':
             k = _paired(body, start, '{', '}')
             last_attr = body[start:k]
             i = k
             continue
-        k = re.search(r'^[ \t]*END_NETWORK[ \t]*$', body[start:], re.M)
+        k = END_NETWORK.search(body, start)
         if not k:
             raise SourceParseError('NETWORK without END_NETWORK')
-        res.append((attributes(last_attr), body[start + len('NETWORK'):start + k.start()]))
+        res.append((attributes(last_attr), body[start + len('NETWORK'):k.start()]))
         last_attr = ''
-        i = start + k.end()
+        i = k.end()
     return res
 
 
