@@ -77,6 +77,21 @@ is the "after" of an edit links to it (*matches edit U001*).
 
 ![Versions: two snapshots compared, a network that matches an edit](tests/screenshots/project_versions.png)
 
+## HMI screens
+
+For a project with a **WinCC Unified** HMI, a snapshot also dumps the screens through the reader
+(`export_hmi_to_folder`). The project page gets an **HMI** tab: every screen drawn with its own colors, texts and tag
+bindings, item properties on click. A screen change is an edit like any other (kind `hmi_screen`, same states, groups
+and checks): a designer with a palette (Text, Rectangle, Line, Button, IO field, Switch, Bar, Gauge, Alarm control,
+Screen window), moving and resizing on an 8 px grid, tag suggestions from the HMI and PLC tag tables, and the diff
+outlined on the screen. *New screen from preset* starts a Machine overview, Alarm page, Manual control or Settings
+screen from a machine name and a list of tags. The export check compares items by name, type, geometry, text and tag
+bindings. Upload writes only changed attributes and tag bindings of existing items (the writer cannot create screens
+or items yet), everything else comes with TIA steps to do by hand. AI agents use `list_screens`, `get_screen`,
+`list_presets` and `propose_screen`.
+
+![HMI designer: a changed screen with an added IO field](tests/screenshots/hmi_designer.png)
+
 ## Requirements
 
 - Python 3 (standard library only, no packages to install)
@@ -130,7 +145,7 @@ client does not start in this folder. The home page shows the same blocks to cop
 
 Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
 `create_group`, `get_group`, `run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
-`compare_snapshots`, `screenshot` — see
+`compare_snapshots`, `list_screens`, `get_screen`, `list_presets`, `propose_screen`, `screenshot` — see
 [docs/reference.md](docs/reference.md#mcp-server).
 
 **Why the agent cannot approve or upload:** a change of a PLC program ends up on a real machine. The agent proposes

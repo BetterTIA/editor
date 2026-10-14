@@ -183,6 +183,7 @@ in the tree under its block.
 | `network` (default) | `nw`, `after` (model) and/or `title_after?`, `comment_after?` | `NW 2: <title>` (`→ <new title>`) |
 | `interface` | `section: Input\|Output\|InOut\|Static\|Temp\|Constant`, `members: [{name, type, comment?, initial?}]` | `Interface: +4 Static` |
 | `new_network` | `after_nw` (0 = at the start), `title` (unique in the block), `comment?`, `language?` (`LAD`/`FBD`, default the block's), `after` | `NW 3+ (new): <title>` |
+| `hmi_screen` | `screen`, `new?`, `hmi?`, `after?` (screen model) or `preset` + `params?` — see [HMI screens](#hmi-screens-wincc-unified) | `Screen: <name>` (`(new)`) under the HMI |
 
 Stored fields per kind (all edits: `id, project, round, kind, block, block_kind, block_number, f, author, time, state,
 note, history, checks, writes?, group?`):
@@ -486,7 +487,7 @@ A server whose Writer or Reader runs `tests\fake_mcp.py` (or that is started wit
 Start the editor for a real project without fake commands; a demo instance and a real one can run side by side on
 different ports.
 
-**Fake servers (tests and demo, no TIA):** `tests\fake_mcp.py writer|reader` — MCP over stdio, only the tools above.
+**Fake servers (tests and demo, no TIA):** `tests\fake_mcp.py writer|reader` — MCP over stdio, only the tools above (and the HMI tools, see [HMI screens](#hmi-screens-wincc-unified)).
 The "TIA project" = the `--state` folder (default `%TEMP%\tiac_fake_tia`): the Writer exports the block from there
 (before the first import from `--sample`, default the `20261012-120000` sample blocks), an import writes the documents
 into `--state` and a line into `<state>\imports.jsonl`; the Reader `--export-root <root> --project <p>` creates a new
@@ -585,6 +586,88 @@ networks from `/api/network?ts=` and `POST /api/layout {before, after, align: tr
 changed orange, deleted red); an added / removed network is drawn whole in green / red. Screenshots:
 `tests\screenshots\project_changelog.png`, `project_versions.png`.
 
+## HMI screens (WinCC Unified)
+The editor shows the screens of a **WinCC Unified** HMI and lets you propose a changed or a new screen as an edit of
+kind `hmi_screen`, with the same states, tree, groups and checks as a network edit.
+
+**Data.** The Reader's `export_hmi_to_folder` dumps the HMI into the snapshot folder:
+`<project>\<ts>\<HMI>\Screens\…\<screen>.json` (screen attributes + `screenItems[]`; every item has `$type` = the
+Openness class such as `HmiIOField`, lower-camel attributes `name, left, top, width, height, visible, backColor,
+foreColor, borderColor, text` (multilingual: `{items: [{language, text}]}`), `font {name, size, weight}`,
+`dynamizations [{propertyName, tag, useIndirectAddressing}]`, `eventHandlers [{eventType, script {scriptCode}}]`),
+`Tags\…\<table>.json` (`tags [{name, dataType, connection, plcTag}]`), `alarms.json`, `connections.json`, and
+`<ts>\manifest-hmi.jsonl` (one line per item: `{kind, path, file, bytes, count, error?}`). The editor walks the folder
+(an HMI = a child folder of the snapshot with `Screens\`); the manifest is not needed. A snapshot calls
+`export_hmi_to_folder` after the PLC export with `runId` = the snapshot's timestamp (same folder, chunked like the PLC
+export) when the project tree mentions an HMI; its failure is a `warnings` entry of the job, the PLC snapshot stands.
+
+**Screen model** (`hmi.py`, tolerant: an unknown class is a generic box with its name, a missing attribute gets a
+default):
+```
+{name, width, height, background,                       // colors as CSS "#rrggbb" / "#rrggbbaa" (Openness "#AARRGGBB")
+ items: [{name, type, left, top, width, height,         // type = $type without "Hmi" (HmiToggleSwitch -> Switch)
+          text?, colors?: {backColor, foreColor, borderColor, lineColor, …}, font?: {name, size, weight},
+          bindings: [{property, tag, indirect?}], events?: [{event, script}], visible?}]}
+```
+Texts: the `en-US` translation (else the first one) without rich-text markup — one language only.
+
+| API | Returns / does |
+|---|---|
+| `GET /api/hmi/screens?project=[&export_ts=][&hmi=]` | `{project, export_ts, hmi, hmis, screens: [{name, width, height, background, items}], tags: [{name, type, plc_tag, connection, table}], errors}` — the newest HMI export (or the given one) |
+| `GET /api/hmi/screen?project=&screen=[&export_ts=][&hmi=]` | the screen model + `project, export_ts, hmi`; 404 when the screen is not there |
+| `GET /api/hmi/presets` | `{presets: [{key, name, description}], params}` |
+| `POST /api/hmi/preset` `{project, preset, screen?, params?}` | the screen model of a preset (saves nothing; the dialog preview) |
+
+**Pages.** The project page has an **HMI** tab (screens, HMI tags, *New screen from preset*); `?project=&screen=` draws
+a screen in a scaled frame (absolutely placed boxes in the screen's own colors and fonts; an IO field shows its tag)
+and shows the properties of the clicked item (type, geometry, text, colors, font, tag bindings, events by name);
+*Propose change* creates an `hmi_screen` edit of it. `screenshot.py` works for these URLs too.
+
+**Edit `hmi_screen`.** `POST /api/edits {project, round, kind: "hmi_screen", screen, new?, hmi?, after? | preset + params?}`:
+`new: false` = a change of an exported screen (`after` defaults to the export), `new: true` = a screen the export does
+not have (`after` or a preset is required). Stored: `hmi, screen, new, block` (= the HMI name), `title` (= the screen),
+`nw: null`, `before {export_ts, screen}` (the exported screen model, `null` for a new one), `after` (screen model).
+`POST /api/edits/<id>/after {after}` replaces the model (only in Proposal). Validation: the shape and **unique item
+names** are checked at the boundary (400); rule errors that do not block saving: an item outside the screen (error), a
+binding to a tag that is neither an HMI tag nor a PLC tag of the export (warning). `GET /api/edits/<id>` adds
+`screen_diff {added, deleted, changed: {item: [{attr, before, after}]}, screen: [...]}` (items paired by name;
+attributes `type, left, top, width, height, text, colors.*, font.*, binding <property>`), `ghosts` (deleted items) and
+`upload_note` (why Upload cannot write it).
+
+**Designer** (`?edit=<id>&edit_mode=1`): the screen on an 8 px grid, a palette (Text, Rectangle, Line, Button, IOField,
+Switch, Bar, Gauge, AlarmControl, ScreenWindow — click, then click the screen), moving by dragging and resizing by the
+corner handles (snapped to 8 px), item properties (name, text, geometry, font size, colors, tag bindings with
+suggestions from the HMI tags and the PLC tag tables), Delete, Ctrl+Z / Ctrl+Y, Esc, *Save proposal*. Added / changed /
+deleted items are outlined green / orange / red (a new screen is not marked); the edit page shows the same and a table
+of the attribute changes.
+
+**Presets** (`hmi.PRESETS`, parametrized by `params {machine, tags: [names], width (1280), height (800), screens
+(navigation bar, default Overview, Alarms, Manual, Settings)}`; a tag's type comes from the HMI / PLC tag tables):
+`machine_overview` (header with the machine name and a state text, label + IO field per value, a lamp per Bool tag,
+navigation bar), `alarm_page` (header, an alarm control over the screen, navigation), `manual_control` (a row per tag:
+label, switch for a Bool tag or IO field, Start / Stop buttons), `settings` (label + IO field per parameter, Save /
+Cancel). *New screen from preset* on the HMI tab: preset, screen name, machine, tags → a preview → an edit with
+`new: true`.
+
+**Export check** (`Check export`, `run_check`): the screen in the newest HMI export (or `export_ts`) must have every
+item of the proposal by name with the same type, geometry (±1 px), text and tag bindings, and no other items; colors,
+fonts and events are not compared.
+
+**TIA steps:** open (or *Add new screen* ⟦unverified⟧ and rename) the screen, delete / change / insert items with
+position, size, text, colors and *dynamization <property> → tag* ⟦unverified⟧ (Properties → Dynamization → Tag),
+compile the HMI ⟦unverified⟧. The menu and task card names are not from the TIA V21 help.
+
+**Upload** (Approved, `POST /api/edits/<id>/upload`): GetPortals, Connect, then for every changed attribute of the
+screen or of an **existing** item `SetHmiItemAttribute {softwarePath: <HMI>, screenName, itemName ('' = the screen),
+attribute (Left, Top, Width, Height, Text with culture en-US, BackColor/ForeColor/… as "#AARRGGBB"), value, dryRun:
+false}` or `SetHmiDynamizationTag {…, property, tag}` → Signed. **What it cannot do — 409 with the reason:** a new
+screen, new or deleted items, a changed type or font, an added or removed binding or color. The Writer
+(BTIA_Writer) has no tool to create a screen or a screen item yet (Openness has `Screens.Create` and
+`ScreenItems.Create<T>`; a tool such as `ImportHmiScreen` would be needed); those edits are made by hand following the
+TIA steps. **Check** (Signed): the Reader dumps the screens (`export_hmi_to_folder`, `pathPrefixes: ["Screens"]`) into
+a new folder of the export root, then the export check → Checked. The HMI `softwarePath` is the HMI folder name of the
+dump — not verified against a real Writer.
+
 ## MCP server
 `mcp_server.py` makes the editor an MCP server for AI agents (Claude Code, Cursor, any MCP client). The client starts
 it as a stdio server (JSON-RPC 2.0, one message per line, protocol `2025-06-18`); it talks to an **already running**
@@ -629,7 +712,11 @@ error of the editor = `isError: true` with its message):
 | `get_changelog` | `project`, `format?` (`json`/`md`), `since?`, `until?` | the project changelog (see [Changelog and versions](#changelog-and-versions)); `md` = the Markdown text |
 | `list_snapshots` | `project` | `GET /api/projects/<name>/snapshots` — snapshots newest first, full or partial |
 | `compare_snapshots` | `project`, `from`, `to`, `block?` | `GET /api/projects/<name>/compare` — changed blocks → networks with the differences and `matches` (edit ids) |
-| `screenshot` | `edit` or `project`+`block`+`nw`, `width?` (1400), `height?` (900), `theme?` (`dark`/`light`) | PNG through `screenshot.py`; without Chrome/Edge an error with a hint to use `get_network` / `get_edit` |
+| `list_screens` | `project`, `export_ts?` | `GET /api/hmi/screens` — the HMI screens and tags |
+| `get_screen` | `project`, `screen`, `export_ts?` | `GET /api/hmi/screen` — the screen model |
+| `list_presets` | — | `GET /api/hmi/presets` |
+| `propose_screen` | `project`, `round`, `screen`, `after?` or `preset` + `params?`, `new?` (default: the export has no such screen), `hmi?`, `note?`, `by?` | an `hmi_screen` edit in Proposal → `{id, state, new, errors, warnings, changes, upload_note, url}` |
+| `screenshot` | `edit`, `project`+`screen` or `project`+`block`+`nw`, `width?` (1400), `height?` (900), `theme?` (`dark`/`light`) | PNG through `screenshot.py`; without Chrome/Edge an error with a hint to use `get_network` / `get_edit` |
 
 A typical flow: `list_projects` → `list_blocks` → `get_network` → change `elements`/`rungs` (keep the ids of kept
 elements, new ids for new ones) → `propose_edit` → fix `errors` with `update_edit` → a person approves it in the
@@ -688,6 +775,10 @@ testing through a browser automation extension: when the tab is hidden (`documen
     rung, NW3 tap after & + chain of assignments + `NOT Coil`, NW4 F-block call (multi-instance) with attributes, a
     negated pin and `ACK` from `P_Trig`, NW5 F-block with negated `QBAD`, NW6 S/R/SR, NW7 `RUNG true` + MOVE, NW8 x +
     N_TRIG, NW9 empty.
+- `Demo_Line\20261012-120000\HMI_1\` + `manifest-hmi.jsonl` — a made-up WinCC Unified dump in the shape of the Reader's
+  `export_hmi_to_folder`: screens `Overview` (header, texts, IO fields, a bar, a gauge, a line, buttons with events, an
+  `HmiClock` as an unknown class), `Alarms` (an alarm control) and `Manual` (toggle switches, a bar), one HMI tag table
+  bound to the PLC sample (`DB_Machine`, tag table), `alarms.json`, `connections.json`.
 - `Demo_Line\20261012-130000\` = a partial export after writing an interface edit (only `FB_Conveyor`, two new statics
   `Jam_Detected : Bool`, `Jam_Count : Int`; `TS_IF` in `tests\common.py`) — older than `20261012-140000`, so it is not
   the newest export of the block.
@@ -704,7 +795,8 @@ testing through a browser automation extension: when the tab is hidden (`documen
   (`tests\test_changelog.py`), snapshot comparison incl. a moved network and the MCP tools (`tests\test_compare.py`),
   serialization, real clicks and screenshots (skipped without Chrome).
 - `tests\screenshots\` — screenshots of sample networks and of the main home/editor/change/upload views, the other kinds
-  of edits (`edit_interface.png`, `edit_new_network.png`, `edit_group.png`), the demo banner (`demo_banner.png`), and
+  of edits (`edit_interface.png`, `edit_new_network.png`, `edit_group.png`), HMI screens (`hmi_overview.png`,
+  `hmi_designer.png`, `hmi_preset_dialog.png`), the demo banner (`demo_banner.png`), and
   `docs\demo.gif`; all regenerated by `python tools\screenshots.py` (temp folders, fake Writer/Reader, port 8765).
 
 ## What works / what does not
@@ -716,6 +808,11 @@ testing through a browser automation extension: when the tab is hidden (`documen
 - ✅ Change tree, states, checks, before/after diff; editor (palette, insert by click and drag, branch, delete,
   operands/pins with autocomplete, undo/redo, Esc), catalog from the export, live LAD/FBD rules; FBD editor, export
   check, TIA steps, show as LAD; Upload/Check against fake servers.
+- ✅ HMI (WinCC Unified): screen viewer, designer, presets, `hmi_screen` edits, export check, Upload of changed attributes
+  and Check against the fake Writer/Reader. ⚠️ The dump shape is taken from the Reader's exporter source and a made-up
+  sample, not from a real export; class names such as `HmiToggleSwitch`, the color and text formats the Writer accepts
+  and the HMI `softwarePath` are not verified. ❌ Creating screens and items through the Writer; editing more than one
+  language; screen groups and faceplates are only shown (a faceplate as a generic box).
 - ⚠️ A circuit that cannot be laid out (bridge, pin fed from somewhere other than the rail) → list of rungs with a
   warning. SCL/STL → warning + text.
 - ⚠️ Text width is an estimate (7.2 px/char, Consolas 12 px); an operand longer than 30 chars is shortened with "…"

@@ -149,6 +149,22 @@ def main():
         d.req('POST', '/api/groups', {'edit_ids': [iface, new, ren], 'name': 'jam detection'})
         d.req('POST', '/api/groups/G001/state', {'state': 'Approved', 'by': 'user'})
         d.shot('?group=G001', 'edit_group.png', 1400, 1000)
+        # H: a changed HMI screen in the designer, a new screen from a preset
+        hu = d.req('POST', '/api/edits', {'project': PROJECT, 'round': 'HMI', 'kind': 'hmi_screen', 'screen': 'Overview',
+                                          'note': 'setpoint field, new title, no clock'})
+        after = hu['after']
+        x = {i['name']: i for i in after['items']}
+        x['Title']['text'] = 'Line 1 — overview'
+        x['IO_Speed']['left'] += 16
+        after['items'] = [i for i in after['items'] if i['name'] != 'Clock'] + [
+            {'name': 'Label_Setpoint', 'type': 'Text', 'left': 40, 'top': 296, 'width': 200, 'height': 40, 'text': 'Speed setpoint',
+             'colors': {'foreColor': '#1b2430'}, 'font': {'size': 18}, 'bindings': []},
+            {'name': 'IO_Setpoint', 'type': 'IOField', 'left': 264, 'top': 296, 'width': 160, 'height': 40, 'font': {'size': 18},
+             'colors': {'backColor': '#ffffff', 'foreColor': '#1b2430', 'borderColor': '#8a9199'},
+             'bindings': [{'property': 'ProcessValue', 'tag': 'Speed_Setpoint'}]}]
+        d.req('POST', '/api/edits/%s/after' % hu['id'], {'after': after})
+        d.shot('?edit=%s&edit_mode=1&select=IO_Setpoint' % hu['id'], 'hmi_designer.png', 1500, 1000)
+        d.shot('?project=%s&view=hmi&dialog=preset' % PROJECT, 'hmi_preset_dialog.png', 1500, 950)
         d.stop()
 
         d = Demo(root, 'data4', 'tia4', demo=True)                    # fake Writer/Reader = demo instance
