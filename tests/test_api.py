@@ -40,6 +40,23 @@ class TestApi(unittest.TestCase):
         self.assertIn({'block': 'FB_Conveyor', 'ts': '20261012-140000'}, p['blocks'])
         self.assertIn({'block': 'FB_Belt', 'ts': '20261012-120000'}, p['blocks'])     # partial export
 
+    def test_project_is_a_name_not_a_path(self):
+        absolute = quote(os.path.join(SAMPLES, PROJECT), safe='')
+        for path in ('/api/block?project=%s&block=FB_Conveyor' % absolute, '/api/catalog?project=%s' % absolute,
+                     '/api/projects/..%2F..%2Ftests/snapshots', '/api/block?project=..&block=FB_Conveyor'):
+            s, _, b = self.get(path)
+            self.assertEqual((s, json.loads(b)['error']), (400, 'invalid project'), path)
+
+    def test_host_header(self):
+        """DNS rebinding: a page of another name resolved to 127.0.0.1 must not read the API."""
+        for host, status in (('evil.example:%d' % self.port, 403), ('localhost:%d' % self.port, 200), ('127.0.0.1', 403)):
+            c = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+            c.request('GET', '/api/exports', headers={'Host': host})
+            r = c.getresponse()
+            r.read()
+            c.close()
+            self.assertEqual(r.status, status, host)
+
     def test_block(self):
         s, _, b = self.get('/api/block?project=%s&block=FB_Conveyor' % PROJECT)
         j = json.loads(b)
@@ -67,7 +84,6 @@ class TestApi(unittest.TestCase):
     def test_errors(self):
         self.assertEqual(self.get('/api/block?project=%s&block=Missing' % PROJECT)[0], 404)
         self.assertEqual(self.get('/api/block?project=%s&block=%s' % (PROJECT, quote('../../server')))[0], 404)
-        self.assertEqual(self.get('/api/block?project=%s&block=x' % quote('..'))[0], 404)
         self.assertEqual(self.get('/api/network?project=%s&block=FB_Conveyor&nw=99' % PROJECT)[0], 404)
         self.assertEqual(self.get('/api/network?project=%s&block=FB_Conveyor&nw=x' % PROJECT)[0], 400)
         self.assertEqual(self.get('/nothing')[0], 404)

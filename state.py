@@ -28,12 +28,17 @@ def now():
     return datetime.now().isoformat(timespec='seconds')
 
 
+def check_name(project):
+    """A project name is a folder name, never a path (it comes from the URL)."""
+    if not re.fullmatch(r'[^\\/:*?"<>|]+', project or '') or project.strip('.') == '':
+        raise StateError('invalid project', 400)
+    return project
+
+
 def _file(data, project):
     if not data:
         raise StateError('the server runs without --data', 503)
-    if not re.fullmatch(r'[^\\/:*?"<>|]+', project or '') or project.strip('.') == '':
-        raise StateError('invalid project', 400)
-    return os.path.join(data, project, 'state.json')
+    return os.path.join(data, check_name(project), 'state.json')
 
 
 def load(data, project):

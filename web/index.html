@@ -1356,7 +1356,7 @@ function aiChip(st, chip) {
 async function loadStatus(refresh, portalId) {
   if (refresh) $('status').innerHTML = statusHtml(Object.assign({}, tiaStatus, {busy: true}));
   try {
-    tiaStatus = await api('/api/tia/status' + (portalId ? `?portalId=${enc(portalId)}` : refresh ? '?refresh=1' : ''));
+    tiaStatus = refresh ? await apiJson('POST', '/api/tia/status', {portalId}) : await api('/api/tia/status');
   } catch (e) { tiaStatus = {tia: 'unknown', writer: 'error: ' + e.message}; }
   $('status').innerHTML = statusHtml(tiaStatus);
   $('status-refresh').onclick = () => loadStatus(true).then(statusChanged);

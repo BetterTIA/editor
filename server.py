@@ -62,7 +62,10 @@ def project_index(root, project):
 
 
 def project_root(root, data, project):
-    """Export root of a project: from the registry, otherwise the server's default --export-root."""
+    """Export root of a project: from the registry, otherwise the server's default --export-root. The name is checked:
+    it is joined into paths."""
+    if project:
+        state.check_name(project)
     try:
         return next((p['export_root'] for p in state.registry(data) if p['name'] == project), root)
     except (OSError, ValueError, KeyError, TypeError):
@@ -1216,13 +1219,16 @@ def api_tia_status(mcp, portal_id=None, timeout=STATUS_TIMEOUT):
 
 
 def refresh_status(h, portal_id=None):
-    """Recompute the TIA status and keep it as the cached one; while a job holds TIA the cached one is returned."""
-    if TIA_LOCK.locked():
+    """Recompute the TIA status (holding TIA_LOCK: no job and no other refresh starts a Writer meanwhile) and keep it
+    as the cached one; while TIA is busy the cached one is returned."""
+    if not TIA_LOCK.acquire(blocking=False):
         return dict(h.tia_status, busy=True)
-    chosen = portal_id or h.tia_status.get('chosen')
-    st = dict(api_tia_status(h.mcp, chosen), chosen=chosen, autoconnect=h.tia_status.get('autoconnect'))
-    h.tia_status.clear()
-    h.tia_status.update(st)
+    try:
+        chosen = portal_id or h.tia_status.get('chosen')
+        st = dict(api_tia_status(h.mcp, chosen), chosen=chosen, autoconnect=h.tia_status.get('autoconnect'))
+        h.tia_status.update(st)                       # one call, always the same keys: readers never see it half done
+    finally:
+        TIA_LOCK.release()
     return st
 
 
@@ -1908,8 +1914,8 @@ class Handler(BaseHTTPRequestHandler):
     def _body(self):
         if self._b is None:                           # read once (the route may look at the project first)
             n = int(self.headers.get('Content-Length') or 0)
-            if n > 5_000_000:
-                raise ValueError('the body is too large')
+            if not 0 <= n <= 5_000_000:
+                raise ValueError('Content-Length must be 0…5000000')
             self._b = [json.loads(self.rfile.read(n).decode('utf-8') or 'null')]
         return self._b[0]
 
@@ -1936,6 +1942,9 @@ class Handler(BaseHTTPRequestHandler):
         if method != 'GET' and origin and urlparse(origin).hostname not in ('localhost', '127.0.0.1'):
             self._json({'error': 'cross-origin request refused'}, 403)   # another web page must not drive TIA
             return
+        if self.headers.get('Host') not in ('localhost:%d' % self.server.server_port, '127.0.0.1:%d' % self.server.server_port):
+            self._json({'error': 'host refused — open the editor at http://localhost:%d/' % self.server.server_port}, 403)
+            return                                    # DNS rebinding: a foreign name pointing at 127.0.0.1
         try:
             if method == 'GET' and c in ('/', '/index.html'):
                 with open(os.path.join(WEB, 'index.html'), 'rb') as f:
@@ -2032,8 +2041,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({'jobs': list(self.jobs.values())})
             elif method == 'GET' and re.fullmatch(r'/api/jobs/[\w-]+', c):
                 self._json(self.jobs[c.split('/')[3]])
-            elif method == 'GET' and c == '/api/tia/status':
-                st = refresh_status(self, q.get('portalId')) if q.get('refresh') == '1' or q.get('portalId')                     else dict(self.tia_status)
+            elif method in ('GET', 'POST') and c == '/api/tia/status':      # POST checks TIA again (starts the Writer)
+                b = self._body() if method == 'POST' else None
+                st = refresh_status(self, b.get('portalId') if isinstance(b, dict) else None) if method == 'POST' \
+                    else dict(self.tia_status)
                 self._json(dict(st, demo=self.demo, **ai_status(self)))
             elif method == 'GET' and c == '/api/ai/clients':
                 self._json(ai_status(self))

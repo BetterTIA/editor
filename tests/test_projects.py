@@ -116,7 +116,7 @@ class TestProjects(unittest.TestCase):
     # ---------- TIA status ----------
     def test_status_not_running_does_not_connect(self):
         self.start(['--no-portal'], ['--no-portal'])
-        s, st = self.req('GET', '/api/tia/status?refresh=1')
+        s, st = self.req('POST', '/api/tia/status', {})
         self.assertEqual(s, 200)
         self.assertEqual((st['tia'], st['writer'], st['reader'], st['ai']), ('not running', 'configured', 'configured', 'no client'))
         self.assertEqual(self.calls('Connect'), [])
@@ -124,7 +124,7 @@ class TestProjects(unittest.TestCase):
 
     def test_status_one_instance_attached(self):
         self.start()
-        s, st = self.req('GET', '/api/tia/status?refresh=1')
+        s, st = self.req('POST', '/api/tia/status', {})
         self.assertEqual((st['tia'], st['project'], st['portalId']), ('attached', PROJECT, 4711))
         self.assertEqual(self.calls('Connect')[0]['arguments'], {'portalId': 4711})
         self.assertEqual(st['reader_export_root'], self.root)
@@ -132,16 +132,16 @@ class TestProjects(unittest.TestCase):
 
     def test_status_multi_instances_choose(self):
         self.start(['--multi-instances'])
-        st = self.req('GET', '/api/tia/status?refresh=1')[1]
+        st = self.req('POST', '/api/tia/status', {})[1]
         self.assertEqual(st['tia'], 'choose')
         self.assertEqual([x['portalId'] for x in st['instances']], [4711, 4712])
         self.assertEqual(self.calls('Connect'), [])
-        st = self.req('GET', '/api/tia/status?portalId=4712')[1]
+        st = self.req('POST', '/api/tia/status', {'portalId': 4712})[1]
         self.assertEqual((st['tia'], st['portalId'], st['project']), ('attached', 4712, PROJECT))
 
     def test_writer_cannot_start_is_error(self):
         self.start(mcp={'writer': ([os.path.join(self.tia, 'not.exe')], None)})
-        s, st = self.req('GET', '/api/tia/status?refresh=1')
+        s, st = self.req('POST', '/api/tia/status', {})
         self.assertEqual(s, 200)
         self.assertTrue(st['writer'].startswith('error: '), st)
         self.assertEqual((st['tia'], st['reader']), ('unknown', 'missing'))
@@ -170,7 +170,7 @@ class TestProjects(unittest.TestCase):
     # ---------- snapshots ----------
     def test_snapshot_whole_plc(self):
         self.start()
-        self.req('GET', '/api/tia/status?refresh=1')
+        self.req('POST', '/api/tia/status', {})
         s, r = self.req('POST', '/api/projects/%s/snapshot' % PROJECT, {})
         self.assertEqual(s, 202, r)
         j = self.wait(r['job'])

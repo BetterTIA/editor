@@ -79,7 +79,7 @@ def main():
         root = 'exports'
         shutil.copytree(SAMPLES, root)
         d = Demo(root, os.path.join(tmp, 'data1'))                    # no Writer / Reader configured
-        d.req('GET', '/api/tia/status?refresh=1')
+        d.req('POST', '/api/tia/status', {})
         d.shot('', 'home_projects.png')
         d.shot('?project=%s&block=FB_Conveyor&nw=2' % PROJECT, 'lad_viewer.png')
         d.shot('?project=%s&block=FB_Conveyor&nw=4' % PROJECT, 'lad_viewer_light.png', 1400, 700, light=True)
@@ -89,7 +89,7 @@ def main():
         root2 = 'exports2'                         # the slow snapshot may still write after stop()
         shutil.copytree(SAMPLES, root2)
         d = Demo(root2, os.path.join(tmp, 'data2'), os.path.join(tmp, 'tia2'), slow=2)
-        d.req('GET', '/api/tia/status?refresh=1')
+        d.req('POST', '/api/tia/status', {})
         job = d.req('POST', '/api/projects/%s/snapshot' % PROJECT, {})['job']['id']
         d.shot('', 'snapshot_progress.png')
         while d.req('GET', '/api/jobs/' + job)['state'] == 'running':    # the job lock is global: wait before the next server
@@ -98,7 +98,7 @@ def main():
 
         data, tia = 'data', 'tia'
         d = Demo(root, data, tia)
-        d.req('GET', '/api/tia/status?refresh=1')
+        d.req('POST', '/api/tia/status', {})
         frames = []
         d.shot('', 'home_tia_attached.png')
         net = d.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=2' % PROJECT)
@@ -131,7 +131,7 @@ def main():
 
         # E: other kinds of edits and a group — interface members, a new network, a renamed network
         d = Demo(root, 'data3', 'tia3')
-        d.req('GET', '/api/tia/status?refresh=1')
+        d.req('POST', '/api/tia/status', {})
         base = {'project': PROJECT, 'round': 'Jam detection', 'block': 'FB_Conveyor'}
         iface = d.req('POST', '/api/edits', dict(base, kind='interface', section='Static', note='jam flag and counter', members=[
             {'name': 'Jam_Detected', 'type': 'Bool', 'comment': 'belt stands while the motor runs'},
@@ -151,7 +151,7 @@ def main():
         d.stop()
 
         d = Demo(root, 'data4', 'tia4', demo=True)                    # fake Writer/Reader = demo instance
-        d.req('GET', '/api/tia/status?refresh=1')
+        d.req('POST', '/api/tia/status', {})
         d.shot('', 'demo_banner.png', 1400, 600)
         d.stop()
         if not a.no_gif:

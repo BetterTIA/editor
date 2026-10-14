@@ -186,7 +186,7 @@ def get_procedure(e, a):
 
 
 def tia_status(e, a):
-    return e.get('/api/tia/status', refresh='1' if a.get('refresh') else None)
+    return e.req('POST', '/api/tia/status', {}) if a.get('refresh') else e.get('/api/tia/status')
 
 
 def take_snapshot(e, a):
