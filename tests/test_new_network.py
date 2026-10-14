@@ -119,8 +119,9 @@ class TestNewNetworkApi(unittest.TestCase):
         self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
         s, r = self.req('POST', '/api/edits/%s/upload' % u['id'], {})
         self.assertTrue(r['ok'], r)
-        self.assertEqual([x['step'] for x in r['write']['steps']][-4:],
-                         ['Insert the network in .s7dcl', 'PreviewImport', 'ImportFromDocuments', 'SetNetworkText'])
+        self.assertEqual([x['step'] for x in r['write']['steps']][-6:],
+                         ['Insert the network in .s7dcl', 'PreviewImport', 'ImportFromDocuments', 'CompileBlock', 'SetNetworkText',
+                          'CompileBlock'])
         with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:
             call = [json.loads(x) for x in f if '"SetNetworkText"' in x][0]['arguments']
         self.assertEqual(call, {'softwarePath': 'PLC_1', 'blockPath': 'Conveyor/FB_Conveyor', 'network': 3, 'dryRun': False,

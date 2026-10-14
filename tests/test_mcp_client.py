@@ -50,10 +50,10 @@ class TestClient(unittest.TestCase):
 
     def test_reader_new_folder(self):
         p = [sys.executable, FAKE, 'reader', '--state', self.state, '--export-root', self.root, '--project', PROJECT]
-        with mcp_client.Client(p, timeout=20) as k:
-            r = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor'],
-                                                          'include': ['blocks'], 'formats': ['documents']}))
-            r2 = json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor']}))
+        with mcp_client.Client(p, timeout=20) as k:                           # answers are wrapped like the real Reader's
+            r = json.loads(json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor'],
+                                                                     'include': ['blocks'], 'formats': ['documents']}))['payload'])
+            r2 = json.loads(json.loads(k.call('export_to_folder', {'pathPrefixes': ['PLC_1/Blocks/Conveyor/FB_Conveyor']}))['payload'])
         self.assertTrue(r['complete'])
         self.assertNotEqual(r['exportFolder'], r2['exportFolder'])          # second export = new timestamp
         self.assertTrue(os.path.exists(os.path.join(r['exportFolder'], 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')))

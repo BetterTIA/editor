@@ -1103,10 +1103,11 @@ def _path_from_text(t):
     """ResolveObjectPath answer -> 'Group/Block' (JSON with path/objectPath… or plain text)."""
     try:
         j = json.loads(t)
-        if isinstance(j, dict):
-            t = next((str(j[k]) for k in ('path', 'objectPath', 'resolvedPath', 'rootRelativePath') if j.get(k)), t)
-        elif isinstance(j, str):
+        if isinstance(j, str):
             t = j
+        else:                                         # the real Writer: {"items": [{"path": "Group/Block", …}], "message": …}
+            t = next((str(d[k]) for d in _dicts(j) for k in ('path', 'objectPath', 'resolvedPath', 'rootRelativePath')
+                      if d.get(k)), t)
     except ValueError:
         pass
     return t.strip().strip('"').replace('\\', '/')
@@ -1189,11 +1190,17 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
                     fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
                         'ResolveObjectPath', {'softwarePath': sp, 'name': block, 'kind': 'block'})))
                     grp = fpath.rsplit('/', 1)[0] if '/' in fpath else ''
-                step('ExportBlocksAsDocuments', lambda: k.call('ExportBlocksAsDocuments', {
-                    'softwarePath': sp, 'exportPath': work, 'regexName': '^%s$' % re.escape(block), 'preservePath': False}))
+                bpath = (grp + '/' if grp else '') + block
+                export = lambda: k.call('ExportBlocksAsDocuments', {
+                    'softwarePath': sp, 'exportPath': work, 'regexName': '^%s$' % re.escape(block), 'preservePath': False})
+                step('ExportBlocksAsDocuments', export)
                 files = glob.glob(os.path.join(work, '**', block + '.s7dcl'), recursive=True)
+                if not files:                         # TIA exports no inconsistent block (a hand edit, an Upload that stopped)
+                    step('CompileBlock', lambda: k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}))
+                    step('ExportBlocksAsDocuments', export)
+                    files = glob.glob(os.path.join(work, '**', block + '.s7dcl'), recursive=True)
                 if not files:
-                    raise s7dcl_write.WriteError('the Writer did not export %s.s7dcl' % block)
+                    raise s7dcl_write.WriteError('the Writer did not export %s.s7dcl — compile the block in TIA' % block)
                 folder = os.path.dirname(files[0])
                 step({'interface': 'Add interface members in .s7dcl', 'new_network': 'Insert the network in .s7dcl'}.get(
                     u.get('kind'), 'Replace the network in .s7dcl'),
@@ -1203,12 +1210,15 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
                 step('ImportFromDocuments', lambda: k.call('ImportFromDocuments', {
                     'softwarePath': sp, 'groupPath': grp, 'importPath': folder, 'fileNameWithoutExtension': block,
                     'importOption': 'Override'}))
+                # an imported block is inconsistent until it compiles, and TIA exports no inconsistent block — neither for
+                # SetNetworkText (it exports and imports the block again) nor for the Check or the next Upload
+                step('CompileBlock', lambda: k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}))
                 texts = _network_texts(u, files[0])
                 if texts:                             # title / comment: the Writer edits the texts of the imported block
-                    arg = {'softwarePath': sp, 'blockPath': (grp + '/' if grp else '') + block, 'network': texts[0],
-                           'dryRun': False}
+                    arg = {'softwarePath': sp, 'blockPath': bpath, 'network': texts[0], 'dryRun': False}
                     arg.update({k_: v for k_, v in (('title', texts[1]), ('comment', texts[2])) if v is not None})
                     step('SetNetworkText', lambda: k.call('SetNetworkText', arg))
+                    step('CompileBlock', lambda: k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}))
             ok, message = True, ('written to the project (%s, group %s) — save the project in TIA (the Writer does not call '
                                    'SaveProject)') % (sp, grp or '/')
         except mcp_client.MCPError as e:
@@ -1301,6 +1311,9 @@ def _dicts(x):
 
 def _project_of(d):
     """{name, path} of a project from a dict with projectPath/path/projectName/name… (tolerant: the shape is not fixed)."""
+    if isinstance(d.get('attributes'), list):           # the real Writer GetProject: attributes [{name: Path, value: …}]
+        d = dict(d, **{a['name'].lower(): a.get('value') for a in d['attributes']
+                       if isinstance(a, dict) and isinstance(a.get('name'), str)})
     path = next((d[k] for k in ('projectPath', 'path', 'fullPath', 'filePath') if isinstance(d.get(k), str) and d[k]), '')
     name = next((d[k] for k in ('projectName', 'name', 'project') if isinstance(d.get(k), str) and d[k]), '')
     if not name and path:
@@ -1332,16 +1345,28 @@ def project_info(t):
     return {'name': '', 'path': ''}
 
 
+_TREE_LINE = re.compile(r'^(\W*)(?:(PlcSoftware|HmiSoftware): )?(.+?) \[([^\]]+)\]\s*$')
+
+
 def plc_list(t):
     """GetProjectTree / GetDevices / OpenTiaProject answer -> [{softwarePath, plcName}].
-    shortcut: any dict with a softwarePath (or a softwarePaths list) counts, filtered by a kind/type field saying 'plc'
-    when there is one — tighten when the real answer shape is known."""
+    Writer V21 GetProjectTree is a text tree ({"tree": "..."}): 'PlcSoftware: X [PLC Program]' under 'CPU [DeviceItem]',
+    and the Writer resolves softwarePath by that DeviceItem name (verified on a real project 2026-10-14).
+    shortcut: device user groups are not prefixed ('Group/CPU') — add when a grouped PLC shows up.
+    Other shapes: any dict with a softwarePath (or a softwarePaths list), filtered by a kind/type field saying 'plc'."""
     res, j = [], _json_any(t)
 
     def add(sp, name, kind=''):
         if isinstance(sp, str) and sp and not any(r['softwarePath'] == sp for r in res):
             res.append({'softwarePath': sp, 'plcName': str(name or sp.split('/')[-1]), 'kind': str(kind or '')})
     for d in _dicts(j):
+        items = []                                    # (indent, name) of the [DeviceItem] lines above the current one
+        for line in (d['tree'] if isinstance(d.get('tree'), str) else '').splitlines():
+            m = _TREE_LINE.match(line)
+            if m and m.group(4) == 'DeviceItem':
+                items = [x for x in items if x[0] < len(m.group(1))] + [(len(m.group(1)), m.group(3))]
+            elif m and m.group(2) == 'PlcSoftware':
+                add(next((n for i, n in reversed(items) if i < len(m.group(1))), m.group(3)), m.group(3), 'plc')
         add(d.get('softwarePath'), d.get('plcName') or d.get('name'), d.get('kind') or d.get('type'))
     for d in _dicts(j):                               # plain lists last: entries with a kind win
         for sp in d.get('softwarePaths') or []:
@@ -1535,6 +1560,8 @@ def _reader_export(r, arg, steps, chunk=None, tool='export_to_folder'):
         texts.append(t)
         j = _json_any(t)
         j = j if isinstance(j, dict) else {}
+        if isinstance(j.get('payload'), str):             # the real Reader: {"success": true, "payload": "<JSON text>"}
+            j = _json_any(j['payload']) or {}
         if chunk:
             chunk(j)
         if j.get('complete', True) is not False:
@@ -1614,11 +1641,11 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
         pr = project_info(step('GetProject', lambda: w.call('GetProject', pid)))
         job['tia_project'] = pr['name']
         if not plcs:
-            tree += step('GetProjectTree', lambda: w.call('GetProjectTree', pid))
-            plcs = plc_list(tree)
+            t = step('GetProjectTree', lambda: w.call('GetProjectTree', pid))
+            tree, plcs = tree + t, plc_list(t)            # each answer parsed alone: concatenated JSON is not JSON
         if not plcs:
-            tree += step('GetDevices', lambda: w.call('GetDevices', pid))
-            plcs = plc_list(tree)
+            t = step('GetDevices', lambda: w.call('GetDevices', pid))
+            tree, plcs = tree + t, plc_list(t)
         if software_path:
             plc = next((x for x in plcs if x['softwarePath'] == software_path),
                        {'softwarePath': software_path, 'plcName': software_path.split('/')[-1]})
@@ -1640,7 +1667,8 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
 
             def chunk(j):                             # progress of the job while it runs
                 job['chunks'] += 1
-                job['exported'] += next((j[k] for k in ('exported', 'exportedCount', 'count') if isinstance(j.get(k), int)), 0)
+                job['exported'] += next((j[k] for k in ('processedItems', 'exported', 'exportedCount', 'count')
+                                         if isinstance(j.get(k), int)), 0)
                 folders.append(_export_folder(j))
             t = _reader_export(r, arg, steps, chunk)[-1]
             folder = next((f for f in folders if f), None)
@@ -2330,7 +2358,7 @@ def main():
     demo = a.demo or is_fake(mcp)
     srv = create_server(a.port, a.export_root, a.data, mcp=mcp, mcp_timeout=a.mcp_timeout,
                         autoconnect=not a.no_autoconnect, ai_timeout=a.ai_timeout, demo=demo)
-    print('TIAC_Editor at http://localhost:%d  (export root %s, data %s%s)' % (a.port, a.export_root, a.data,
+    print('BetterTIA Editor at http://localhost:%d  (export root %s, data %s%s)' % (a.port, a.export_root, a.data,
                                                                               ', DEMO — fake TIA' if demo else ''), flush=True)
     try:
         srv.serve_forever()

@@ -95,6 +95,16 @@ class TestUploadCheck(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
         self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {'softwarePath': 1})[0], 400)
 
+    def test_upload_compiles_an_inconsistent_block(self):
+        self.stop()
+        self.start('--inconsistent')                  # TIA exports no inconsistent block: compile it, export again
+        self.set_tia()
+        uid = self.proposal(ops=self.OPS)
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertTrue(r['ok'], r)
+        self.assertEqual([k['step'] for k in r['edit']['writes'][0]['steps']][3:6],
+                         ['ExportBlocksAsDocuments', 'CompileBlock', 'ExportBlocksAsDocuments'])
+
     def test_upload_check_checked(self):
         self.set_tia()
         uid = self.proposal(ops=self.OPS)
@@ -105,7 +115,7 @@ class TestUploadCheck(unittest.TestCase):
         self.assertEqual((u['state'], u['history'][-1]['by']), ('Signed', 'TIAC_Writer'))
         self.assertEqual([k['step'] for k in u['writes'][0]['steps']],
                          ['GetPortals', 'Connect', 'ResolveObjectPath', 'ExportBlocksAsDocuments', 'Replace the network in .s7dcl',
-                          'PreviewImport', 'ImportFromDocuments'])
+                          'PreviewImport', 'ImportFromDocuments', 'CompileBlock'])
         imp = self.imports()
         self.assertEqual((len(imp), imp[0]['groupPath'], imp[0]['importOption'], imp[0]['fileNameWithoutExtension']),
                          (1, 'Conveyor', 'Override', 'FB_Conveyor'))

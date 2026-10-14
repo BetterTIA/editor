@@ -63,7 +63,9 @@ def text(v):
     shortcut: one language only — keep all translations when the editor edits more than en-US."""
     if isinstance(v, dict):
         items = [x for x in v.get('items') or [] if isinstance(x, dict)]
-        v = next((x for x in items if x.get('language') == 'en-US'), items[0] if items else {}).get('text')
+        def culture(x):                               # the real dump: language = {"$type": "Language", "culture": "en-US"}
+            return x['language'].get('culture') if isinstance(x.get('language'), dict) else x.get('language')
+        v = next((x for x in items if culture(x) == 'en-US'), items[0] if items else {}).get('text')
     return (re.sub(r'<[^>]+>', '', v).strip() or None) if isinstance(v, str) else None
 
 

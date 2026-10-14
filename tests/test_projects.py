@@ -242,6 +242,11 @@ class TestJobs(unittest.TestCase):
         self.assertEqual((j['id'], j['state'], len(jobs)), ('J081', 'done', server.JOBS_KEPT + 1))
         self.assertNotIn('J001', jobs)
 
+    def test_plc_list_reads_the_writer_text_tree(self):
+        from tests.fake_mcp import TREE
+        self.assertEqual(server.plc_list(json.dumps({'tree': TREE})), [{'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}])
+        self.assertEqual(server.plc_list(json.dumps({'tree': TREE}) + json.dumps({'devices': []})), [])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -55,6 +55,24 @@ def copy_tree(z, dst, block):
 PROJECT_PATH = 'C:\\TIA\\Demo_Line\\Demo_Line.ap21'
 DEVICES = [{'name': 'PLC_1', 'type': 'CPU 1516F-3 PN/DP', 'kind': 'PlcSoftware', 'softwarePath': 'PLC_1'},
            {'name': 'HMI_1', 'type': 'MTP1200 Unified Comfort', 'kind': 'HmiSoftware', 'softwarePath': 'HMI_1'}]
+TREE = '''```
+Demo_Line
+├── Devices [Collection]
+│   ├── S7-1500/ET200MP station_1 [Device: System:Device.S71500]
+│   │   ├── Rail_0 [DeviceItem]
+│   │   │   └── PLC_1 [Hardware Component]
+│   │   └── PLC_1 [DeviceItem]
+│   │       ├── PlcSoftware: PLC_1 [PLC Program]
+│   │       ├── PROFINET interface_1 [Hardware Component]
+│   │       └── PROFINET interface_1 [DeviceItem]
+│   │           └── Port_1 [DeviceItem]
+│   └── HMI_1 [Device: OrderNumber:6AV2128-3MB06-0AX1/V19.0.0.0]
+│       └── HMI_1 [DeviceItem]
+│           └── HMI_RT_1 [DeviceItem]
+│               └── HmiSoftware: HMI_RT_1 [HMI Program]
+└── UngroupedDevicesGroup: Ungrouped devices [System Group]
+    └── IO device_1 [System:Device.ET200SP]
+```'''
 
 
 def portals(a):
@@ -79,7 +97,9 @@ def writer(a, nm, arg):
         return 'Connected to TIA Portal V21 (fake), portalId %s' % (arg.get('portalId') or 4711)
     if nm == 'GetProject':
         return json.dumps({'projects': [{'name': 'Demo_Line', 'path': PROJECT_PATH, 'kind': 'project'}]})
-    if nm in ('GetDevices', 'GetProjectTree'):
+    if nm == 'GetProjectTree':                        # the Writer's real shape: a text tree (seen on a V21 project)
+        return json.dumps({'tree': TREE, 'message': 'Project tree retrieved'})
+    if nm == 'GetDevices':
         return json.dumps({'devices': DEVICES})
     if nm == 'GetState':
         return json.dumps({'portalId': 4711, 'connected': True, 'project': PROJECT_PATH, 'writeMode': True})
@@ -101,6 +121,8 @@ def writer(a, nm, arg):
         return json.dumps({'path': (group + '/' if group else '') + arg['name']})
     if nm == 'ExportBlocksAsDocuments':
         block = arg['regexName'].strip('^$')
+        if a.inconsistent and not os.path.exists(os.path.join(a.state, 'compiled.txt')):   # TIA exports no inconsistent block
+            return json.dumps({'items': [], 'message': 'Document export completed: 0 blocks exported', 'meta': {'exportedBlocks': 0}})
         copy_tree(find(a, block)[0], arg['exportPath'], block)
         return 'Exported 1 block(s) to %s' % arg['exportPath']
     if nm == 'PreviewImport':
@@ -124,6 +146,10 @@ def writer(a, nm, arg):
         return '%s%s (fake): %s' % ('dry run: ' if arg.get('dryRun', True) else '', nm, json.dumps(arg))
     if nm == 'CompileHmi':
         return json.dumps({'compiled': arg['softwarePath'], 'state': 'Success', 'errors': 0, 'warnings': 0})
+    if nm == 'CompileBlock':                          # the real answer: {state, errorCount, warningCount, messages: [...]}
+        open(os.path.join(a.state, 'compiled.txt'), 'a').write(arg['path'] + '\n')
+        return json.dumps({'state': 'Success', 'errorCount': 0, 'warningCount': 0, 'messages': [
+            {'path': '%s (FC)' % arg['path'].split('/')[-1], 'state': 'Success', 'description': 'Block was successfully compiled.'}]})
     raise ValueError('unknown tool %s for the fake Writer' % nm)
 
 
@@ -236,8 +262,9 @@ def export_plc(a, arg):
     with open(os.path.join(folder, 'manifest.jsonl'), 'a', encoding='utf-8') as f:
         for rel in files[start:end]:
             f.write(json.dumps({'path': plc + '/' + rel.replace(os.sep, '/'), 'format': 'documents'}) + '\n')
-    res = {'exportFolder': folder, 'manifest': os.path.join(folder, 'manifest.jsonl'), 'exported': end - start,
-           'complete': end == len(files), 'runId': os.path.basename(folder)}
+    res = {'exportFolder': folder, 'plcFolder': os.path.join(folder, plc), 'manifestPath': os.path.join(folder, 'manifest.jsonl'),
+           'runId': os.path.basename(folder), 'plcName': plc, 'totalItems': len(files), 'offset': start,
+           'processedItems': end - start, 'complete': end == len(files)}
     if end < len(files):
         res['nextOffset'] = end
     return json.dumps(res)
@@ -275,9 +302,14 @@ def export_hmi(a, arg):
     return json.dumps(res)
 
 
+def wrap(res):
+    """The real Reader wraps every answer: {"success": true, "payload": "<JSON text>"} (seen on a V21 project)."""
+    return json.dumps({'success': True, 'payload': res})
+
+
 def reader(a, nm, arg):
     if nm == 'export_hmi_to_folder':
-        return export_hmi(a, arg)
+        return wrap(export_hmi(a, arg))
     if nm == 'get_project_status':
         if a.no_portal:
             return json.dumps({'connected': False, 'message': 'TIA Portal is not running'})
@@ -285,7 +317,7 @@ def reader(a, nm, arg):
     if nm != 'export_to_folder':
         raise ValueError('unknown tool %s for the fake Reader' % nm)
     if not arg.get('pathPrefixes'):
-        return export_plc(a, arg)
+        return wrap(export_plc(a, arg))
     prefix = arg['pathPrefixes'][0].strip('/')
     parts = prefix.split('/')                            # <PLC>/Blocks/<Group…>/<block>
     plc, block = parts[0], parts[-1]
@@ -294,8 +326,8 @@ def reader(a, nm, arg):
     copy_tree(z, os.path.join(folder, plc, 'Blocks', *[x for x in group.split('/') if x]), block)
     with open(os.path.join(folder, 'manifest.jsonl'), 'w', encoding='utf-8') as f:
         f.write(json.dumps({'path': prefix, 'format': 'documents'}) + '\n')
-    return json.dumps({'exportFolder': folder, 'complete': True, 'manifest': os.path.join(folder, 'manifest.jsonl'),
-                       'exported': 1})
+    return wrap(json.dumps({'exportFolder': folder, 'plcFolder': os.path.join(folder, plc), 'complete': True,
+                            'manifestPath': os.path.join(folder, 'manifest.jsonl'), 'processedItems': 1, 'totalItems': 1}))
 
 
 def main():
@@ -308,6 +340,7 @@ def main():
     ap.add_argument('--multi-instances', action='store_true')
     ap.add_argument('--no-portal', action='store_true', help='TIA Portal is not running')
     ap.add_argument('--no-hmi', action='store_true', help='Reader: the project has no Unified HMI')
+    ap.add_argument('--inconsistent', action='store_true', help='Writer: blocks export only after CompileBlock')
     ap.add_argument('--slow', type=float, default=0)
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)

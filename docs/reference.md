@@ -435,10 +435,12 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
    written only for a comparison or TON (other instructions: stop, make it by hand); a title / comment-only edit leaves
    the network text as it is; `.s7res` is not changed, BOM and CRLF are kept,
 5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (the text is stored in the record as `preview`),
-6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`.
+6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`,
+7. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
+   exports no inconsistent block (`SetNetworkText`, the Check and the next Upload would find nothing; seen on a real project).
 
 Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network);
-a new network and a network edit with `title_after` / `comment_after` get a 7th step `SetNetworkText` (see
+a new network and a network edit with `title_after` / `comment_after` get a step `SetNetworkText` after the compile, followed by a second `CompileBlock` (it imports the block again; see
 [Edit kinds and groups](#edit-kinds-and-groups)).
 
 Result → `edit.writes` = `[{time, tool: "TIAC_Writer", steps: [{step, ok, message}], ok, message, preview?}]`; on
