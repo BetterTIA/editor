@@ -31,6 +31,12 @@ class TestAddMembers(unittest.TestCase):
         self.assertIn('        Jam_Count : Int := 0;\n    END_VAR', t)
         self.assertEqual(len(s7dcl.parse_block(t)['networks']), 8)            # networks untouched
 
+    def test_retain_section_is_static(self):
+        text = sample('FB_Conveyor').replace('\n    VAR\n', '\n    VAR RETAIN\n', 1)
+        t = s7dcl_write.add_members(text, 'Static', MEMBERS[:1])
+        self.assertEqual(t.count('END_VAR'), text.count('END_VAR'))               # no second Static section
+        self.assertEqual(catalog.interface(t)['section']['static'][-1], {'name': 'Jam_Detected', 'type': 'Bool'})
+
     def test_new_section_and_crlf(self):
         text = sample('FB_Conveyor').replace('\n', '\r\n')
         t = s7dcl_write.add_members(text, 'Temp', [{'name': 'Tmp', 'type': 'Int'}])
@@ -141,9 +147,7 @@ class TestInterfaceApi(unittest.TestCase):
                       d['warnings'])
 
     def test_upload_writes_the_members(self):
-        st = self.req('GET', '/api/state?project=' + PROJECT)[1]
-        st['tia'] = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
-        self.req('PUT', '/api/state?project=' + PROJECT, st)
+        self.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'})
         _, u = self.propose()
         self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
         s, r = self.req('POST', '/api/edits/%s/upload' % u['id'], {})

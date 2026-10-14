@@ -480,9 +480,10 @@ def display_name(p):
     return ('%s %s' % (SYMBOL[p['type']], p.get('operand') or '')).strip()
 
 
-def validate(m, f_block=False, non_f=()):
-    """-> [{id, error, warnings?}]. f_block: the edited block is an F-block; non_f: names of project blocks that are not F."""
-    ch = []
+def validate(m, f_block=False, non_f=(), before=None):
+    """-> [{id, error, warnings?}]. f_block: the edited block is an F-block; non_f: names of project blocks that are not F;
+    before: the model the edit started from."""
+    ch, B = [], {p['id']: p for p in (before or {}).get('elements', [])}
     consumers = {v['signal'] for p in m['elements'] for v in p['inputs'] if v.get('signal')}
     for p in m['elements']:
         if p['type'] in WITH_OPERAND and not (p.get('operand') or '').strip():
@@ -491,9 +492,14 @@ def validate(m, f_block=False, non_f=()):
             ch.append({'id': p['id'], 'error': 'Missing instance: %s' % display_name(p)})
         if p['type'] not in ('call', 'instruction'):
             for v in p['inputs']:
-                # shortcut: V21 export has `RUNG` + `Coil(x)` (= without input, probably "always 1") — for boxes from the
-                # export the 1st input of =/S/R is not reported; refine once it is verified in TIA how the editor draws it
+                # a V21 export has `RUNG` + `Coil(x)` (= without an input, "always 1"): an empty 1st input of =/S/R from the
+                # export is not an error — unless the edit emptied it
                 if p['type'] in ('assign', 's', 'r') and v['n'] == 1 and not p['id'].startswith('n'):
+                    old = ((B.get(p['id']) or {}).get('inputs') or [{}])[0]
+                    if not v.get('signal') and not v['operand'].strip() and (old.get('signal') or old.get('operand', '').strip()):
+                        ch.append({'id': p['id'], 'warning': True,
+                                   'error': 'Input 1 of box %s was emptied — without an input TIA takes it as always 1 '
+                                            '(warning)' % display_name(p)})
                     continue
                 if not v.get('signal') and not v['operand'].strip():
                     ch.append({'id': p['id'], 'error': 'Unconnected input %d of box %s — add an operand or a signal'
@@ -544,8 +550,6 @@ def _content(p, source):
     empty call pins are ignored."""
     d = {k: p[k].strip() for k in ('operand', 'name', 'instance', 'template') if isinstance(p.get(k), str) and p[k].strip()}
     d['type'] = p['type']
-    if p.get('neg_output'):
-        d['neg_output'] = True
     inp = []
     for v in p['inputs']:
         x = source(v['signal']) if v.get('signal') else v['operand'].strip()
@@ -555,6 +559,14 @@ def _content(p, source):
     d['inputs'] = sorted(inp, key=_j) if p['type'] in COMMUTATIVE else inp
     d['outputs'] = [[v['pin'], bool(v.get('neg')), v['operand'].strip()] for v in p.get('outputs', []) if v['operand'].strip()]
     return d
+
+
+def fold_neg_output(elements):
+    """Copies of the boxes, a negated main output (`neg_output`, editor only) written the way the export has it:
+    as a negation of the consumers' inputs."""
+    neg = {p['id'] for p in elements if p.get('neg_output')}
+    return [dict(p, neg_output=False, inputs=[dict(v, neg=bool(v.get('neg')) != (v.get('signal') in neg)) for v in p['inputs']])
+            for p in elements]
 
 
 def canon(elements):
@@ -580,7 +592,8 @@ def content_match(proposal, export):
         for p in elements:
             d.setdefault(_j(_content(p, lambda s: 'signal')), []).append(p)
         return d
-    a, b = multiset(proposal['elements']), multiset(export['elements'])
+    pa, pb = fold_neg_output(proposal['elements']), fold_neg_output(export['elements'])
+    a, b = multiset(pa), multiset(pb)
     missing = [p for k, v in a.items() for p in v[len(b.get(k, [])):]]
     extra = [p for k, v in b.items() for p in v[len(a.get(k, [])):]]
     res = []
@@ -592,7 +605,7 @@ def content_match(proposal, export):
             res.append('different box %s: proposal %s, export %s' % (SYMBOL.get(p['type']) or p.get('name'), description(p), description(q)))
     res += ['missing in export: %s' % description(p) for p in missing]
     res += ['extra in export: %s' % description(p) for p in extra]
-    if not res and canon(proposal['elements']) != canon(export['elements']):
+    if not res and canon(pa) != canon(pb):
         res.append('boxes match, but signal wiring differs')
     return not res, res
 

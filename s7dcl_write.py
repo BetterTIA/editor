@@ -7,6 +7,7 @@ our own parser (`s7dcl.py`, `fbd.py`) reads the text back to the same content �
 """
 import re
 
+import fbd
 import s7dcl
 
 IND = ' ' * 8                                   # RUNG in the network body
@@ -27,19 +28,27 @@ class WriteError(ValueError):
 
 # ---------- common ----------
 
-def _template(name, tmpl):
-    """'Int' / 'Int to DInt' -> attribute text `{ S7_Templates := "…" }`.
-    shortcut: template keys are guessed (SrcType, time_type, DestType), only comparison and TON verified — complete from an export"""
+def templates(text_s7dcl):
+    """{(instruction name, template): attribute text} of every `{ S7_Templates := "…" }` in an exported block."""
+    res = {}
+    for m in re.finditer(r'S7_Templates\s*:=\s*"([^"]*)"[^{}]*\}\s*(?:NOT\s+)?([^\s(]+)\s*\(', text_s7dcl):
+        name = s7dcl.element(m.group(2), None, {}).get('name')
+        res.setdefault((name, s7dcl._template({'S7_Templates': m.group(1)})), m.group(1))
+    return res
+
+
+def _template(name, tmpl, known):
+    """'Int' / 'Int to DInt' -> attribute text `{ S7_Templates := "…" }`: the text the exported block already has for that
+    instruction and template; otherwise only the keys verified in an export (comparison SrcType, TON time_type)."""
     if not tmpl:
         return None
-    parts = [x.strip() for x in str(tmpl).split(' to ')]
-    if name in ('TON', 'TOF', 'TP', 'TONR'):
-        keys = ['time_type']
-    elif len(parts) == 2:
-        keys = ['SrcType', 'DestType']
-    else:
-        keys = ['SrcType']
-    return '{ S7_Templates := "%s" }' % '; '.join('%s := %s' % kv for kv in zip(keys, parts))
+    text = known.get((name, tmpl))
+    if text is None:
+        if name not in (None, 'TON'):
+            raise WriteError('the S7_Templates keys of %s (%s) are not verified and the block has no such box to copy them '
+                             'from — make this change by hand in TIA' % (name, tmpl))
+        text = '%s := %s' % ('time_type' if name == 'TON' else 'SrcType', tmpl)
+    return '{ S7_Templates := "%s" }' % text
 
 
 def _attributes(a):
@@ -79,7 +88,7 @@ def _target_box(p):
 
 # ---------- LAD ----------
 
-def _lad_element(p):
+def _lad_element(p, known):
     t = p['type']
     if t in ('contact', 'contact_nc'):
         return [IND_P + '%s( %s )' % ('Contact' if t == 'contact' else 'I_Contact', p.get('operand', ''))]
@@ -88,7 +97,7 @@ def _lad_element(p):
         return _call('P_Contact' if t == 'contact_p' else 'N_Contact',
                        ['operand := %s' % p.get('operand', ''), 'bit := %s' % p.get('bit', '')])
     if t == 'comparison':
-        s = _template(None, p.get('template'))
+        s = _template(None, p.get('template'), known)
         return ([IND_P + s] if s else []) + _call('%s_Contact' % COMPARISONS[p['op']],
                                                      ['in1 := %s' % p.get('in1', ''), 'in2 := %s' % p.get('in2', '')])
     if t == 'coil_neg':
@@ -113,7 +122,7 @@ def _lad_element(p):
         rows = _call(target, args)
     if p.get('neg'):
         rows[0] = IND_P + 'NOT ' + rows[0].lstrip()
-    s = _template(p.get('name'), p.get('template'))
+    s = _template(p.get('name'), p.get('template'), known)
     return ([IND_P + s] if s else []) + rows
 
 
@@ -121,8 +130,8 @@ def _node(u):
     return u[3:] if u.startswith('op:') else 'wire#' + u
 
 
-def lad_text(m):
-    """LAD model {elements, rungs} -> network body text (lines between NETWORK and END_NETWORK)."""
+def lad_text(m, known=None):
+    """LAD model {elements, rungs} -> network body text (lines between NETWORK and END_NETWORK); known = templates()."""
     P = {p['id']: p for p in m['elements']}
     rows = []
     for r in m.get('rungs') or [{'from': 'powerrail', 'path': [], 'to': None}]:
@@ -131,7 +140,7 @@ def lad_text(m):
             if it.startswith('wire#'):
                 rows.append(IND_P + it)
             elif it in P:
-                rows += _lad_element(P[it])
+                rows += _lad_element(P[it], known or {})
             else:
                 raise WriteError('rung refers to a non-existent element %r' % it)
         rows.append(IND + 'END_RUNG' + (' wire#' + r['to'] if r.get('to') else ''))
@@ -145,7 +154,7 @@ def _has_chain(p):
     return bool(p['inputs']) and (p['type'] not in ('call', 'instruction') or p['inputs'][0]['pin'] == 'EN')
 
 
-def _fbd_box(p, wire_of):
+def _fbd_box(p, wire_of, known):
     t, before = p['type'], []                             # before = attributes / template above the element
     inp = p['inputs'][1:] if _has_chain(p) else p['inputs']
 
@@ -164,7 +173,7 @@ def _fbd_box(p, wire_of):
         target, lower = _target_box(p)
         args = [_pin(v['pin'], ':=', value(v), v.get('neg'), lower) for v in inp]
         args += [_pin(v['pin'], '=>', v.get('operand', ''), v.get('neg'), lower) for v in p.get('outputs', [])]
-        s = _template(p.get('name'), p.get('template'))
+        s = _template(p.get('name'), p.get('template'), known)
         before = ([IND_P + s] if s else []) + _attributes(p.get('attributes'))
         rows = _call(target, args)
     if _has_chain(p) and p['inputs'][0].get('neg'):
@@ -172,11 +181,11 @@ def _fbd_box(p, wire_of):
     return before + rows
 
 
-def fbd_text(m):
+def fbd_text(m, known=None):
     """FBD model {elements} -> network body text. Chain = a box whose input 1 is the main output of the previous one;
     other consumers of the output get `wire#wN` (tap in the rung / END_RUNG wire#wN). Negation of the main output
     (`neg_output`, editor only) is written as negation of the consumers' inputs."""
-    elements = [dict(p, inputs=[dict(v) for v in p['inputs']]) for p in m['elements']]
+    elements = fbd.fold_neg_output(m['elements'])
     P = {p['id']: p for p in elements}
     consumers = {p['id']: [] for p in elements}
     for c in elements:
@@ -185,10 +194,6 @@ def fbd_text(m):
                 if v['signal'] not in P:
                     raise WriteError('signal from a non-existent box %s' % v['signal'])
                 consumers[v['signal']].append((c, v))
-    for p in elements:
-        if p.get('neg_output'):
-            for _, v in consumers[p['id']]:
-                v['neg'] = not v.get('neg')
     nxt = {}
     for p in elements:
         k = next((c for c, v in consumers[p['id']] if _has_chain(c) and v is c['inputs'][0]), None)
@@ -214,7 +219,7 @@ def fbd_text(m):
         p = start
         while True:
             done.add(p['id'])
-            rows += _fbd_box(p, wire_of)
+            rows += _fbd_box(p, wire_of, known or {})
             following = nxt.get(p['id'])
             if following is None or following['id'] in done:
                 break
@@ -229,11 +234,9 @@ def fbd_text(m):
     return '\n'.join(rows) + '\n'
 
 
-def network_text(m):
-    """"After" model (LAD or FBD) -> network body text for `.s7dcl`."""
-    if m.get('language') == 'FBD':
-        return fbd_text(m)
-    return lad_text(m)
+def network_text(m, known=None):
+    """"After" model (LAD or FBD) -> network body text for `.s7dcl`; known = templates() of the exported block."""
+    return (fbd_text if m.get('language') == 'FBD' else lad_text)(m, known)
 
 
 # ---------- replacing a network in the block file ----------
@@ -308,7 +311,7 @@ def add_members(text_s7dcl, section, members):
     t = text_s7dcl.replace('\r\n', '\n')
     m = re.search(r'^[ \t]*(?:NETWORK|BEGIN)[ \t]*$', t, re.M)
     head_end = m.start() if m else len(t)
-    kw = SECTION_KEYWORD[section].replace(' ', r'[ \t]+')
+    kw = r'VAR(?:[ \t]+(?:RETAIN|NON_RETAIN))?' if section == 'Static' else SECTION_KEYWORD[section].replace(' ', r'[ \t]+')
     opening = re.compile(r'^([ \t]*)%s[ \t]*$' % kw, re.M).search(t, 0, head_end)
     if opening:
         end = re.compile(r'^([ \t]*)END_VAR[ \t]*$', re.M).search(t, opening.end(), head_end)

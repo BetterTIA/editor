@@ -111,9 +111,7 @@ class TestNewNetworkApi(unittest.TestCase):
         self.assertEqual(self.req('POST', '/api/edits/%s/upload' % u['id'], {})[0], 409)
 
     def test_upload_title_and_check(self):
-        st = self.req('GET', '/api/state?project=' + PROJECT)[1]
-        st['tia'] = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
-        self.req('PUT', '/api/state?project=' + PROJECT, st)
+        self.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'})
         _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=4' % PROJECT)
         _, old = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'E3', 'block': 'FB_Conveyor', 'nw': 4,
                                                  'after': {'elements': net['elements'], 'rungs': net['rungs']}})

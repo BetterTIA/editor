@@ -115,9 +115,7 @@ def main():
         frames.append(d.shot('?project=%s&block=FB_Conveyor&nw=2' % PROJECT, 'f2.png', 1280, 800, out=tmp))
         frames.append(d.shot('?edit=' + u1, 'f3.png', 1280, 800, out=tmp))
         d.req('POST', '/api/edits/%s/state' % u1, {'state': 'Approved', 'by': 'user'})
-        st = d.req('GET', '/api/state?project=' + PROJECT)
-        st['tia'] = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
-        d.req('PUT', '/api/state?project=' + PROJECT, st)
+        d.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'})
         d.shot('?edit=' + u1, 'tia_steps.png', 1400, 1000)
         frames.append(d.shot('?edit=' + u1, 'f4.png', 1280, 800, out=tmp))
         d.req('POST', '/api/edits/%s/upload' % u1, {})

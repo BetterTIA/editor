@@ -772,11 +772,8 @@ async function showEdit(uid, error) {
   }
   $('tia-save').onclick = async () => {
     try {
-      const st = await api(`/api/state?project=${enc(u.project)}`);
-      const t = {softwarePath: $('tia-sp').value.trim(), plcName: $('tia-plc').value.trim(), groupPath: $('tia-grp').value.trim()};
-      for (const k of Object.keys(t)) if (!t[k]) delete t[k];
-      if (Object.keys(t).length) st.tia = t; else delete st.tia;
-      await apiJson('PUT', `/api/state?project=${enc(u.project)}`, st);
+      await apiJson('PUT', `/api/state/tia?project=${enc(u.project)}`,
+                    {softwarePath: $('tia-sp').value, plcName: $('tia-plc').value, groupPath: $('tia-grp').value});
       await showEdit(uid);
     } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
   };

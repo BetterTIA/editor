@@ -16,6 +16,7 @@ import check
 import layout
 import procedure
 import server
+import state
 
 BLOCK = 'FB_Safety'
 CAT = catalog.catalog(SAMPLES, PROJECT)
@@ -102,6 +103,13 @@ class TestRules(unittest.TestCase):
         self.assertIn('Missing operand', ch[0]['error'])
         self.assertIn('Unconnected input 1', ch[1]['error'])
         self.assertIn('leads nowhere', ch[4]['error'])
+
+    def test_emptied_assignment_input(self):
+        x = op(m(1), {'type': 'change_operand', 'id': 'b3', 'input': 1, 'operand': ''})
+        self.assertFalse(any(c['id'] == 'b3' for c in fbd.validate(x)))           # as exported: no input = always 1
+        c = next(c for c in fbd.validate(x, before=m(1)) if c['id'] == 'b3')
+        self.assertTrue(c['warning'])
+        self.assertIn('was emptied', c['error'])
 
     def test_f_block(self):
         x = op(m(1), {'type': 'insert_call', 'element': 'fb:FB_Belt', 'instance': '"DB_Belt1"'})
@@ -224,10 +232,11 @@ class TestApiFbdEdit(unittest.TestCase):
         self.assertTrue(any(x['to'] == {'id': 'b2', 'input': 5} for x in r['places']))
         s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'F2', 'block': BLOCK, 'nw': 1, 'after': r['after']})
         self.assertEqual(s, 201)
-        # before = newest export (TS2 already has the edit) -> switch before to TS0 via a state PUT as in practice (proposal before the write)
-        s, st = self.req('GET', '/api/state?project=%s' % PROJECT)
-        st['edits'][0]['before'] = dict(server._model(server.api_network(SAMPLES, PROJECT, BLOCK, 1, TS0)), export_ts=TS0)
-        self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 200)
+        # before = newest export (TS2 already has the edit) -> switch before to TS0 as in practice (proposal before the write)
+        with state.LOCK:
+            st = state.load(self.data, PROJECT)
+            st['edits'][0]['before'] = dict(server._model(server.api_network(SAMPLES, PROJECT, BLOCK, 1, TS0)), export_ts=TS0)
+            state.save(self.data, PROJECT, st)
         uid = u['id']
         s, p = self.req('GET', '/api/edits/%s/procedure' % uid)
         self.assertEqual(s, 200)

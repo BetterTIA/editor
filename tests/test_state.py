@@ -180,20 +180,48 @@ class TestApiEdits(unittest.TestCase):
         self.assertEqual(s, 200)
         self.assertIn(b'showEdit', html)
 
-    def test_state_get_put(self):
+    def test_state_get_and_tia(self):
         self.create()
         s, all = self.req('GET', '/api/state')
         self.assertEqual(all['projects'][0]['project'], PROJECT)
-        _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
-        st['edits'][0]['note'] = 'edited PUT'
-        self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 200)
-        self.assertEqual(self.req('GET', '/api/state?project=%s' % PROJECT)[1]['edits'][0]['note'], 'edited PUT')
-        self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, {'x': 1})[0], 400)
-        self.assertEqual(self.req('PUT', '/api/state?project=Missing', st)[0], 404)
+        tia = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1', 'groupPath': ''}
+        self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, tia),
+                         (200, {'project': PROJECT, 'tia': {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}}))
+        st = self.req('GET', '/api/state?project=%s' % PROJECT)[1]
+        self.assertEqual((st['tia']['plcName'], len(st['edits'])), ('PLC_1', 1))
+        self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {'x': '1'})[0], 400)
+        self.assertEqual(self.req('PUT', '/api/state/tia?project=Missing', tia)[0], 404)
+        self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {})
+        self.assertNotIn('tia', self.req('GET', '/api/state?project=%s' % PROJECT)[1])
+
+    def test_tia_settings_and_edits_at_the_same_time(self):
+        """Saving the TIA settings never loses an edit created meanwhile (it used to be GET + PUT of the whole file)."""
+        threads = [threading.Thread(target=f) for i in range(6) for f in (
+            lambda i=i: self.create(note=str(i)),
+            lambda i=i: self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {'softwarePath': 'PLC_%d' % i}))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        st = self.req('GET', '/api/state?project=%s' % PROJECT)[1]
+        self.assertEqual(sorted(u['note'] for u in st['edits']), [str(i) for i in range(6)])
+        self.assertRegex(st['tia']['softwarePath'], r'^PLC_\d$')
+
+    def test_save_waits_for_a_reader(self):
+        """Windows: os.replace fails while another process has state.json open — the save retries instead of failing."""
+        self.create()
+        f = open(os.path.join(self.data, PROJECT, 'state.json'), encoding='utf-8')
+        threading.Timer(0.2, f.close).start()
+        st = state.load(self.data, PROJECT)
+        st['edits'][0]['note'] = 'saved'
+        state.save(self.data, PROJECT, st)
+        self.assertEqual(state.load(self.data, PROJECT)['edits'][0]['note'], 'saved')
 
     def test_invalid_input(self):
         self.assertEqual(self.create(after={'elements': 'x'})[0], 400)
         self.assertEqual(self.create(after={'elements': [], 'rungs': [{'from': 'powerrail', 'path': ['p1'], 'to': None}]})[0], 400)
+        for p in ({'id': 'p1', 'type': 'contact', 'operand': 5}, {'id': 'p1', 'type': 'comparison', 'op': '=>', 'in1': 'a', 'in2': 'b'}):
+            self.assertEqual(self.create(after={'elements': [p], 'rungs': [{'from': 'powerrail', 'path': ['p1'], 'to': None}]})[0], 400)
         self.assertEqual(self.create(nw=99)[0], 404)
         self.assertEqual(self.req('POST', '/api/edits', [1, 2])[0], 400)
 

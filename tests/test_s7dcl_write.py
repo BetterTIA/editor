@@ -18,9 +18,9 @@ def match(a, b):
     return fbd.content_match(a, b) if a['language'] == 'FBD' else diff.content_match(a, b)
 
 
-def reparse(nw):
+def reparse(nw, known=None):
     """network model -> text -> model (same language)"""
-    content = z.network_text(nw)
+    content = z.network_text(nw, known)
     if nw.get('language') == 'FBD':
         return {'language': 'FBD', 'elements': fbd.parse(content)}
     r, p = s7dcl.parse_lad(content)
@@ -32,14 +32,14 @@ class TestRoundtrip(unittest.TestCase):
         n = 0
         for f in glob.glob(os.path.join(SAMPLES, '**', '*.s7dcl'), recursive=True):
             text = s7dcl.read(f)
-            b = s7dcl.parse_block(text)
+            b, known = s7dcl.parse_block(text), z.templates(text)       # attribute texts are copied from the export
             for nw in b['networks']:
                 if 'elements' not in nw:
                     continue
                 with self.subTest(block=os.path.basename(f), nw=nw['nw']):
-                    self.assertEqual(match(nw, reparse(nw)), (True, []))
+                    self.assertEqual(match(nw, reparse(nw, known)), (True, []))
                     # replacing a network with itself: the whole block reads the same (other networks and attributes unchanged)
-                    b2 = s7dcl.parse_block(z.replace_network(text, nw['nw'], z.network_text(nw)))
+                    b2 = s7dcl.parse_block(z.replace_network(text, nw['nw'], z.network_text(nw, known)))
                     self.assertEqual(len(b2['networks']), len(b['networks']))
                     for x, y in zip(b['networks'], b2['networks']):
                         self.assertEqual(x['attributes'], y['attributes'])
@@ -88,13 +88,22 @@ class TestModelsFromEditor(unittest.TestCase):
                         'template': 'Int to DInt', 'power': ['EN', 'ENO'],
                         'inputs': [{'pin': 'IN', 'operand': '#A'}], 'outputs': [{'pin': 'OUT', 'operand': '#B'}]}],
              'rungs': [{'from': 'powerrail', 'path': ['p1', 'p2'], 'to': None}]}
-        t = z.lad_text(m)
+        with self.assertRaises(z.WriteError):                                 # CONV keys are not verified
+            z.lad_text(m)
+        known = {('CONV', 'Int to DInt'): 'SrcType := Int; DestType := DInt'}             # from the exported block
+        t = z.lad_text(m, known)
+        self.assertIn('{ S7_Templates := "SrcType := Int; DestType := DInt" }', t)
         self.assertIn('"FC_Branches"(  )', t)
         self.assertIn('Convert(\n                in := #A,\n                out => #B', t)
-        r = reparse(m)
+        r = reparse(m, known)
         self.assertEqual(r['elements'][0]['instance'], '"FC_Branches"')          # parser: a call; the server resolves it as an FC
         self.assertEqual(diff.content_match({'elements': m['elements'][1:], 'rungs': []},
                                              {'elements': r['elements'][1:], 'rungs': []}), (True, []))
+
+    def test_templates_from_the_export(self):
+        text = s7dcl.read(os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl'))
+        self.assertEqual(z.templates(text), {('TON', 'Time'): 'time_type := Time', (None, 'Int'): 'SrcType := Int',
+                                             (None, 'Real'): 'SrcType := Real'})
 
     def test_fbd_operation(self):
         n = self.nw('FB_Safety', 3)

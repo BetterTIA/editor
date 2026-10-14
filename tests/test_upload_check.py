@@ -56,9 +56,7 @@ class TestUploadCheck(unittest.TestCase):
         return r.status, t
 
     def set_tia(self, tia=TIA):
-        _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
-        st['tia'] = tia
-        self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 200)
+        self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, tia)[0], 200)
 
     def proposal(self, block='FB_Conveyor', nw=1, ops=None, state='Approved'):
         _, net = self.req('GET', '/api/network?project=%s&block=%s&nw=%d' % (PROJECT, block, nw))
@@ -95,9 +93,7 @@ class TestUploadCheck(unittest.TestCase):
         uid_p = self.proposal(state='Proposal')
         self.assertEqual(self.req('POST', '/api/edits/%s/upload' % uid_p)[0], 409)
         self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
-        _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
-        st['tia'] = {'softwarePath': 1}
-        self.assertEqual(self.req('PUT', '/api/state?project=%s' % PROJECT, st)[0], 400)
+        self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {'softwarePath': 1})[0], 400)
 
     def test_upload_check_checked(self):
         self.set_tia()
@@ -202,6 +198,30 @@ class TestUploadCheck(unittest.TestCase):
             self.assertIn('in3 := "Sensor_C"', f.read())
         s, c = self.req('POST', '/api/edits/%s/check' % uid)
         self.assertEqual((c['match'], c['edit']['state']), (True, 'Checked'))
+
+    def test_upload_negated_output_and_check(self):
+        """A negated box output is written as a negated input of the next box; the export check reads it back as equal."""
+        self.set_tia()
+        uid = self.proposal('FC_Branches', 3, ops=[{'type': 'negate', 'id': 'b1', 'output': 'main'}])
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertTrue(r['ok'], r)
+        s, c = self.req('POST', '/api/edits/%s/check' % uid)
+        self.assertEqual((c['match'], c['edit']['state']), (True, 'Checked'), c)
+
+    def test_upload_refused_when_the_network_changed_in_tia(self):
+        """Someone changed the network in TIA after the proposal's export: Upload must not overwrite it."""
+        self.set_tia()
+        uid = self.proposal(ops=self.OPS)
+        src = os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor')
+        os.makedirs(os.path.join(self.tia, 'Conveyor'))
+        for f in ('FB_Conveyor.s7dcl', 'FB_Conveyor.s7res'):
+            with open(os.path.join(src, f), encoding='utf-8-sig') as a, \
+                    open(os.path.join(self.tia, 'Conveyor', f), 'w', encoding='utf-8') as b:
+                b.write(a.read().replace('#Ready )', '#Ready_Changed )', 1))
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertEqual((s, r['ok'], r['edit']['state']), (200, False, 'Approved'))
+        self.assertIn('changed in the project since the proposal', r['message'])
+        self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was imported
 
 
 if __name__ == '__main__':

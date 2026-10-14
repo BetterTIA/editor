@@ -26,9 +26,7 @@ class TestNetworkTexts(unittest.TestCase):
         self.srv = server.create_server(0, self.root, self.data, mcp=mcp, mcp_timeout=30)
         self.url = 'http://127.0.0.1:%d' % self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-        st = self.req('GET', '/api/state?project=' + PROJECT)[1]
-        st['tia'] = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
-        self.req('PUT', '/api/state?project=' + PROJECT, st)
+        self.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'})
 
     def tearDown(self):
         self.srv.shutdown()

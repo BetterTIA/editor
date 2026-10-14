@@ -205,6 +205,9 @@ def _fbd_after(after, width=0):
     return m
 
 
+TEXT_FIELDS = ('operand', 'op', 'in1', 'in2', 'bit', 'below', 'call', 'name', 'instance', 'template')
+
+
 def verify_model(after):
     """The "after" model from the API (trust boundary): elements with id/type, boxes with pins, rungs only of existing ids and wire#."""
     error = state.StateError('after must be a network model {elements:[{id, type, …}], rungs:[{from, path, to}]}', 400)
@@ -213,7 +216,9 @@ def verify_model(after):
     ids = set()
     for p in after['elements']:
         if not isinstance(p, dict) or not isinstance(p.get('id'), str) or not isinstance(p.get('type'), str) \
-                or p['id'].startswith('x:') or p['id'] in ids:
+                or p['id'].startswith('x:') or p['id'] in ids \
+                or any(p.get(k) is not None and not isinstance(p[k], str) for k in TEXT_FIELDS) \
+                or p['type'] == 'comparison' and p.get('op') not in s7dcl.COMPARISONS.values():
             raise error
         if p['type'] == 'box':
             pwr = p.get('power')
@@ -246,12 +251,22 @@ def api_state(data, project=None):
     return {'projects': [{'project': p, 'edits': state.load(data, p)['edits']} for p in state.projects(data)]}
 
 
-def api_state_put(root, data, project, obj):
+def api_state_tia(root, data, project, body):
+    """PUT /api/state/tia?project= {softwarePath, plcName?, groupPath?}: only the TIA settings change, under the lock
+    (empty values are dropped, {} clears them)."""
     if not project_index(root, project):
         raise KeyError('unknown project')
+    if not isinstance(body, dict) or set(body) - {'softwarePath', 'plcName', 'groupPath'} \
+            or not all(isinstance(v, str) for v in body.values()):
+        raise state.StateError('tia must be {softwarePath, plcName?, groupPath?} (strings)', 400)
+    t = {k: v.strip() for k, v in body.items() if v.strip()}
     with state.LOCK:
-        state.save(data, project, obj)
-    return obj
+        s = state.load(data, project)
+        s['tia'] = t
+        if not t:
+            del s['tia']
+        state.save(data, project, s)
+    return {'project': project, 'tia': s.get('tia')}
 
 
 def _after_model(after, language):
@@ -263,7 +278,7 @@ def _after_model(after, language):
     verify_model(after)
     m = {'elements': after['elements'], 'rungs': after['rungs']}
     m['wires'] = s7dcl.wires(m)
-    m['layout'] = after.get('layout') or _layout(m)[0]
+    m['layout'] = _layout(m)[0]                     # the client's layout is not trusted
     return m
 
 
@@ -543,9 +558,9 @@ def _non_f(root, project):
         return set()
 
 
-def _validate(after, f=False, root=None, project=None):
+def _validate(after, f=False, root=None, project=None, before=None):
     if fbd.is_fbd(after):
-        return fbd.validate(after, f, _non_f(root, project) if f and root else ())
+        return fbd.validate(after, f, _non_f(root, project) if f and root else (), before)
     return model.validate(after)
 
 
@@ -568,7 +583,7 @@ def api_edit_detail(data, uid, width=0, root=None):
                                      'back by itself; check what was written to the project.' % u['state'])
     following, previous = state.transitions(u)
     res.update({'edit': u, 'next': following, 'previous': previous, 'checked_allowed': state.checked_allowed(u),
-                'errors': _validate(u['after'], u.get('f'), root, u['project']) if 'after' in u else []})
+                'errors': _validate(u['after'], u.get('f'), root, u['project'], _before(u)) if 'after' in u else []})
     return res
 
 
@@ -651,7 +666,7 @@ def _layout_fbd(body, root=None):
     if res['drawing'] is not None:
         after['layout'] = fbd.layout(after['elements'])[0]
     res.update({'after': after, 'places': fbd.places(after, res['drawing']), 'last': last,
-                'errors': _validate(after, f, root, str(body.get('project', '')))})
+                'errors': _validate(after, f, root, str(body.get('project', '')), before)})
     return res
 
 
@@ -726,7 +741,7 @@ def api_check_export(root, data, uid, body):
         match, diffs = diff.content_match(u['after'], n)
     if n is not None:
         for k, have, what in (('title_after', n['title'], 'title'), ('comment_after', n.get('comment') or '', 'comment')):
-            if k in u and have != u[k]:
+            if k in u and _lines(have) != _lines(u[k]):
                 match = False
                 diffs = diffs + ['%s in the export "%s", the proposal "%s"' % (what, have, u[k])]
     if t == u['before'].get('export_ts'):
@@ -737,7 +752,12 @@ def api_check_export(root, data, uid, body):
             'diffs': diffs, 'edit': u}
 
 
-def api_edit_after(data, uid, body):
+def _lines(t):
+    """Text as `.s7res` keeps it: lines without their indentation, no empty lines at the ends."""
+    return '\n'.join(x.strip() for x in t.splitlines()).strip()
+
+
+def api_edit_after(data, uid, body, root=None):
     """Save a proposal (editor "Save proposal", update_edit): the "after" model of a network edit, the members/section of an
     interface edit, the note. Only in state Proposal; rule errors do not block saving."""
     if not isinstance(body, dict):
@@ -756,8 +776,6 @@ def api_edit_after(data, uid, body):
             if body.get('after') is None:
                 raise state.StateError('after: the network model is required (or title_after / comment_after)', 400)
             after = _after_model(body['after'], 'FBD' if fbd.is_fbd(body['after']) else 'LAD')
-            if body['after'].get('layout') and not fbd.is_fbd(after):
-                after['layout'] = _layout(after)[0]          # the client's layout is not trusted here
             if fbd.is_fbd(after) != fbd.is_fbd(u['after']):
                 raise state.StateError('the language of the proposal (LAD/FBD) must stay the same', 400)
             u['after'] = after
@@ -772,7 +790,7 @@ def api_edit_after(data, uid, body):
         if body.get('note') is not None:
             u['note'] = str(body['note'])
         state.save(data, project, s)
-    return {'edit': u, 'errors': _validate(u['after'], u.get('f')) if 'after' in u else []}
+    return {'edit': u, 'errors': _validate(u['after'], u.get('f'), root, u['project'], _before(u)) if 'after' in u else []}
 
 
 # ---------- Upload (TIAC_Writer) and Check (TIAC_Reader) ----------
@@ -785,7 +803,7 @@ def _tia(s, project, data=''):
     t = s.get('tia') or next((p.get('tia') for p in state.registry(data) if p['name'] == project), None) or {}
     if not t.get('softwarePath'):
         raise state.StateError('project %s has no TIA settings (tia: {softwarePath, plcName, groupPath?}) — '
-                                 'set them in the UI on a change ("TIA settings") or through PUT /api/state' % project)
+                                 'set them in the UI on a change ("TIA settings") or through PUT /api/state/tia' % project)
     return t
 
 
@@ -831,7 +849,7 @@ def _insert_in_file(file, bom, text, b, u):
     if u['after_nw'] and u.get('after_title') and b['networks'][u['after_nw'] - 1]['title'] != u['after_title']:
         raise s7dcl_write.WriteError('NW %d in the project is "%s", the proposal follows "%s" — the networks moved, propose again'
                                      % (u['after_nw'], b['networks'][u['after_nw'] - 1]['title'], u['after_title']))
-    new_value = s7dcl_write.insert_network(text, u['after_nw'], s7dcl_write.network_text(u['after']), u['language'])
+    new_value = s7dcl_write.insert_network(text, u['after_nw'], s7dcl_write.network_text(u['after'], s7dcl_write.templates(text)), u['language'])
     nets = s7dcl.parse_block(new_value.replace('\r\n', '\n'))['networks']
     if len(nets) != len(b['networks']) + 1:
         raise s7dcl_write.WriteError('the block does not have one network more after the insertion')
@@ -878,13 +896,17 @@ def _replace_in_file(file, u):
     language = 'FBD' if fbd.is_fbd(u['after']) else 'LAD'
     if n['language'] != language:
         raise s7dcl_write.WriteError('NW %d is %s in the project, the proposal is %s' % (n['nw'], n['language'] or '?', language))
-    new_value = s7dcl_write.replace_network(text, n['nw'], s7dcl_write.network_text(u['after']))
+    match = fbd.content_match if language == 'FBD' else diff.content_match
+    if match(_without_call_names(u['after']), _without_call_names(u['before']))[0]:   # only the title / comment changes
+        return 'NW %d "%s": the logic is unchanged, only the network text is set' % (n['nw'], n['title'])
+    if 'elements' not in n or not match(_without_call_names(u['before']), _without_call_names(n))[0]:
+        raise s7dcl_write.WriteError('NW %d "%s" changed in the project since the proposal (its base export %s) — '
+                                     'propose the change again from a fresh snapshot' % (n['nw'], n['title'],
+                                                                                         u['before'].get('export_ts')))
+    new_value = s7dcl_write.replace_network(text, n['nw'], s7dcl_write.network_text(u['after'], s7dcl_write.templates(text)))
     back = s7dcl.parse_block(new_value.replace('\r\n', '\n'))['networks'][n['nw'] - 1]
-    if language == 'FBD':
-        match, diffs = fbd.content_match(_without_call_names(u['after']), _without_call_names(back))
-    else:
-        match, diffs = diff.content_match(_without_call_names(u['after']), _without_call_names(back))
-    if not match:
+    ok, diffs = match(_without_call_names(u['after']), _without_call_names(back))
+    if not ok:
         raise s7dcl_write.WriteError('the serialized proposal does not match the proposal: %s' % '; '.join(diffs))
     with open(file, 'wb') as f:
         f.write((b'\xef\xbb\xbf' if bom else b'') + new_value.encode('utf-8'))
@@ -994,7 +1016,7 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
             ok, message, preview = False, CONNECTION_ERROR + str(e), None
         except SnapshotError as e:
             ok, message, preview = False, str(e), None
-        except (s7dcl_write.WriteError, s7dcl.SourceParseError, OSError, ValueError) as e:
+        except Exception as e:                        # whatever stops it (also after the import) must be recorded
             ok, message, preview = False, 'Upload stopped: %s' % e, None
         write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
         if preview is not None:
@@ -1933,8 +1955,8 @@ class Handler(BaseHTTPRequestHandler):
                                        int(q.get('nw', '1')), q.get('ts'), int(q.get('width', '0'))))
             elif method == 'GET' and c == '/api/state':
                 self._json(api_state(self.data, q.get('project')))
-            elif method == 'PUT' and c == '/api/state':
-                self._json(api_state_put(root(q.get('project')), self.data, q.get('project', ''), self._body()))
+            elif method == 'PUT' and c == '/api/state/tia':
+                self._json(api_state_tia(root(q.get('project')), self.data, q.get('project', ''), self._body()))
             elif method == 'POST' and c == '/api/edits':
                 self._json(api_edit_create(root(body_project()), self.data, self._body()), 201)
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/state', c):
@@ -1965,7 +1987,7 @@ class Handler(BaseHTTPRequestHandler):
             elif method == 'POST' and c == '/api/layout':
                 self._json(api_layout(root(body_project()), self._body()))
             elif method in ('POST', 'PUT') and re.fullmatch(r'/api/edits/[\w-]+/after', c):
-                self._json(api_edit_after(self.data, c.split('/')[3], self._body()))
+                self._json(api_edit_after(self.data, c.split('/')[3], self._body(), root_of(c.split('/')[3])))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/check-export', c):
                 self._json(api_check_export(root_of(c.split('/')[3]), self.data, c.split('/')[3], self._body()))
             elif method == 'POST' and re.fullmatch(r'/api/edits/[\w-]+/upload', c):
@@ -2030,6 +2052,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'error': str(e).strip("'")}, 404)
         except (ValueError, TypeError, s7dcl.SourceParseError) as e:
             self._json({'error': str(e)}, 400)
+        except OSError as e:
+            self._json({'error': str(e)}, 500)
 
     def do_GET(self):
         self._handle('GET')

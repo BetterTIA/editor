@@ -6,6 +6,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import datetime
 
 
@@ -37,10 +38,11 @@ def _file(data, project):
 
 def load(data, project):
     c = _file(data, project)
-    if not os.path.exists(c):
-        return {'edits': []}
-    with open(c, encoding='utf-8') as f:
-        return migrate(json.load(f))
+    with LOCK:                                        # an open file would make os.replace fail on Windows
+        if not os.path.exists(c):
+            return {'edits': []}
+        with open(c, encoding='utf-8') as f:
+            return migrate(json.load(f))
 
 
 def migrate(obj):
@@ -67,7 +69,14 @@ def _write_json(c, obj):
             json.dump(obj, f, ensure_ascii=False, indent=1)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, c)
+        for i in range(20):                           # Windows: a reader outside the lock (antivirus, an editor) blocks it
+            try:
+                os.replace(tmp, c)
+                break
+            except PermissionError:
+                if i == 19:
+                    raise
+                time.sleep(0.05)
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -93,10 +102,11 @@ def verify_structure(obj):
 
 def registry(data):
     c = os.path.join(data, 'projects.json') if data else ''
-    if not c or not os.path.exists(c):
-        return []
-    with open(c, encoding='utf-8') as f:
-        return json.load(f)
+    with LOCK:
+        if not c or not os.path.exists(c):
+            return []
+        with open(c, encoding='utf-8') as f:
+            return json.load(f)
 
 
 def save_registry(data, items):
