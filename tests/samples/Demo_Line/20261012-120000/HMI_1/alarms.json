@@ -1,0 +1,50 @@
+{
+  "kind": "alarms",
+  "alarmClasses": [
+    {
+      "$type": "HmiAlarmClass",
+      "name": "Alarm"
+    },
+    {
+      "$type": "HmiAlarmClass",
+      "name": "Warning"
+    }
+  ],
+  "discreteAlarms": [
+    {
+      "$type": "HmiDiscreteAlarm",
+      "name": "Fault_Belt1",
+      "alarmClass": "Alarm",
+      "raisedStateTag": "Fault_Belt1",
+      "triggerBit": 0,
+      "alarmText": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "Belt 1 fault"
+          }
+        ]
+      }
+    },
+    {
+      "$type": "HmiDiscreteAlarm",
+      "name": "Emergency_Stop",
+      "alarmClass": "Alarm",
+      "raisedStateTag": "Emergency_Stop",
+      "triggerBit": 0,
+      "alarmText": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "Emergency stop pressed"
+          }
+        ]
+      }
+    }
+  ],
+  "analogAlarms": []
+}

@@ -174,12 +174,16 @@ def get_job(e, a):
 def take_screenshot(e, a):
     if a.get('edit'):
         page = {'edit': a['edit']}
+    elif a.get('project') and a.get('screen'):
+        page = {'project': a['project'], 'screen': a['screen']}
     elif a.get('project') and a.get('block') and a.get('nw'):
         page = {'project': a['project'], 'block': a['block'], 'nw': a['nw']}
     else:
-        raise ToolError('give edit, or project + block + nw')
+        raise ToolError('give edit, project + screen, or project + block + nw')
     if a.get('edit'):                                     # unknown edit / block -> a clear error instead of a blank PNG
         e.get('/api/edits/' + q(a['edit']))
+    elif a.get('screen'):
+        e.get('/api/hmi/screen', project=a['project'], screen=a['screen'])
     else:
         e.get('/api/block', project=a['project'], block=a['block'])
     light = a.get('theme') == 'light'
@@ -215,6 +219,14 @@ def compare_snapshots(e, a):
     return e.get('/api/projects/%s/compare' % q(a['project']), block=a.get('block'), **{'from': a['from'], 'to': a['to']})
 
 
+def list_screens(e, a):
+    return e.get('/api/hmi/screens', project=a['project'], export_ts=a.get('export_ts'))
+
+
+def get_screen(e, a):
+    return e.get('/api/hmi/screen', project=a['project'], screen=a['screen'], export_ts=a.get('export_ts'))
+
+
 def _schema(props, required=()):
     return {'type': 'object', 'properties': props, 'required': list(required), 'additionalProperties': False}
 
@@ -223,6 +235,7 @@ S, I, B = {'type': 'string'}, {'type': 'integer', 'minimum': 1}, {'type': 'boole
 MODEL = {'type': 'object', 'description': 'network model: LAD {elements, rungs} or FBD {language: "FBD", elements}; '
                                           'start from get_network, keep the ids of kept elements, new ids for new ones'}
 TS = {'type': 'string', 'description': 'export timestamp YYYYMMDD-HHMMSS (default: the newest export of the block)'}
+HMI_TS = {'type': 'string', 'description': 'HMI export timestamp YYYYMMDD-HHMMSS (default: the newest HMI export)'}
 KIND = {'type': 'string', 'enum': ['network', 'interface', 'new_network'],
         'description': 'what the edit changes (default network)'}
 TITLE_AFTER = {'type': 'string', 'description': 'network edit: the new network title ("" = keep the current one)'}
@@ -296,8 +309,14 @@ TOOLS = [
      _schema({'project': S, 'from': {'type': 'string', 'description': 'older snapshot timestamp YYYYMMDD-HHMMSS'},
               'to': {'type': 'string', 'description': 'newer snapshot timestamp YYYYMMDD-HHMMSS'}, 'block': S},
              ['project', 'from', 'to']), compare_snapshots),
-    ('screenshot', 'PNG of an edit (diff) or of a network as the editor draws it (headless Chrome or Edge).',
-     _schema({'edit': S, 'project': S, 'block': S, 'nw': I, 'width': I, 'height': I,
+    ('list_screens', 'WinCC Unified HMI of a project (newest HMI export or export_ts): screens with size and item count, '
+                     'and the HMI tags with their PLC tags.',
+     _schema({'project': S, 'export_ts': HMI_TS}, ['project']), list_screens),
+    ('get_screen', 'One HMI screen: {name, width, height, background, items: [{name, type, left, top, width, height, text, '
+                   'colors, font, bindings: [{property, tag}], events}]}.',
+     _schema({'project': S, 'screen': S, 'export_ts': HMI_TS}, ['project', 'screen']), get_screen),
+    ('screenshot', 'PNG of an edit (diff), of an HMI screen or of a network as the editor draws it (headless Chrome or Edge).',
+     _schema({'edit': S, 'project': S, 'block': S, 'nw': I, 'screen': S, 'width': I, 'height': I,
               'theme': {'type': 'string', 'enum': ['dark', 'light']}}), take_screenshot),
 ]
 BY_NAME = {t[0]: t for t in TOOLS}

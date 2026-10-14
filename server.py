@@ -18,6 +18,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 import fbd
 import catalog
+import hmi
 import layout
 import mcp_client
 import model
@@ -1360,12 +1361,12 @@ def start_job(jobs, kind, project, fn):
     return job
 
 
-def _reader_export(r, arg, steps, chunk=None):
-    """Reader export_to_folder in chunks (complete: false -> continue with runId + offset=nextOffset) -> the answers;
-    chunk(answer as a dict) is called after each one."""
+def _reader_export(r, arg, steps, chunk=None, tool='export_to_folder'):
+    """Reader export_to_folder (or export_hmi_to_folder) in chunks (complete: false -> continue with runId +
+    offset=nextOffset) -> the answers; chunk(answer as a dict) is called after each one."""
     texts = []
     while True:
-        t = _step(steps, 'export_to_folder #%d' % (len(texts) + 1), lambda: r.call('export_to_folder', arg))
+        t = _step(steps, '%s #%d' % (tool, len(texts) + 1), lambda: r.call(tool, arg))
         texts.append(t)
         j = _json_any(t)
         j = j if isinstance(j, dict) else {}
@@ -1425,14 +1426,14 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
     if isinstance(portal, str):
         portal = int(portal) if portal.isdigit() else (portal or None)   # the Writer's portalId is a process id (integer)
     with _client(mcp, 'writer', timeout) as w:
-        plcs = []
+        plcs, tree = [], ''
         if source == 'ap21':
             if not path:
                 raise SnapshotError('project %s has no .ap21 path' % name)
             t = step('OpenTiaProject', lambda: w.call(
                 'OpenTiaProject', dict({'path': path}, **({'portalId': portal} if portal else {})), max(timeout, OPEN_TIMEOUT)))
             portal = next((d['portalId'] for d in _dicts(_json_any(t)) if d.get('portalId') not in (None, '')), portal)
-            plcs = plc_list(t)
+            plcs, tree = plc_list(t), t
         else:
             if not portal:
                 inst = portal_instances(step('GetPortals', lambda: w.call('GetPortals', {})))
@@ -1448,9 +1449,11 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
         pr = project_info(step('GetProject', lambda: w.call('GetProject', pid)))
         job['tia_project'] = pr['name']
         if not plcs:
-            plcs = plc_list(step('GetProjectTree', lambda: w.call('GetProjectTree', pid)))
+            tree += step('GetProjectTree', lambda: w.call('GetProjectTree', pid))
+            plcs = plc_list(tree)
         if not plcs:
-            plcs = plc_list(step('GetDevices', lambda: w.call('GetDevices', pid)))
+            tree += step('GetDevices', lambda: w.call('GetDevices', pid))
+            plcs = plc_list(tree)
         if software_path:
             plc = next((x for x in plcs if x['softwarePath'] == software_path),
                        {'softwarePath': software_path, 'plcName': software_path.split('/')[-1]})
@@ -1475,14 +1478,23 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
                 job['exported'] += next((j[k] for k in ('exported', 'exportedCount', 'count') if isinstance(j.get(k), int)), 0)
                 folders.append(_export_folder(j))
             t = _reader_export(r, arg, steps, chunk)[-1]
-        folder = next((f for f in folders if f), None)
-        if folder is None:                            # no folder in the answer -> a new timestamp in the project's root
-            new = sorted(set(project_index(target, name)) - before) if target else []
-            if not new:
-                raise SnapshotError('the Reader answer names no export folder and none appeared in the project — '
-                                    'the Reader writes to its own --export-root (%s): %s'
-                                    % (reader_export_root(mcp) or 'unknown', t[:300]))
-            folder = (target, name, new[-1])
+            folder = next((f for f in folders if f), None)
+            if folder is None:                        # no folder in the answer -> a new timestamp in the project's root
+                new = sorted(set(project_index(target, name)) - before) if target else []
+                if not new:
+                    raise SnapshotError('the Reader answer names no export folder and none appeared in the project — '
+                                        'the Reader writes to its own --export-root (%s): %s'
+                                        % (reader_export_root(mcp) or 'unknown', t[:300]))
+                folder = (target, name, new[-1])
+            # shortcut: "is there an HMI" = the project tree mentions HMI/Unified — use a typed device list when the
+            # Writer gives one; the HMI dump goes into the same snapshot folder (runId = its timestamp)
+            if re.search(r'hmi|unified', tree, re.I):
+                try:
+                    _reader_export(r, dict({'runId': folder[2], 'offset': 0, 'timeBudgetSeconds': 120},
+                                           **({'projectPath': path} if source == 'ap21' and path else {})), steps,
+                                   lambda j: job.update(hmi_chunks=job.get('hmi_chunks', 0) + 1), 'export_hmi_to_folder')
+                except (mcp_client.MCPError, SnapshotError) as e:   # the PLC snapshot stands; the HMI is a warning
+                    job.setdefault('warnings', []).append('HMI export failed (the PLC snapshot is complete): %s' % str(e)[:500])
         rroot, pname, ts = folder
         if reg and not (_same(rroot, reg['export_root']) and pname == name):
             raise SnapshotError(('the Reader exported to %s, but project %s reads %s — the Reader writes to its own '
@@ -1982,6 +1994,9 @@ ROUTES = [
     ('GET', r'/api/network', lambda h: api_network(*_project(h), h.q.get('block', ''), int(h.q.get('nw', '1')), h.q.get('ts'),
                                                    int(h.q.get('width', '0')))),
     ('GET', r'/api/catalog', lambda h: api_catalog(*_project(h))),
+    ('GET', r'/api/hmi/screens', lambda h: hmi.api_screens(*_project(h), h.q.get('export_ts'), h.q.get('hmi'))),
+    ('GET', r'/api/hmi/screen', lambda h: hmi.api_screen(*_project(h), h.q.get('screen', ''), h.q.get('export_ts'),
+                                                         h.q.get('hmi'))),
     ('POST', r'/api/layout', lambda h: api_layout(h.root_for(h.body_project()), h._body())),
     ('GET', r'/api/state', lambda h: api_state(h.data, h.q.get('project'))),
     ('PUT', r'/api/state/tia', lambda h: api_state_tia(_project(h)[0], h.data, _project(h)[1], h._body())),

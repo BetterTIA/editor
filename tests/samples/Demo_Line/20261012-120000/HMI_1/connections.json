@@ -1,0 +1,11 @@
+{
+  "kind": "connections",
+  "connections": [
+    {
+      "$type": "HmiConnection",
+      "name": "HMI_Connection_1",
+      "communicationDriver": "SIMATIC S7 1500",
+      "partner": "PLC_1"
+    }
+  ]
+}

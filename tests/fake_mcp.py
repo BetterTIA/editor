@@ -11,7 +11,9 @@ ImportFromDocuments (copies the documents to --state and appends a line to <stat
 Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
 --multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
 CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
-Reader: get_project_status; export_to_folder without pathPrefixes = the whole PLC from the sample in 2 chunks
+Reader: get_project_status; export_hmi_to_folder = the HMI sample (HMI_1, screens changed by the Writer taken from
+<state>\\HMI_1) in chunks of 3 files into <export-root>\\<project>\\<runId>\\HMI_1 + manifest-hmi.jsonl (--no-hmi = no
+Unified HMI in the project); export_to_folder without pathPrefixes = the whole PLC from the sample in 2 chunks
 (runId + offset=nextOffset). With pathPrefixes — a new folder <export-root>\\<project>\\<YYYYMMDD-HHMMSS>\\<PLC>\\Blocks\\… with the block
 from --state (or from the sample), answers JSON {exportFolder, complete, manifest}.
 """
@@ -28,6 +30,7 @@ from datetime import datetime, timedelta
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SAMPLE = os.path.join(ROOT, 'samples', 'Demo_Line', '20261012-120000', 'PLC_1', 'Blocks')
+SAMPLE_HMI = os.path.join(ROOT, 'samples', 'Demo_Line', '20261012-120000', 'HMI_1')
 
 
 def find(a, block):
@@ -49,7 +52,7 @@ def copy_tree(z, dst, block):
 
 PROJECT_PATH = 'C:\\TIA\\Demo_Line\\Demo_Line.ap21'
 DEVICES = [{'name': 'PLC_1', 'type': 'CPU 1516F-3 PN/DP', 'kind': 'PlcSoftware', 'softwarePath': 'PLC_1'},
-           {'name': 'HMI_1', 'type': 'TP1200 Comfort', 'kind': 'HmiSoftware', 'softwarePath': 'HMI_1'}]
+           {'name': 'HMI_1', 'type': 'MTP1200 Unified Comfort', 'kind': 'HmiSoftware', 'softwarePath': 'HMI_1'}]
 
 
 def portals(a):
@@ -192,7 +195,41 @@ def export_plc(a, arg):
     return json.dumps(res)
 
 
+def export_hmi(a, arg):
+    """export_hmi_to_folder: the HMI sample (a screen the fake Writer changed comes from --state) in chunks of 3 files."""
+    if a.no_hmi:
+        raise ValueError('No WinCC Unified HMI software was found in the project.')
+    hmi = os.path.basename(SAMPLE_HMI)
+    files = sorted(os.path.relpath(os.path.join(d, f), SAMPLE_HMI).replace(os.sep, '/') for d, _, fs in os.walk(SAMPLE_HMI)
+                   for f in fs)
+    start = int(arg.get('offset') or 0)
+    if arg.get('runId'):
+        folder = os.path.join(a.export_root, a.project, arg['runId'])
+        os.makedirs(folder, exist_ok=True)
+    elif start:
+        raise ValueError('offset greater than 0 requires the runId returned by the first call.')
+    else:
+        folder = new_folder(a)
+    end = min(len(files), start + 3)
+    with open(os.path.join(folder, 'manifest-hmi.jsonl'), 'a', encoding='utf-8') as f:
+        for rel in files[start:end]:
+            src = os.path.join(a.state, hmi, rel)
+            dst = os.path.join(folder, hmi, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src if os.path.exists(src) else os.path.join(SAMPLE_HMI, rel), dst)
+            kind = 'screen' if rel.startswith('Screens/') else 'tagTable' if rel.startswith('Tags/') else rel[:-5]
+            f.write(json.dumps({'kind': kind, 'path': rel[:-5], 'file': rel, 'bytes': os.path.getsize(dst)}) + '\n')
+    res = {'exportFolder': folder, 'hmiFolder': os.path.join(folder, hmi), 'manifestPath': os.path.join(folder, 'manifest-hmi.jsonl'),
+           'runId': os.path.basename(folder), 'hmiName': hmi, 'totalItems': len(files), 'offset': start,
+           'processedItems': end - start, 'complete': end == len(files)}
+    if end < len(files):
+        res['nextOffset'] = end
+    return json.dumps(res)
+
+
 def reader(a, nm, arg):
+    if nm == 'export_hmi_to_folder':
+        return export_hmi(a, arg)
     if nm == 'get_project_status':
         if a.no_portal:
             return json.dumps({'connected': False, 'message': 'TIA Portal is not running'})
@@ -222,6 +259,7 @@ def main():
     ap.add_argument('--project', default='Demo_Line')
     ap.add_argument('--multi-instances', action='store_true')
     ap.add_argument('--no-portal', action='store_true', help='TIA Portal is not running')
+    ap.add_argument('--no-hmi', action='store_true', help='Reader: the project has no Unified HMI')
     ap.add_argument('--slow', type=float, default=0)
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)

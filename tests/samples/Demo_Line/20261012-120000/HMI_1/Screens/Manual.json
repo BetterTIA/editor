@@ -1,0 +1,310 @@
+{
+  "$type": "HmiScreen",
+  "name": "Manual",
+  "width": 1280,
+  "height": 800,
+  "backColor": "#FFEEF1F4",
+  "screenNumber": 0,
+  "screenItems": [
+    {
+      "$type": "HmiRectangle",
+      "name": "Header",
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 64,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 0,
+      "backColor": "#FF1F3A5F",
+      "borderColor": "#FF1F3A5F",
+      "borderWidth": 0
+    },
+    {
+      "$type": "HmiText",
+      "name": "Title",
+      "left": 24,
+      "top": 12,
+      "width": 600,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 0,
+      "text": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "Manual control"
+          }
+        ]
+      },
+      "foreColor": "#FFFFFFFF",
+      "backColor": "#00000000",
+      "font": {
+        "$type": "HmiFontPart",
+        "name": "Siemens Sans",
+        "size": 24,
+        "weight": "Bold",
+        "italic": false,
+        "underline": false
+      },
+      "alignmentVertical": "Middle"
+    },
+    {
+      "$type": "HmiText",
+      "name": "Label_Auto",
+      "left": 40,
+      "top": 100,
+      "width": 200,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 0,
+      "text": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "<body><p>Automatic mode</p></body>"
+          }
+        ]
+      },
+      "foreColor": "#FF1B2430",
+      "backColor": "#00000000",
+      "font": {
+        "$type": "HmiFontPart",
+        "name": "Siemens Sans",
+        "size": 18,
+        "weight": "Normal",
+        "italic": false,
+        "underline": false
+      },
+      "alignmentVertical": "Middle"
+    },
+    {
+      "$type": "HmiToggleSwitch",
+      "name": "Switch_Auto",
+      "left": 260,
+      "top": 100,
+      "width": 120,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 1,
+      "backColor": "#FFDDE3EA",
+      "foreColor": "#FF2F6FA3",
+      "dynamizations": [
+        {
+          "$type": "TagDynamization",
+          "propertyName": "ProcessValue",
+          "tag": "Mode_Auto",
+          "readOnly": false,
+          "useIndirectAddressing": false
+        }
+      ]
+    },
+    {
+      "$type": "HmiText",
+      "name": "Label_Service",
+      "left": 40,
+      "top": 160,
+      "width": 200,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 0,
+      "text": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "<body><p>Service start</p></body>"
+          }
+        ]
+      },
+      "foreColor": "#FF1B2430",
+      "backColor": "#00000000",
+      "font": {
+        "$type": "HmiFontPart",
+        "name": "Siemens Sans",
+        "size": 18,
+        "weight": "Normal",
+        "italic": false,
+        "underline": false
+      },
+      "alignmentVertical": "Middle"
+    },
+    {
+      "$type": "HmiToggleSwitch",
+      "name": "Switch_Service",
+      "left": 260,
+      "top": 160,
+      "width": 120,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 2,
+      "backColor": "#FFDDE3EA",
+      "foreColor": "#FF2F6FA3",
+      "dynamizations": [
+        {
+          "$type": "TagDynamization",
+          "propertyName": "ProcessValue",
+          "tag": "Service_Start",
+          "readOnly": false,
+          "useIndirectAddressing": false
+        }
+      ]
+    },
+    {
+      "$type": "HmiText",
+      "name": "Label_Setpoint",
+      "left": 40,
+      "top": 220,
+      "width": 200,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 0,
+      "text": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "<body><p>Speed setpoint</p></body>"
+          }
+        ]
+      },
+      "foreColor": "#FF1B2430",
+      "backColor": "#00000000",
+      "font": {
+        "$type": "HmiFontPart",
+        "name": "Siemens Sans",
+        "size": 18,
+        "weight": "Normal",
+        "italic": false,
+        "underline": false
+      },
+      "alignmentVertical": "Middle"
+    },
+    {
+      "$type": "HmiIOField",
+      "name": "IO_Setpoint",
+      "left": 260,
+      "top": 220,
+      "width": 160,
+      "height": 40,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 3,
+      "backColor": "#FFFFFFFF",
+      "foreColor": "#FF1B2430",
+      "borderColor": "#FF8A9199",
+      "borderWidth": 1,
+      "font": {
+        "$type": "HmiFontPart",
+        "name": "Siemens Sans",
+        "size": 18,
+        "weight": "Normal",
+        "italic": false,
+        "underline": false
+      },
+      "outputFormat": "{D}",
+      "alignmentHorizontal": "Right",
+      "dynamizations": [
+        {
+          "$type": "TagDynamization",
+          "propertyName": "ProcessValue",
+          "tag": "Speed_Setpoint",
+          "readOnly": false,
+          "useIndirectAddressing": false
+        }
+      ]
+    },
+    {
+      "$type": "HmiBar",
+      "name": "Bar_Setpoint",
+      "left": 40,
+      "top": 300,
+      "width": 600,
+      "height": 32,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 0,
+      "backColor": "#FFDDE3EA",
+      "foreColor": "#FF3AA655",
+      "borderColor": "#FF8A9199",
+      "minValue": 0,
+      "maxValue": 100,
+      "dynamizations": [
+        {
+          "$type": "TagDynamization",
+          "propertyName": "ProcessValue",
+          "tag": "Speed_Setpoint",
+          "readOnly": false,
+          "useIndirectAddressing": false
+        }
+      ]
+    },
+    {
+      "$type": "HmiButton",
+      "name": "Btn_Overview",
+      "left": 24,
+      "top": 720,
+      "width": 200,
+      "height": 56,
+      "visible": true,
+      "enabled": true,
+      "layer": 0,
+      "tabIndex": 4,
+      "text": {
+        "$type": "MultilingualText",
+        "items": [
+          {
+            "$type": "MultilingualTextItem",
+            "language": "en-US",
+            "text": "Overview"
+          }
+        ]
+      },
+      "backColor": "#FF2F6FA3",
+      "foreColor": "#FFFFFFFF",
+      "borderColor": "#FF1F3A5F",
+      "borderWidth": 1,
+      "cornerRadius": 4,
+      "font": {
+        "$type": "HmiFontPart",
+        "name": "Siemens Sans",
+        "size": 18,
+        "weight": "Bold",
+        "italic": false,
+        "underline": false
+      },
+      "eventHandlers": [
+        {
+          "$type": "EventHandler",
+          "eventType": "Tapped",
+          "script": {
+            "$type": "Script",
+            "scriptCode": "HMIRuntime.UI.SysFct.ChangeScreen(\"Overview\", \"../\");",
+            "async": false
+          }
+        }
+      ]
+    }
+  ]
+}

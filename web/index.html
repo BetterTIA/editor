@@ -319,6 +319,31 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
                           background: var(--accent-soft); color: var(--accent); font-size: 12px; }
 .empty-state li + li::after { content: none; }
 .empty-state svg { color: var(--accent); }
+/* ---------- H: HMI screens (WinCC Unified) — the screen keeps its own colors in both themes ---------- */
+.hmi-wrap { position: relative; overflow: hidden; border: 1px solid var(--edge); border-radius: var(--r-sm); box-shadow: var(--shadow); }
+.hmi-screen { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; background: #ffffff; color: #1b2430;
+              font: 16px "Segoe UI", system-ui, sans-serif; }
+.hi { position: absolute; box-sizing: border-box; display: flex; align-items: center; overflow: hidden; white-space: nowrap;
+      padding: 0 6px; line-height: 1.1; }
+.hi.t-Rectangle, .hi.t-Line, .hi.t-Bar, .hi.t-Gauge, .hi.t-Switch, .hi.t-AlarmControl { padding: 0; }
+.hi.t-Button { justify-content: center; border-radius: 4px; }
+.hi.t-IOField { justify-content: flex-end; font-family: var(--mono); }
+.hi.t-IOField i { font-style: normal; opacity: .55; font-size: .8em; margin-right: auto; }
+.hi.t-Switch span { width: 100%; height: 100%; border-radius: 999px; position: relative; display: block; }
+.hi.t-Switch span::after { content: ''; position: absolute; left: 4px; top: 4px; bottom: 4px; aspect-ratio: 1; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.hi.t-Bar b { position: absolute; left: 0; bottom: 0; }
+.hi.t-AlarmControl { flex-direction: column; align-items: stretch; justify-content: flex-start; font-size: 14px; }
+.hi.t-AlarmControl div { display: grid; grid-template-columns: 160px 1fr 120px; border-bottom: 1px solid #d5dbe1; padding: 6px 8px; }
+.hi.t-AlarmControl div:first-child { background: #dde3ea; font-weight: 600; }
+.hi.t-ScreenWindow, .hi.other { border: 2px dashed #8a9199; justify-content: center; color: #56606c; font-size: 14px; }
+.hi.sel { outline: 3px solid var(--accent); outline-offset: 2px; z-index: 5; }
+.hi.d-added { outline: 3px solid var(--added); outline-offset: 1px; }
+.hi.d-changed { outline: 3px solid var(--changed); outline-offset: 1px; }
+.hi.d-deleted { outline: 3px dashed var(--deleted); outline-offset: 1px; opacity: .5; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--edge-strong); vertical-align: -2px; margin-right: 4px; }
+.main.screen { grid-template-columns: 290px 1fr 300px; }
+#palette.hmi-props { padding: 0 var(--s3) var(--s4); }
+#palette.hmi-props h2 { margin-left: 0; }
 @media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .status { margin-left: 0; } header { flex-wrap: wrap; } .main, .main.edit { grid-template-columns: 1fr; }
                             aside { max-height: 40vh; } .empty-state { grid-template-columns: 1fr; } }
@@ -536,7 +561,7 @@ function rungList(net) {
 // ---------- page ----------
 // project page: Blocks | Changelog | Versions
 function projectTabs(project, view) {
-  return `<div class="tools" role="tablist">` + [['blocks', 'Blocks'], ['changelog', 'Changelog'], ['versions', 'Versions']].map(([v, t]) =>
+  return `<div class="tools" role="tablist">` + [['blocks', 'Blocks'], ['hmi', 'HMI'], ['changelog', 'Changelog'], ['versions', 'Versions']].map(([v, t]) =>
     `<button role="tab" class="${view === v ? 'active' : ''}" aria-selected="${view === v}" onclick="location.href='${link({view: v === 'blocks' ? null : v})}'">${t}</button>`).join('') + `</div>`;
 }
 async function showExports(project) {
@@ -939,6 +964,126 @@ async function showVersions(project) {
     canvas($('v-canvas'), v, v.drawing ? Object.fromEntries(v.elements.map(p => [p.id, y ? 'added' : 'deleted'])) : {});
   }
 }
+
+// ---------- H1: HMI screens (WinCC Unified) — view ----------
+const HMI_TYPES = ['Text', 'Rectangle', 'Line', 'Button', 'IOField', 'Switch', 'Bar', 'Gauge', 'AlarmControl', 'ScreenWindow'];
+// one screen item as an absolutely placed div in screen pixels (the frame scales the whole screen)
+function hmiItem(x) {
+  const c = x.colors || {}, f = x.font || {}, d = document.createElement('div');
+  const pv = (x.bindings || []).find(b => b.property === 'ProcessValue');
+  d.className = 'hi t-' + x.type + (HMI_TYPES.includes(x.type) ? '' : ' other');
+  d.dataset.name = x.name;
+  d.title = `${x.name} (${x.type})`;
+  Object.assign(d.style, {left: x.left + 'px', top: x.top + 'px', width: x.width + 'px', height: x.height + 'px',
+                          fontSize: f.size ? f.size + 'px' : '', fontWeight: /bold/i.test(f.weight || '') ? 700 : '',
+                          color: c.foreColor || c.textColor || '', background: ['Line', 'Gauge'].includes(x.type) ? '' : c.backColor || '',
+                          border: c.borderColor && !['Text', 'Line'].includes(x.type) ? `1px solid ${c.borderColor}` : ''});
+  if (x.visible === false) d.style.opacity = .35;
+  const t = esc(x.text || '');
+  const vertical = x.height > x.width;
+  d.innerHTML = {
+    Text: t, Button: t, Rectangle: '',
+    IOField: (pv ? `<i>${esc(pv.tag)}</i>` : '') + '0.0',
+    Switch: `<span style="background:${esc(c.foreColor || '#2f6fa3')}"></span>`,
+    Bar: `<b style="background:${esc(c.foreColor || '#2f6fa3')};${vertical ? 'width:100%;height:60%' : 'height:100%;width:60%'}"></b>`,
+    Gauge: `<svg viewBox="0 0 100 100" width="100%" height="100%"><circle cx="50" cy="50" r="46" fill="${esc(c.backColor || '#fff')}" stroke="#8a9199" stroke-width="2"/>` +
+           `<path d="M20 74 A38 38 0 1 1 80 74" fill="none" stroke="${esc(c.foreColor || '#1b2430')}" stroke-width="4"/><line x1="50" y1="50" x2="30" y2="28" stroke="#c0392b" stroke-width="3"/></svg>`,
+    Line: `<svg width="${Math.max(x.width, 1)}" height="${Math.max(x.height, 1)}" style="overflow:visible;position:absolute;left:0;top:0"><line x1="0" y1="0" x2="${x.width}" y2="${x.height}" stroke="${esc(c.lineColor || c.foreColor || '#1b2430')}" stroke-width="2"/></svg>`,
+    AlarmControl: '<div><span>Time</span><span>Alarm text</span><span>State</span></div>' + '<div><span>&nbsp;</span><span></span><span></span></div>'.repeat(3),
+    ScreenWindow: 'Screen window ' + esc(x.name),
+  }[x.type] ?? `${esc(x.type)} ${esc(x.name)}`;
+  if (x.type === 'Line') d.style.overflow = 'visible';
+  return d;
+}
+// the screen in a frame of the given width; marks: {item name: 'added' | 'changed' | 'deleted'}; ghosts: deleted items drawn faded
+function hmiFrame(s, width, marks = {}, ghosts = []) {
+  const k = Math.min(1, width / s.width), wrap = document.createElement('div'), scr = document.createElement('div');
+  wrap.className = 'hmi-wrap';
+  Object.assign(wrap.style, {width: s.width * k + 'px', height: s.height * k + 'px'});
+  scr.className = 'hmi-screen';
+  Object.assign(scr.style, {width: s.width + 'px', height: s.height + 'px', transform: `scale(${k})`, background: s.background || '#ffffff'});
+  for (const x of s.items.concat(ghosts)) {
+    const d = hmiItem(x);
+    if (marks[x.name]) d.classList.add('d-' + marks[x.name]);
+    scr.appendChild(d);
+  }
+  wrap.appendChild(scr);
+  wrap.scale = k;
+  return wrap;
+}
+function hmiProps(x) {
+  if (!x) return '<p class="comment">Click an item on the screen.</p>';
+  const row = (k, v) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`;
+  return `<table><colgroup><col style="width:96px"><col></colgroup><tr class="section"><td colspan="2">${esc(x.name)} · ${esc(x.type)}</td></tr>` +
+    row('position', `${x.left}, ${x.top}`) + row('size', `${x.width} × ${x.height}`) +
+    (x.text != null ? row('text', esc(x.text)) : '') +
+    Object.entries(x.colors || {}).map(([k, v]) => row(k, `<span class="swatch" style="background:${esc(v)}"></span>${esc(v)}`)).join('') +
+    (x.font ? row('font', esc([x.font.name, x.font.size && x.font.size + ' px', x.font.weight].filter(Boolean).join(' · '))) : '') +
+    ((x.bindings || []).length ? `<tr class="section"><td colspan="2">Tag bindings</td></tr>` +
+      x.bindings.map(b => row(b.property, `<span class="c">${esc(b.tag)}</span>${b.indirect ? ' (indirect)' : ''}`)).join('') : '') +
+    ((x.events || []).length ? `<tr class="section"><td colspan="2">Events</td></tr>` + row('', x.events.map(e => esc(e.event)).join(', ')) : '') + '</table>';
+}
+function screensHtml(r, project, active) {
+  return `<h2>${esc(r.hmi)} — screens</h2>` + r.screens.map(x =>
+    `<a class="${x.name === active ? 'active' : ''}" href="?project=${enc(project)}&screen=${enc(x.name)}"><span class="c">${esc(x.name)}</span>${x.items} items</a>`).join('');
+}
+async function showHmi(project) {
+  $('info').textContent = project;
+  document.title = `BetterTIA Editor — ${project} HMI`;
+  let r;
+  try { r = await api(`/api/hmi/screens?project=${enc(project)}`); }
+  catch (e) {
+    $('content').innerHTML = projectTabs(project, 'hmi') + `<div class="notice"><b>No HMI screens</b><span>${esc(e.message)}. A snapshot exports the ` +
+      `WinCC Unified HMI of the project with the Reader (export_hmi_to_folder).</span></div>`;
+    return;
+  }
+  $('nw').innerHTML += screensHtml(r, project);
+  $('content').innerHTML = projectTabs(project, 'hmi') +
+    `<h1>HMI <span class="c">${esc(r.hmi)}</span></h1><p class="comment">WinCC Unified screens from the HMI export ${esc(r.export_ts)}. ` +
+    `Open a screen to see it, or start a new one from a preset.</p>` +
+    `<div class="tools"><button class="hl" id="hmi-new">New screen from preset</button><span class="mode" id="hmi-error"></span></div><div id="hmi-dialog"></div>` +
+    r.errors.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
+    `<details class="panel" open><summary>Screens <span class="sum">${r.screens.length}</span></summary><div class="body log">` +
+    r.screens.map(x => `<div><a class="nw" href="?project=${enc(project)}&screen=${enc(x.name)}"><span class="c">${esc(x.name)}</span>` +
+      `<b>${x.width} × ${x.height}</b><span class="hint">${x.items} items</span></a></div>`).join('') + `</div></details>` +
+    `<details class="panel"><summary>HMI tags <span class="sum">${r.tags.length}</span></summary><div class="body log">` +
+    r.tags.map(t => `<div><span class="c">${esc(t.name)}</span><span class="hint">${esc(t.type)}</span><span>${esc(t.plc_tag)}</span><span class="by">${esc(t.table)}</span></div>`).join('') +
+    `</div></details>`;
+  $('hmi-new').onclick = () => presetDialog(project, r);
+  if (q.get('dialog') === 'preset') await presetDialog(project, r);
+}
+async function showScreen(project, name) {
+  const [r, s] = await Promise.all([api(`/api/hmi/screens?project=${enc(project)}`), api(`/api/hmi/screen?project=${enc(project)}&screen=${enc(name)}`)]);
+  $('info').textContent = `${project} · HMI export ${s.export_ts} · ${s.hmi} · screen ${s.name}`;
+  document.title = `BetterTIA Editor — screen ${s.name}`;
+  $('nw').innerHTML += screensHtml(r, project, name);
+  document.querySelector('.main').classList.add('screen');
+  const side = $('palette');
+  side.hidden = false;
+  side.className = 'hmi-props';
+  const pp = lastState.projects.find(p => p.project === project);
+  const round = pp && pp.edits.length ? pp.edits[pp.edits.length - 1].round : 'Round 1';
+  $('content').innerHTML = `<p><a href="?project=${enc(project)}&view=hmi">← HMI</a></p><h1><span class="c">Screen:</span> ${esc(s.name)}</h1>` +
+    `<p class="comment">${s.width} × ${s.height} · ${s.items.length} items · ${esc(s.hmi)}</p>` +
+    `<div class="tools"><button class="hl" id="hmi-propose">Propose change</button> round <input id="hmi-round" value="${esc(round)}"><span class="mode" id="hmi-error"></span></div><div id="hmi-frame"></div>`;
+  const fr = hmiFrame(s, $('hmi-frame').clientWidth || 900);
+  $('hmi-frame').appendChild(fr);
+  let sel = q.get('select');
+  const show = () => {
+    for (const d of fr.querySelectorAll('.hi')) d.classList.toggle('sel', d.dataset.name === sel);
+    side.innerHTML = `<h2>Item properties</h2><div class="properties">${hmiProps(s.items.find(x => x.name === sel))}</div>`;
+  };
+  for (const d of fr.querySelectorAll('.hi')) d.onclick = () => { sel = d.dataset.name; show(); };
+  show();
+  $('hmi-propose').onclick = async () => {
+    try {
+      const u = await api('/api/edits', 'POST', {project, kind: 'hmi_screen', hmi: s.hmi, screen: s.name, new: false,
+                                                 round: $('hmi-round').value.trim() || 'Round 1', note: ''});
+      location.href = `?edit=${enc(u.id)}&edit_mode=1`;
+    } catch (e) { $('hmi-error').textContent = '⚠ ' + e.message; }
+  };
+}
+async function presetDialog() { /* H2 */ }
 
 // ---------- M3: editor ----------
 const ed = {u: null, before: null, after: null, hist: [], redo: [], select: null, insert: null, branch: null, res: null,
@@ -1495,10 +1640,12 @@ async function start() {
   else if (q.get('edit')) await showEdit(q.get('edit'));
   else if (q.get('group')) await showGroup(q.get('group'));
   else if (project && block) await showNetwork(project, block);
+  else if (project && q.get('screen')) { $('nw').innerHTML = await loadTree(null); await showScreen(project, q.get('screen')); }
   else if (project) {
     $('nw').innerHTML = await loadTree(null);
     const view = q.get('view');
-    await (view === 'changelog' ? showChangelog(project) : view === 'versions' ? showVersions(project) : showExports(project));
+    await (view === 'changelog' ? showChangelog(project) : view === 'versions' ? showVersions(project)
+           : view === 'hmi' ? showHmi(project) : showExports(project));
   }
   else {                                     // home: shown at once, the TIA check (autoconnect) re-renders it
     statusChanged = showHome;

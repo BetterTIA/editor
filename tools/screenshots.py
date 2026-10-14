@@ -84,6 +84,7 @@ def main():
         d.shot('?project=%s&block=FB_Conveyor&nw=2' % PROJECT, 'lad_viewer.png')
         d.shot('?project=%s&block=FB_Conveyor&nw=4' % PROJECT, 'lad_viewer_light.png', 1400, 700, light=True)
         d.shot('?project=%s&block=FB_Safety&nw=1' % PROJECT, 'fbd_viewer.png', 1400, 700)
+        d.shot('?project=%s&screen=Overview&select=IO_Speed' % PROJECT, 'hmi_overview.png', 1400, 760)
         d.stop()
 
         root2 = 'exports2'                         # the slow snapshot may still write after stop()

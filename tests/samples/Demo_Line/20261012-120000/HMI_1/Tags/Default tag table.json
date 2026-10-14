@@ -1,0 +1,94 @@
+{
+  "$type": "HmiTagTable",
+  "name": "Default tag table",
+  "tags": [
+    {
+      "$type": "HmiTag",
+      "name": "Machine_Speed",
+      "dataType": "Real",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Speed",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Speed_Setpoint",
+      "dataType": "Int",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Speed_Setpoint",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Mode_Auto",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Mode_Auto",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Service_Start",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Service_Start",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Safety_OK",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Safety_OK",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Pieces",
+      "dataType": "DInt",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Counter.Pieces",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Rejects",
+      "dataType": "DInt",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"DB_Machine\".Counter.Rejects",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Horn",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"Horn\"",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Emergency_Stop",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"Emergency_Stop\"",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Fault_Belt1",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"Fault_Belt1\"",
+      "acquisitionCycle": "T1s"
+    },
+    {
+      "$type": "HmiTag",
+      "name": "Ack",
+      "dataType": "Bool",
+      "connection": "HMI_Connection_1",
+      "plcTag": "\"Ack\"",
+      "acquisitionCycle": "T1s"
+    }
+  ]
+}

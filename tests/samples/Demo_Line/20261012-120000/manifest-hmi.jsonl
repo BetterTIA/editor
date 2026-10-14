@@ -1,0 +1,6 @@
+{"kind":"alarms","path":"Alarms","file":"alarms.json","bytes":1046,"count":4}
+{"kind":"connections","path":"Connections","file":"connections.json","bytes":202,"count":1}
+{"kind":"screen","path":"Screens/Alarms","file":"Screens/Alarms.json","bytes":3884,"count":5}
+{"kind":"screen","path":"Screens/Manual","file":"Screens/Manual.json","bytes":7139,"count":10}
+{"kind":"screen","path":"Screens/Overview","file":"Screens/Overview.json","bytes":11414,"count":16}
+{"kind":"tagTable","path":"Tags/Default tag table","file":"Tags/Default tag table.json","bytes":2323,"count":11}
