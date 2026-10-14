@@ -6,6 +6,7 @@ TIA V21 help (table COMMANDS with the source); anything unverified is described 
 import model
 import diff
 import fbd
+import hmi
 
 N = '⟦unverified⟧'
 # command -> (text for the step, source in the V21 help)
@@ -46,6 +47,8 @@ def where(u):
     """What the edit changes, as the tree and the changelog show it."""
     if u.get('kind') == 'interface':
         return 'Interface: +%d %s' % (len(u.get('members') or []), u.get('section'))
+    if u.get('kind') == 'hmi_screen':
+        return 'Screen: %s%s' % (u.get('screen'), ' (new)' if u.get('new') else '')
     if u.get('kind') == 'new_network':
         return 'NW %s+ (new): %s' % (u.get('after_nw'), u.get('title') or '(no title)')
     return 'NW %s: %s%s' % (u['nw'], u.get('title') or '(no title)', ' → %s' % u['title_after'] if u.get('title_after') else '')
@@ -237,6 +240,43 @@ def steps_lad(u):
     return steps
 
 
+# ---------- HMI screen ----------
+
+def _v(x):
+    return '`%s`' % x if x not in (None, '') else '(none)'
+
+
+def _attrs(ch):
+    return ', '.join('%s %s → %s' % (x['attr'].replace('binding ', 'dynamization '), _v(x['before']), _v(x['after'])) for x in ch)
+
+
+def steps_hmi(u):
+    """Steps in the WinCC Unified screen editor; the menu and task card names are not from the V21 help (marked)."""
+    a, b = u['after'], (u.get('before') or {}).get('screen')
+    c, A, hm, sc = hmi.compare(b, a), {i['name']: i for i in a['items']}, _v(u.get('hmi')), _v(u.get('screen'))
+    if u.get('new'):
+        steps = ['Project tree → %s → **Screens** → **Add new screen** %s; rename the new screen to %s (`F2`).' % (hm, N, sc),
+                 'Screen properties: size %d × %d%s.' % (a['width'], a['height'], ', background %s' % _v(a['background'])
+                                                           if a.get('background') else '')]
+    else:
+        steps = ['Project tree → %s → **Screens** → open %s (double-click).' % (hm, sc)]
+        if c['screen']:
+            steps.append('Screen properties (click an empty spot of the screen): %s.' % _attrs(c['screen']))
+    steps += ['Select %s and delete it (`Delete`).' % _v(n) for n in c['deleted']]
+    steps += ['Select %s → **Properties**: %s.' % (_v(n), _attrs(ch)) for n, ch in c['changed'].items()]
+    for n in c['added']:
+        x = A[n]
+        steps.append('Insert **%s** from the **Toolbox** task card %s and name it %s: position %d, %d, size %d × %d%s%s%s%s.' % (
+            x['type'], N, _v(n), x['left'], x['top'], x['width'], x['height'],
+            ', text “%s”' % x['text'] if x.get('text') else '',
+            ''.join(', %s %s' % (k, _v(v)) for k, v in (x.get('colors') or {}).items()),
+            ''.join(', dynamization %s → tag %s (Properties → Dynamization → Tag %s)' % (_v(z['property']), _v(z['tag']), N)
+                    for z in x['bindings']),
+            ''.join(', event %s: script `%s`' % (e['event'], e['script']) for e in x.get('events') or [] if e.get('script'))))
+    steps.append('Compile the HMI: right-click %s → **Compile** → **Software (only changes)** %s.' % (hm, N))
+    return steps
+
+
 SECTION_TEXT = {'Input': 'Input', 'Output': 'Output', 'InOut': 'InOut', 'Static': 'Static', 'Temp': 'Temp',
                 'Constant': 'Constant'}
 
@@ -254,7 +294,9 @@ def steps_interface(u):
 def procedure(u):
     """-> {header, steps, markdown} for an edit (network change, interface members)."""
     hl = header(u)
-    if u.get('kind') == 'interface':
+    if u.get('kind') == 'hmi_screen':
+        steps, inner = [], steps_hmi(u)
+    elif u.get('kind') == 'interface':
         inner = steps_interface(u)
         steps = ['Open the block %s (the interface is the upper part of the program editor).' % _c(block_name(u))]
     elif u.get('kind') == 'new_network':
@@ -280,8 +322,10 @@ def procedure(u):
     if u.get('f') and inner:
         steps.append('Compile the safety program and check the F-signature; safety changes are protected by the F-CPU password / '
                      '**Safety Administration** (exact name of the compile command %s).' % N)
-    steps.append('Save the project, export the block with the Reader and run `python check.py --edit %s` '
-                 '(or the "Check export" button).' % u.get('id', ''))
+    steps.append(('Save the project, take a snapshot (it dumps the HMI too) and press "Check export" (`python check.py --edit %s`).'
+                  if u.get('kind') == 'hmi_screen' else
+                  'Save the project, export the block with the Reader and run `python check.py --edit %s` '
+                  '(or the "Check export" button).') % u.get('id', ''))
     md = '### TIA steps — %s\n' % hl + ''.join('%d. %s\n' % (i + 1, k) for i, k in enumerate(steps))
     if any(N in k for k in steps):
         md += '\n%s = not verified in the TIA V21 help, check it in the editor.\n' % N

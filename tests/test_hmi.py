@@ -119,5 +119,125 @@ class TestHmiSnapshot(unittest.TestCase):
         self.assertIn('No WinCC Unified HMI', j['warnings'][0])
 
 
+class TestHmiEdits(unittest.TestCase):
+    """H2: hmi_screen edits — proposal, diff, TIA steps, Upload (fake Writer), Check (fake Reader), presets, MCP."""
+    def setUp(self):
+        self.root, self.data, self.tia = (tempfile.mkdtemp() for _ in range(3))
+        shutil.copytree(os.path.join(SAMPLES, PROJECT, TS0), os.path.join(self.root, PROJECT, TS0))
+        py = sys.executable
+        mcp = {'writer': ([py, FAKE, 'writer', '--state', self.tia], None),
+               'reader': ([py, FAKE, 'reader', '--state', self.tia, '--export-root', self.root, '--project', PROJECT], None)}
+        self.srv = server.create_server(0, self.root, self.data, mcp=mcp, mcp_timeout=30)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        for d in (self.root, self.data, self.tia):
+            shutil.rmtree(d, ignore_errors=True)
+
+    def req(self, method, path, body=None):
+        c = http.client.HTTPConnection('127.0.0.1', self.srv.server_address[1], timeout=60)
+        c.request(method, path, json.dumps(body).encode() if body is not None else None, {'Content-Type': 'application/json'})
+        r = c.getresponse()
+        t = json.loads(r.read())
+        c.close()
+        return r.status, t
+
+    def ok(self, method, path, body=None, status=200):
+        s, r = self.req(method, path, body)
+        self.assertEqual(s, status, r)
+        return r
+
+    def changed_overview(self):
+        u = self.ok('POST', '/api/edits', {'project': PROJECT, 'round': 'HMI', 'kind': 'hmi_screen', 'screen': 'Overview'}, 201)
+        self.assertEqual((u['hmi'], u['new'], u['before']['export_ts'], u['after'], u['f']),
+                         ('HMI_1', False, TS0, u['before']['screen'], False))
+        after = json.loads(json.dumps(u['after']))
+        x = {i['name']: i for i in after['items']}
+        x['IO_Speed']['left'] += 8
+        x['Title']['text'] = 'Line 1 — overview'
+        x['IO_Pieces']['bindings'][0]['tag'] = 'Rejects'
+        x['Header']['colors']['backColor'] = '#203040'
+        return u['id'], after
+
+    def test_change_upload_check(self):
+        uid, after = self.changed_overview()
+        r = self.ok('POST', '/api/edits/%s/after' % uid, {'after': after})
+        self.assertEqual(r['errors'], [])
+        d = self.ok('GET', '/api/edits/' + uid)
+        c = d['screen_diff']
+        self.assertEqual((c['added'], c['deleted'], sorted(c['changed'])), ([], [], ['Header', 'IO_Pieces', 'IO_Speed', 'Title']))
+        self.assertEqual(c['changed']['IO_Speed'], [{'attr': 'left', 'before': 260, 'after': 268}])
+        self.assertNotIn('upload_note', d)
+        p = self.ok('GET', '/api/edits/%s/procedure' % uid)
+        self.assertIn('"HMI_1" · Screen: Overview', p['header'])
+        self.assertTrue(any('`IO_Pieces`' in k and 'dynamization ProcessValue `Pieces` → `Rejects`' in k for k in p['steps']), p['steps'])
+        self.assertFalse(self.ok('POST', '/api/edits/%s/check-export' % uid, {})['match'])      # the export is still the old one
+        self.ok('POST', '/api/edits/%s/state' % uid, {'state': 'Approved', 'by': 'user'})
+        r = self.ok('POST', '/api/edits/%s/upload' % uid, {})
+        self.assertTrue(r['ok'], r)
+        self.assertEqual(r['edit']['state'], 'Signed')
+        with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:
+            calls = [json.loads(z) for z in f]
+        sets = [(z['tool'], z['arguments'].get('itemName'), z['arguments'].get('attribute') or z['arguments'].get('property'),
+                 z['arguments'].get('value') or z['arguments'].get('tag')) for z in calls if z['tool'].startswith('SetHmi')]
+        self.assertEqual(sorted(sets), [('SetHmiDynamizationTag', 'IO_Pieces', 'ProcessValue', 'Rejects'),
+                                        ('SetHmiItemAttribute', 'Header', 'BackColor', '#FF203040'),
+                                        ('SetHmiItemAttribute', 'IO_Speed', 'Left', '268'),
+                                        ('SetHmiItemAttribute', 'Title', 'Text', 'Line 1 — overview')])
+        r = self.ok('POST', '/api/edits/%s/check' % uid, {})
+        self.assertTrue(r['match'], r)
+        self.assertEqual(r['edit']['state'], 'Checked')
+
+    def test_new_screen_from_preset(self):
+        self.assertEqual(self.ok('GET', '/api/hmi/presets')['presets'][0]['key'], 'machine_overview')
+        m = self.ok('POST', '/api/hmi/preset', {'project': PROJECT, 'preset': 'manual_control', 'screen': 'Belt',
+                                                'params': {'machine': 'Belt 2', 'tags': ['Mode_Auto', 'Speed_Setpoint']}})
+        types = {i['name']: i['type'] for i in m['items']}
+        self.assertEqual((types['Switch_Mode_Auto'], types['IO_Speed_Setpoint']), ('Switch', 'IOField'))   # Bool -> switch
+        body = {'project': PROJECT, 'round': 'HMI', 'kind': 'hmi_screen', 'screen': 'Belt', 'new': True,
+                'preset': 'machine_overview', 'params': {'machine': 'Belt 2', 'tags': ['Machine_Speed', 'Horn', 'Nope']}}
+        u = self.ok('POST', '/api/edits', body, 201)
+        d = self.ok('GET', '/api/edits/' + u['id'])
+        self.assertEqual(d['screen_diff']['added'][:2], ['Header', 'Title'])
+        self.assertTrue(any(e.get('warning') and 'Nope' in e['error'] for e in d['errors']), d['errors'])
+        self.assertIn('ImportHmiScreen', d['upload_note'])
+        p = self.ok('GET', '/api/edits/%s/procedure' % u['id'])
+        self.assertIn('Add new screen', p['steps'][0])
+        self.assertIn('dynamization `ProcessValue` → tag `Machine_Speed`', p['markdown'])
+        self.ok('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved', 'by': 'user'})
+        self.assertEqual(self.req('POST', '/api/edits/%s/upload' % u['id'], {})[0], 409)
+        k = self.ok('POST', '/api/edits/%s/check-export' % u['id'], {})
+        self.assertEqual((k['match'], k['diffs']), (False, ['screen Belt is not in the export']))
+        # the same name again, an exported name as new, a duplicate item, a broken model
+        self.assertEqual(self.req('POST', '/api/edits', dict(body, screen='Overview'))[0], 400)
+        after = json.loads(json.dumps(d['edit']['after']))
+        after['items'].append(dict(after['items'][0]))
+        self.assertEqual(self.req('POST', '/api/edits/%s/after' % u['id'], {'after': after})[0], 409)   # Approved: no changes
+        self.ok('POST', '/api/edits/%s/state' % u['id'], {'state': 'Proposal', 'by': 'user'})
+        s, r = self.req('POST', '/api/edits/%s/after' % u['id'], {'after': after})
+        self.assertEqual(s, 400)
+        self.assertIn('unique', r['error'])
+        after['items'].pop()
+        after['items'][0]['width'] = 5000
+        r = self.ok('POST', '/api/edits/%s/after' % u['id'], {'after': after})
+        self.assertTrue(any('outside the screen' in e['error'] for e in r['errors']), r['errors'])
+        self.assertEqual(self.req('POST', '/api/edits/%s/after' % u['id'], {'after': {'items': 'x'}})[0], 400)
+
+    def test_mcp_propose_screen(self):
+        import mcp_server
+        e = mcp_server.Editor('http://127.0.0.1:%d' % self.srv.server_address[1])
+        r = mcp_server.call_tool(e, 'propose_screen', {'project': PROJECT, 'round': 'AI', 'screen': 'Alarms_2',
+                                                       'preset': 'alarm_page', 'params': {'machine': 'Line'}}, {'name': 'agent'})
+        v = json.loads(r['content'][0]['text'])
+        self.assertEqual((v['new'], v['state']), (True, 'Proposal'))
+        self.assertIn('Alarm_View', v['changes']['added'])
+        r = mcp_server.call_tool(e, 'propose_screen', {'project': PROJECT, 'round': 'AI', 'screen': 'Manual'})
+        self.assertFalse(json.loads(r['content'][0]['text'])['new'])
+        self.assertTrue(mcp_server.call_tool(e, 'propose_screen', {'project': PROJECT, 'round': 'AI', 'screen': 'X'})['isError'])
+        self.assertEqual(len(json.loads(mcp_server.call_tool(e, 'list_presets', {})['content'][0]['text'])['presets']), 4)
+
+
 if __name__ == '__main__':
     unittest.main()

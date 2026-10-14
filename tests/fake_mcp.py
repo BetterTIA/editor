@@ -7,7 +7,9 @@ python tests\\fake_mcp.py reader --export-root DIR --project Demo_Line [--state 
 until then it is read from --sample (default: the Demo_Line sample 20261012-120000\\PLC_1\\Blocks).
 Writer: Connect, ResolveObjectPath, ExportBlocksAsDocuments (copies .s7dcl/.s7res to exportPath), PreviewImport,
 ImportFromDocuments (copies the documents to --state and appends a line to <state>\\imports.jsonl), SetNetworkText
-(title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res).
+(title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res), SetHmiItemAttribute and
+SetHmiDynamizationTag (a screen of the HMI sample copied to <state>\\HMI_1\\Screens and changed there), GetHmiTags,
+RenameHmiScreen / SetHmiTagPlcTags (only answer), CompileHmi.
 Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
 --multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
 CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
@@ -113,6 +115,15 @@ def writer(a, nm, arg):
         return 'Imported %s (%s)' % (block, arg.get('importOption'))
     if nm == 'SetNetworkText':
         return set_network_text(a, arg)
+    if nm in ('SetHmiItemAttribute', 'SetHmiDynamizationTag'):
+        return set_hmi(a, nm, arg)
+    if nm == 'GetHmiTags':
+        with open(os.path.join(SAMPLE_HMI, 'Tags', 'Default tag table.json'), encoding='utf-8') as f:
+            return json.dumps({'tags': [dict(t, table='Default tag table') for t in json.load(f)['tags']]})
+    if nm in ('RenameHmiScreen', 'SetHmiTagPlcTags'):
+        return '%s%s (fake): %s' % ('dry run: ' if arg.get('dryRun', True) else '', nm, json.dumps(arg))
+    if nm == 'CompileHmi':
+        return json.dumps({'compiled': arg['softwarePath'], 'state': 'Success', 'errors': 0, 'warnings': 0})
     raise ValueError('unknown tool %s for the fake Writer' % nm)
 
 
@@ -154,6 +165,43 @@ def set_network_text(a, arg):
     with open(rp, 'wb') as f:
         f.write((res.replace('\n', '\r\n') if crlf else res).encode('utf-8'))
     return 'NW %s of %s: %s set (fake)' % (arg['network'], block, ', '.join(texts))
+
+
+def set_hmi(a, nm, arg):
+    """SetHmiItemAttribute / SetHmiDynamizationTag on <state>\\HMI_1\\Screens\\<screen>.json (copied from the sample first);
+    the fake Reader's export_hmi_to_folder takes the screen from there."""
+    hmi = os.path.basename(SAMPLE_HMI)
+    if arg['softwarePath'] != hmi:
+        raise ValueError('no WinCC Unified HMI software %s (fake: %s)' % (arg['softwarePath'], hmi))
+    p = os.path.join(a.state, hmi, 'Screens', arg['screenName'] + '.json')
+    if not os.path.exists(p):
+        src = os.path.join(SAMPLE_HMI, 'Screens', arg['screenName'] + '.json')
+        if not os.path.exists(src):
+            raise ValueError('screen %s does not exist' % arg['screenName'])
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        shutil.copyfile(src, p)
+    with open(p, encoding='utf-8') as f:
+        s = json.load(f)
+    x = next((i for i in s['screenItems'] if i['name'] == arg['itemName']), None) if arg.get('itemName') else s
+    if x is None:
+        raise ValueError('screen %s has no item %s' % (arg['screenName'], arg['itemName']))
+    if nm == 'SetHmiDynamizationTag':
+        d = next((d for d in x.get('dynamizations') or [] if d.get('propertyName') == arg['property']), None)
+        if d is None:
+            raise ValueError('%s has no tag dynamization of %s' % (arg['itemName'], arg['property']))
+        k, old, new, target = 'tag', d['tag'], arg['tag'], d
+    else:
+        k, v = arg['attribute'][:1].lower() + arg['attribute'][1:], arg['value']
+        old, target = x.get(k), x
+        new = {'$type': 'MultilingualText', 'items': [{'$type': 'MultilingualTextItem', 'language': arg.get('culture') or 'en-US',
+                                                       'text': v}]} if k == 'text' else \
+            json.loads(v) if re.fullmatch(r'-?\d+(\.\d+)?', v) else v
+    if arg.get('dryRun', True):
+        return 'dry run: %s.%s %s -> %s' % (arg.get('itemName') or arg['screenName'], k, json.dumps(old), json.dumps(new))
+    target[k] = new
+    with open(p, 'w', encoding='utf-8') as f:
+        json.dump(s, f, ensure_ascii=False, indent=2)
+    return '%s.%s set (fake)' % (arg.get('itemName') or arg['screenName'], k)
 
 
 RUNS = {}

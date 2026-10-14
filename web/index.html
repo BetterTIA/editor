@@ -336,14 +336,28 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 .hi.t-AlarmControl div { display: grid; grid-template-columns: 160px 1fr 120px; border-bottom: 1px solid #d5dbe1; padding: 6px 8px; }
 .hi.t-AlarmControl div:first-child { background: #dde3ea; font-weight: 600; }
 .hi.t-ScreenWindow, .hi.other { border: 2px dashed #8a9199; justify-content: center; color: #56606c; font-size: 14px; }
-.hi.sel { outline: 3px solid var(--accent); outline-offset: 2px; z-index: 5; }
 .hi.d-added { outline: 3px solid var(--added); outline-offset: 1px; }
 .hi.d-changed { outline: 3px solid var(--changed); outline-offset: 1px; }
 .hi.d-deleted { outline: 3px dashed var(--deleted); outline-offset: 1px; opacity: .5; }
+.hi.sel { outline: 3px solid var(--accent); outline-offset: 2px; z-index: 5; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--edge-strong); vertical-align: -2px; margin-right: 4px; }
 .main.screen { grid-template-columns: 290px 1fr 300px; }
 #palette.hmi-props { padding: 0 var(--s3) var(--s4); }
 #palette.hmi-props h2 { margin-left: 0; }
+.hmi-screen.grid::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: linear-gradient(rgba(27, 36, 48, .07) 1px, transparent 1px), linear-gradient(90deg, rgba(27, 36, 48, .07) 1px, transparent 1px);
+  background-size: 8px 8px; }
+.hmi-edit .hi { cursor: move; touch-action: none; }
+.hmi-edit .hi.t-Line { min-height: 8px; }
+.hmi-edit .hh { position: absolute; background: var(--accent); border: 1px solid #fff; z-index: 6; touch-action: none; }
+.hmi-edit .hh.nw, .hmi-edit .hh.se { cursor: nwse-resize; } .hmi-edit .hh.ne, .hmi-edit .hh.sw { cursor: nesw-resize; }
+.hmi-edit.inserting .hmi-screen, .hmi-edit.inserting .hi { cursor: crosshair; }
+table.changes { width: 100%; border-collapse: collapse; font: 12px/1.5 var(--mono); margin-top: var(--s3); }
+table.changes th { text-align: left; color: var(--muted); font: 600 11px "Segoe UI", system-ui, sans-serif; padding: 2px 6px; border-bottom: 1px solid var(--edge); }
+table.changes td { padding: 2px 6px; border-bottom: 1px dashed var(--edge); overflow-wrap: anywhere; }
+table.changes .added { color: var(--added); } table.changes .changed { color: var(--changed); } table.changes .deleted { color: var(--deleted); }
+.preset-tags { max-height: 240px; overflow: auto; border: 1px solid var(--edge); border-radius: var(--r-sm); padding: var(--s1) var(--s2); }
+.preset-tags label { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text); padding: 1px 0; }
 @media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .status { margin-left: 0; } header { flex-wrap: wrap; } .main, .main.edit { grid-template-columns: 1fr; }
                             aside { max-height: 40vh; } .empty-state { grid-template-columns: 1fr; } }
@@ -631,10 +645,11 @@ function editTitleHtml(u) {
 function editWhere(u) {
   if (u.kind === 'interface') return `Interface: +${(u.members || []).length} ${u.section}`;
   if (u.kind === 'new_network') return `NW ${u.after_nw}+ (new): ${u.title || ''}`;
+  if (u.kind === 'hmi_screen') return `Screen: ${u.screen}${u.new ? ' (new)' : ''}`;
   return `NW ${u.nw}: ${u.title || ''}${u.title_after ? ' → ' + u.title_after : ''}`;
 }
-const treeKey = u => u.kind === 'interface' || u.kind === 'new_network' ? u.kind + ':' + u.id : 'nw:' + u.nw;
-const treeOrder = u => u.kind === 'interface' ? -1 : u.kind === 'new_network' ? u.after_nw + 0.5 : u.nw;
+const treeKey = u => ['interface', 'new_network', 'hmi_screen'].includes(u.kind) ? u.kind + ':' + u.id : 'nw:' + u.nw;
+const treeOrder = u => u.kind === 'interface' || u.kind === 'hmi_screen' ? -1 : u.kind === 'new_network' ? u.after_nw + 0.5 : u.nw;
 let lastState = {projects: []};
 async function loadTree(activeId) {
   try { lastState = await api('/api/state'); return treeHtml(lastState, activeId); }
@@ -715,7 +730,7 @@ async function showEdit(uid, error) {
   const d = await api(`/api/edits/${enc(uid)}?width=${canvasWidth()}`);
   const u = d.edit;
   $('info').textContent = `${u.project} · edit ${u.id} · base export ${u.before.export_ts}`;
-  document.title = `BetterTIA Editor — ${u.id} ${u.block} NW${u.nw}`;
+  document.title = `BetterTIA Editor — ${u.id} ${u.block} ${u.screen || 'NW' + u.nw}`;
   let left = await loadTree(u.id);
   try {
     const b = await api(`/api/block?project=${enc(u.project)}&block=${enc(u.block)}`);
@@ -724,6 +739,7 @@ async function showEdit(uid, error) {
   $('nw').innerHTML = left;
   const m = $('content');
   const btnChecked = d.next === 'Checked' && !d.checked_allowed;
+  const canTia = d.tia || u.kind === 'hmi_screen';      // an HMI edit names its HMI itself
   const language = d.language || 'LAD';
   const at = STATES.indexOf(u.state);
   const checks = u.checks || [], last = checks[checks.length - 1];
@@ -739,8 +755,11 @@ async function showEdit(uid, error) {
     (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked only after the latest export check matches (Check / Check export)"' : ''}>${esc(d.next)} →</button>` : '') +
     `</div><div class="buttons">` +
     (u.state === 'Approved' ? (u.f ? `<span class="fblock">⚠ F-block: change it by hand following the TIA steps below</span>`
-      : `<button id="upload" class="tia" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed' : 'fill in the TIA settings for the project first'}">Upload to TIA</button>`) : '') +
-    (u.state === 'Signed' ? `<button id="check" class="tia check" ${d.tia ? '' : 'disabled'} title="${d.tia ? 'TIAC_Reader exports the block and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
+      : `<button id="upload" class="tia" ${canTia && !d.upload_note ? '' : 'disabled'} title="${esc(d.upload_note || (!canTia ? 'fill in the TIA settings for the project first'
+          : u.kind === 'hmi_screen' ? 'TIAC_Writer sets the changed attributes and tag dynamizations of the screen items → Signed'
+          : 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed'))}">Upload to TIA</button>` +
+        (d.upload_note ? `<span class="fblock" title="${esc(d.upload_note)}">⚠ Upload cannot write this edit — make it by hand following the TIA steps</span>` : '')) : '') +
+    (u.state === 'Signed' ? `<button id="check" class="tia check" ${canTia ? '' : 'disabled'} title="${canTia ? 'TIAC_Reader exports it and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
     (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
     `<span class="progress" id="progress"></span>` +
     `</div></div>` +
@@ -750,7 +769,7 @@ async function showEdit(uid, error) {
     (d.texts ? `<details class="panel" open><summary>Network text <span class="sum">title / comment, set after the import</span></summary><div class="body texts">` +
       Object.entries(d.texts).map(([k, [a, b]]) => `<div><span class="hint">${k === 'title_after' ? 'Title' : 'Comment'}</span> ` +
         `<span class="old">${esc(a || '(none)')}</span> → <b class="new">${esc(b)}</b></div>`).join('') + `</div></details>` : '') +
-    (d.interface ? `<details class="panel" open><summary>Interface <span class="sum">section ${esc(d.interface.section)}: before / after</span>` +
+    (d.screen_diff ? hmiDiffHtml(u, d) : d.interface ? `<details class="panel" open><summary>Interface <span class="sum">section ${esc(d.interface.section)}: before / after</span>` +
       `<span class="legend"><span class="p">added</span></span></summary><div class="body">${interfaceHtml(d.interface)}</div></details>`
     : `<details class="panel" open><summary>Model <span class="sum">${u.kind === 'new_network' ? `new ${esc(u.language || '')} network after NW ${u.after_nw}` : '"after" against the export'}</span>` +
     `<span class="legend"><span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></span></summary><div class="body canvas-body" id="model"></div></details>`) +
@@ -803,6 +822,7 @@ async function showEdit(uid, error) {
     };
   }
   if ($('model')) canvas($('model'), d, d.diff);
+  if ($('hmi-model')) $('hmi-model').appendChild(hmiFrame(u.after, $('hmi-model').clientWidth || 900, u.new ? {} : hmiMarks(d.screen_diff), d.ghosts));
   try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* no TIA steps */ }
 }
 // ---------- E5: a group of edits = one change ----------
@@ -1083,7 +1103,274 @@ async function showScreen(project, name) {
     } catch (e) { $('hmi-error').textContent = '⚠ ' + e.message; }
   };
 }
-async function presetDialog() { /* H2 */ }
+// ---------- H2: new screen from a preset ----------
+async function presetDialog(project, r) {
+  const p = await api('/api/hmi/presets'), box = $('hmi-dialog');
+  const chosen = new Set((q.get('tags') || r.tags.slice(0, 6).map(t => t.name).join(',')).split(',').filter(Boolean));
+  box.innerHTML = `<details class="panel" open><summary>New screen from preset <span class="sum">creates an edit "new screen" in state Proposal</span></summary>` +
+    `<div class="body"><div class="duo"><div class="add">` +
+    `<label>Preset <select id="p-preset">${p.presets.map(x => `<option value="${esc(x.key)}" ${x.key === (q.get('preset') || 'machine_overview') ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` +
+    `<div class="line"><label>Screen name <input id="p-name" type="text" value="${esc(q.get('name') || 'Line_overview')}"></label></div>` +
+    `<div class="line"><label>Machine <input id="p-machine" type="text" value="${esc(q.get('machine') || 'Demo line')}"></label></div>` +
+    `<div class="line"><label>Round <input id="p-round" type="text" value="HMI"></label></div>` +
+    `<div><b class="hint">Tags shown on the screen (Bool tags become lamps / switches)</b><div class="preset-tags">` +
+    r.tags.map(t => `<label><input type="checkbox" data-tag="${esc(t.name)}" ${chosen.has(t.name) ? 'checked' : ''}><span class="c">${esc(t.name)}</span><span class="hint">${esc(t.type)}</span></label>`).join('') +
+    `</div></div><div class="line"><button class="hl" id="p-create">Create proposal</button><span class="hint" id="p-desc"></span></div></div>` +
+    `<div id="preset-preview"></div></div></div></details>`;
+  const params = () => ({machine: $('p-machine').value, tags: [...box.querySelectorAll('input[data-tag]:checked')].map(i => i.dataset.tag)});
+  const preview = async () => {
+    try {
+      const m = await api('/api/hmi/preset', 'POST', {project, preset: $('p-preset').value, screen: $('p-name').value, params: params()});
+      const pv = $('preset-preview');
+      pv.innerHTML = '';
+      pv.appendChild(hmiFrame(m, pv.clientWidth || 520));
+      $('p-desc').textContent = p.presets.find(x => x.key === $('p-preset').value).description;
+      $('hmi-error').textContent = '';
+    } catch (e) { $('hmi-error').textContent = '⚠ ' + e.message; }
+  };
+  for (const i of box.querySelectorAll('input, select')) i.onchange = preview;
+  $('p-create').onclick = async () => {
+    try {
+      const u = await api('/api/edits', 'POST', {project, kind: 'hmi_screen', new: true, hmi: r.hmi, screen: $('p-name').value.trim(),
+                                                 preset: $('p-preset').value, params: params(), round: $('p-round').value.trim() || 'HMI',
+                                                 note: `new screen from the preset ${$('p-preset').selectedOptions[0].textContent}`});
+      location.href = `?edit=${enc(u.id)}&edit_mode=1`;
+    } catch (e) { $('hmi-error').textContent = '⚠ ' + e.message; }
+  };
+  await preview();
+}
+// edit page: the "after" screen with the changes marked, and the table of attribute changes
+function hmiDiffHtml(u, d) {
+  const c = d.screen_diff, rows = c.screen.map(x => ['(screen)', 'changed', x]).concat(c.deleted.map(n => [n, 'deleted']),
+    u.new ? [] : c.added.map(n => [n, 'added']), Object.entries(c.changed).flatMap(([n, ch]) => ch.map(x => [n, 'changed', x])));
+  const v = x => x == null ? '—' : esc(typeof x === 'string' ? x : JSON.stringify(x));
+  return `<details class="panel" open><summary>Screen <span class="sum">${u.new ? `new screen ${esc(u.screen)} of ${esc(u.hmi)}, ${u.after.items.length} items`
+      : `"after" against the HMI export ${esc(u.before.export_ts)}`}</span><span class="legend"><span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></span></summary>` +
+    `<div class="body"><div id="hmi-model"></div>` + (rows.length ? `<table class="changes"><tr><th>Item</th><th>Change</th><th>Attribute</th><th>Before</th><th>After</th></tr>` +
+      rows.map(([n, k, x]) => `<tr class="${k}"><td>${esc(n)}</td><td>${k}</td><td>${x ? esc(x.attr) : ''}</td><td>${x ? v(x.before) : ''}</td><td>${x ? v(x.after) : ''}</td></tr>`).join('') + `</table>`
+      : u.new ? '' : '<p class="hint">No change against the export yet — open the editor.</p>') + `</div></details>`;
+}
+const hmiMarks = c => Object.fromEntries([...c.added.map(n => [n, 'added']), ...Object.keys(c.changed).map(n => [n, 'changed']), ...c.deleted.map(n => [n, 'deleted'])]);
+
+// ---------- H2: screen designer ----------
+const he = {u: null, after: null, before: null, hist: [], redo: [], sel: null, insert: null, changed: false, tags: [], frame: null};
+const HMI_DEFAULTS = {
+  Text: {width: 200, height: 40, text: 'Text', colors: {foreColor: '#1b2430'}, font: {size: 18}},
+  Rectangle: {width: 160, height: 96, colors: {backColor: '#dde3ea', borderColor: '#8a9199'}},
+  Line: {width: 200, height: 0, colors: {lineColor: '#1b2430'}},
+  Button: {width: 200, height: 56, text: 'Button', colors: {backColor: '#2f6fa3', foreColor: '#ffffff'}, font: {size: 18, weight: 'Bold'}},
+  IOField: {width: 160, height: 40, colors: {backColor: '#ffffff', foreColor: '#1b2430', borderColor: '#8a9199'}, font: {size: 18}},
+  Switch: {width: 120, height: 40, colors: {backColor: '#dde3ea', foreColor: '#2f6fa3'}},
+  Bar: {width: 48, height: 200, colors: {backColor: '#dde3ea', foreColor: '#2f6fa3', borderColor: '#8a9199'}},
+  Gauge: {width: 200, height: 200, colors: {backColor: '#ffffff', foreColor: '#1b2430'}},
+  AlarmControl: {width: 800, height: 400, colors: {backColor: '#ffffff', borderColor: '#8a9199'}, font: {size: 14}},
+  ScreenWindow: {width: 400, height: 300},
+};
+const defaultProperty = t => ['IOField', 'Switch', 'Bar', 'Gauge'].includes(t) ? 'ProcessValue' : 'Visible';
+const canon = v => Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v;
+
+async function hmiEditor(d) {
+  const u = d.edit;
+  Object.assign(he, {u, after: JSON.parse(JSON.stringify(u.after)), before: u.before.screen || {items: []}, hist: [], redo: [],
+                     sel: q.get('select'), insert: q.get('palette'), changed: false});
+  const [scr, cat] = await Promise.all([api(`/api/hmi/screens?project=${enc(u.project)}`).catch(() => ({tags: [], screens: [], hmi: u.hmi})),
+                                        api(`/api/catalog?project=${enc(u.project)}`).catch(() => ({tags: []}))]);
+  he.tags = [...new Set(scr.tags.map(t => t.name).concat(cat.tags.map(t => t.name)))];
+  $('operands').innerHTML = he.tags.map(t => `<option value="${esc(t)}">`).join('');
+  $('info').textContent = `${u.project} · editing ${u.id} · ${u.new ? 'new screen' : 'HMI export ' + u.before.export_ts}`;
+  document.title = `BetterTIA Editor — edit ${u.id}`;
+  $('nw').innerHTML = await loadTree(u.id) + (scr.screens.length ? screensHtml(scr, u.project, u.screen) : '');
+  document.querySelector('.main').classList.add('edit');
+  const pal = $('palette');
+  pal.hidden = false;
+  pal.innerHTML = `<h2>Screen items</h2>` + HMI_TYPES.map(t => `<div class="item" data-type="${t}" title="click, then click the screen"><b>${t}</b></div>`).join('') +
+    `<p class="empty" style="margin-top:8px">Click an item, then click the screen to place it. Drag an item to move it, its corner handles resize it (8 px grid). Delete removes, Ctrl+Z undoes.</p>`;
+  for (const x of pal.querySelectorAll('.item')) x.onclick = () => { he.insert = he.insert === x.dataset.type ? null : x.dataset.type; hmiRender(); };
+  $('content').innerHTML = `<div class="edit-head">` + editTitleHtml(u) +
+    `<div class="header"><span class="state s-Proposal">Proposal</span><span id="ed-mark"></span> round <b>${esc(u.round)}</b> · editing · ${he.after.width} × ${he.after.height}</div>` +
+    `<div class="tools" style="margin:0"><button id="ed-undo" title="Ctrl+Z">↶ Undo</button><button id="ed-redo" title="Ctrl+Y">↷ Redo</button><span class="sep"></span>` +
+    `<button id="ed-delete" title="Delete">Delete</button><span class="sep"></span><button id="ed-save" class="hl">Save proposal</button><button id="ed-close">Close editor</button></div></div>` +
+    `<div class="mode" id="ed-mode"></div><div id="ed-canvas" class="hmi-edit"></div>` +
+    `<div class="legend" style="margin-top:var(--s2)">Against the export: <span class="p">added</span><span class="z">changed</span><span class="s">deleted</span></div>` +
+    `<div class="editor-bottom"><div><h3>Screen rules</h3><div class="errors" id="ed-errors"></div></div><div><h3>Item properties</h3><div class="properties" id="ed-properties"></div></div></div>`;
+  $('ed-undo').onclick = () => hmiHistory(he.hist, he.redo);
+  $('ed-redo').onclick = () => hmiHistory(he.redo, he.hist);
+  $('ed-delete').onclick = hmiDelete;
+  $('ed-save').onclick = async () => {
+    try {
+      const r = await api(`/api/edits/${enc(u.id)}/after`, 'POST', {after: he.after});
+      he.changed = false;
+      const n = r.errors.filter(c => !c.warning).length;
+      mode(`Saved ${new Date().toLocaleTimeString()}` + (r.errors.length ? ` — ${n} rule error(s), ${r.errors.length - n} warning(s)` : ' — no errors'), true);
+    } catch (e) { mode('⚠ Save failed: ' + e.message); }
+  };
+  $('ed-close').onclick = () => { if (!he.changed || confirm('Unsaved changes will be lost. Close?')) location.href = `?edit=${enc(u.id)}`; };
+  document.addEventListener('keydown', hmiKeys);
+  hmiRender();
+}
+function hmiPush() { he.hist.push(JSON.stringify(he.after)); he.redo = []; he.changed = true; }
+function hmiHistory(from, to) {
+  if (!from.length) return;
+  to.push(JSON.stringify(he.after));
+  he.after = JSON.parse(from.pop());
+  he.changed = true;
+  hmiRender();
+}
+function hmiDelete() {
+  if (!he.sel) return;
+  hmiPush();
+  he.after.items = he.after.items.filter(x => x.name !== he.sel);
+  he.sel = null;
+  hmiRender();
+}
+function hmiKeys(e) {
+  const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName);
+  if (e.key === 'Escape') {
+    if (inField) document.activeElement.blur();
+    else { he.insert = null; he.sel = null; hmiRender(); }
+    return;
+  }
+  if (inField) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? hmiHistory(he.redo, he.hist) : hmiHistory(he.hist, he.redo); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); hmiHistory(he.redo, he.hist); }
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && he.sel) { e.preventDefault(); hmiDelete(); }
+}
+// the same rules as the server (hmi.validate): items inside the screen, bindings to known tags (warning)
+function hmiErrors() {
+  const s = he.after, known = new Set(he.tags), res = [];
+  for (const x of s.items) {
+    if (x.left < 0 || x.top < 0 || x.left + x.width > s.width || x.top + x.height > s.height)
+      res.push({id: x.name, error: `${x.name} is outside the screen (${x.left}, ${x.top}, ${x.width} × ${x.height} on ${s.width} × ${s.height})`});
+    for (const b of x.bindings || [])
+      if (known.size && !known.has(b.tag.replace(/^"|"$/g, ''))) res.push({id: x.name, warning: true, error: `${x.name}: ${b.property} → tag ${b.tag} is neither an HMI tag nor a PLC tag of the export`});
+  }
+  return res;
+}
+const snap8 = v => Math.round(v / 8) * 8;
+function hmiRender() {
+  const box = $('ed-canvas');
+  if (!box) return;
+  const B = Object.fromEntries(he.before.items.map(i => [i.name, i])), marks = {};
+  for (const x of he.u.new ? [] : he.after.items) {              // a new screen: everything is added, nothing to mark
+    if (!B[x.name]) marks[x.name] = 'added';
+    else if (JSON.stringify(canon(B[x.name])) !== JSON.stringify(canon(x))) marks[x.name] = 'changed';
+  }
+  const ghosts = he.before.items.filter(i => !he.after.items.some(x => x.name === i.name));
+  for (const g of ghosts) marks[g.name] = 'deleted';
+  box.innerHTML = '';
+  box.classList.toggle('inserting', !!he.insert);
+  const fr = hmiFrame(he.after, (box.clientWidth || 900) - 2, marks, ghosts), scr = fr.firstChild, k = fr.scale;
+  he.frame = fr;
+  box.appendChild(fr);
+  scr.classList.add('grid');
+  for (const d of scr.querySelectorAll('.hi')) {
+    const x = he.after.items.find(i => i.name === d.dataset.name);
+    if (!x || d.classList.contains('d-deleted')) { d.style.pointerEvents = 'none'; continue; }
+    d.onpointerdown = e => hmiDrag(e, x, '');
+    if (x.name !== he.sel) continue;
+    d.classList.add('sel');
+    for (const [c, cx, cy] of [['nw', x.left, x.top], ['ne', x.left + x.width, x.top], ['sw', x.left, x.top + x.height], ['se', x.left + x.width, x.top + x.height]]) {
+      const h = document.createElement('span'), s = 12 / k;
+      h.className = 'hh ' + c;
+      Object.assign(h.style, {left: cx - s / 2 + 'px', top: cy - s / 2 + 'px', width: s + 'px', height: s + 'px'});
+      h.onpointerdown = e => hmiDrag(e, x, c);
+      scr.appendChild(h);
+    }
+  }
+  scr.onpointerdown = e => {
+    if (e.target !== scr) return;
+    if (he.insert) hmiInsert(e);
+    else if (he.sel) { he.sel = null; hmiRender(); }
+  };
+  for (const x of $('palette').querySelectorAll('.item')) x.classList.toggle('active', x.dataset.type === he.insert);
+  if (he.insert) mode(`Inserting: ${he.insert} — click the screen where its top left corner goes (Esc cancels).`);
+  else if (!$('ed-mode').classList.contains('message')) mode('');
+  const errs = hmiErrors(), n = errs.filter(c => !c.warning).length;
+  $('ed-mark').innerHTML = n ? `<span class="mark-errors">⚠ ${n} rule error${n === 1 ? '' : 's'}</span> ·` : '';
+  $('ed-errors').innerHTML = errs.length ? errs.map(c => `<div data-id="${esc(c.id)}" class="${c.warning ? 'var' : ''}">⚠ ${esc(c.error)}</div>`).join('')
+                                        : '<div class="ok">✓ No errors.</div>';
+  for (const d of $('ed-errors').querySelectorAll('div[data-id]')) d.onclick = () => { he.sel = d.dataset.id; hmiRender(); };
+  $('ed-undo').disabled = !he.hist.length;
+  $('ed-redo').disabled = !he.redo.length;
+  $('ed-delete').disabled = !he.sel;
+  hmiProperties();
+}
+function hmiInsert(e) {
+  const r = he.frame.firstChild.getBoundingClientRect(), k = he.frame.scale, t = he.insert;
+  let i = 1;
+  while (he.after.items.some(x => x.name.toLowerCase() === `${t}_${i}`.toLowerCase())) i++;
+  hmiPush();
+  const x = Object.assign({name: `${t}_${i}`, type: t, left: snap8((e.clientX - r.left) / k), top: snap8((e.clientY - r.top) / k), bindings: []},
+                          JSON.parse(JSON.stringify(HMI_DEFAULTS[t])));
+  he.after.items.push(x);
+  he.sel = x.name;
+  he.insert = null;
+  hmiRender();
+}
+function hmiDrag(e, x, corner) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (he.insert) { hmiInsert(e); return; }
+  const k = he.frame.scale, o = {left: x.left, top: x.top, width: x.width, height: x.height}, sx = e.clientX, sy = e.clientY;
+  let moved = false;
+  if (he.sel !== x.name) { he.sel = x.name; hmiRender(); }
+  const move = ev => {
+    const dx = (ev.clientX - sx) / k, dy = (ev.clientY - sy) / k;
+    if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+    if (!moved) { hmiPush(); moved = true; }
+    if (!corner) { x.left = snap8(o.left + dx); x.top = snap8(o.top + dy); }
+    if (corner.includes('w')) { x.left = Math.min(snap8(o.left + dx), o.left + o.width); x.width = o.left + o.width - x.left; }
+    if (corner.includes('e')) x.width = Math.max(0, snap8(o.left + o.width + dx) - o.left);
+    if (corner.includes('n')) { x.top = Math.min(snap8(o.top + dy), o.top + o.height); x.height = o.top + o.height - x.top; }
+    if (corner.includes('s')) x.height = Math.max(0, snap8(o.top + o.height + dy) - o.top);
+    hmiRender();
+  };
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+}
+function hmiSet(x, key, val) {
+  if (key === 'name') {
+    val = val.trim();
+    if (!val || he.after.items.some(i => i !== x && i.name.toLowerCase() === val.toLowerCase())) { mode('⚠ An item name must be unique and not empty.'); hmiRender(); return; }
+  }
+  hmiPush();
+  const [a, b] = key.split('.');
+  if (b) {
+    x[a] = x[a] || {};
+    if (val === '' || val == null) delete x[a][b]; else x[a][b] = val;
+    if (!Object.keys(x[a]).length) delete x[a];
+  } else if (val === '' || val == null) { if (['left', 'top', 'width', 'height'].includes(a)) x[a] = 0; else delete x[a]; }
+  else x[a] = val;
+  if (key === 'name') he.sel = val;
+  hmiRender();
+}
+function hmiProperties() {
+  const v = $('ed-properties'), x = he.after.items.find(i => i.name === he.sel);
+  if (!x) { v.innerHTML = `<p class="comment">Click an item on the screen, or pick one in the palette and click the screen to insert it.</p>`; return; }
+  const inp = (key, val, type = 'text', extra = '') => `<input data-k="${key}" type="${type}" value="${esc(val ?? '')}" ${extra} autocomplete="off">`;
+  const row = (label, html) => `<tr><td>${esc(label)}</td><td>${html}</td></tr>`;
+  const colors = [...new Set(Object.keys(x.colors || {}).concat(x.type === 'Line' ? ['lineColor'] : ['backColor', 'foreColor', 'borderColor']))];
+  v.innerHTML = `<table><colgroup><col style="width:96px"><col></colgroup><tr class="section"><td colspan="2">${esc(x.type)}</td></tr>` +
+    row('name', inp('name', x.name)) + row('text', inp('text', x.text)) +
+    ['left', 'top', 'width', 'height'].map(g => row(g, inp(g, x[g], 'number', 'step="8"'))).join('') +
+    row('font size', inp('font.size', x.font?.size, 'number', 'min="1"')) +
+    colors.map(c => row(c, /^#[0-9a-f]{6}$/.test(x.colors?.[c] || '#000000') ? inp('colors.' + c, x.colors?.[c] || '#000000', 'color', 'style="height:26px;padding:1px"')
+                                                                          : inp('colors.' + c, x.colors[c]))).join('') +
+    `<tr class="section"><td colspan="2">Tag bindings</td></tr>` +
+    (x.bindings || []).concat([{property: defaultProperty(x.type), tag: ''}]).map((z, i) =>
+      `<tr><td><input data-b="${i}" data-f="property" value="${esc(z.property)}"></td><td><input data-b="${i}" data-f="tag" value="${esc(z.tag)}" list="operands" placeholder="HMI or PLC tag" autocomplete="off"></td></tr>`).join('') +
+    ((x.events || []).length ? `<tr class="section"><td colspan="2">Events</td></tr>` + row('', x.events.map(e => esc(e.event)).join(', ')) : '') + '</table>';
+  for (const i of v.querySelectorAll('[data-k]')) i.onchange = () => hmiSet(x, i.dataset.k, i.type === 'number' ? (i.value === '' ? null : +i.value) : i.value);
+  for (const i of v.querySelectorAll('[data-b]')) i.onchange = () => {
+    hmiPush();
+    const list = x.bindings = x.bindings || [], n = +i.dataset.b;
+    list[n] = list[n] || {property: defaultProperty(x.type), tag: ''};
+    list[n][i.dataset.f] = i.value.trim();
+    x.bindings = list.filter(z => z.property && z.tag);
+    hmiRender();
+  };
+}
 
 // ---------- M3: editor ----------
 const ed = {u: null, before: null, after: null, hist: [], redo: [], select: null, insert: null, branch: null, res: null,
@@ -1097,6 +1384,7 @@ async function editor(uid) {
   const u = d.edit;
   if (u.state !== 'Proposal') { await showEdit(uid, `Only a proposal in state Proposal can be edited (now ${u.state}).`); return; }
   if (u.kind === 'interface') { await showEdit(uid, 'An interface edit has no canvas — change its members with update_edit (MCP) or POST /api/edits/<id>/after.'); return; }
+  if (u.kind === 'hmi_screen') { await hmiEditor(d); return; }
   const fbd = u.after.language === 'FBD';
   Object.assign(ed, {u, fbd, f: !!u.f, input: null,
                      before: u.kind === 'new_network' ? (fbd ? {language: 'FBD', elements: []} : {elements: [], rungs: []})

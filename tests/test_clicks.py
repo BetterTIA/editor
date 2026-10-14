@@ -164,5 +164,33 @@ class TestClicks(unittest.TestCase):
         self.wait_for("ed.after.elements.some(p => p.id === 'n1')")
 
 
+    def drag(self, selector_js, dx, dy):
+        x, y = self.js('(() => { const r = (%s).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()'
+                       % selector_js)
+        self.ws.call('Input.dispatchMouseEvent', type='mousePressed', x=x, y=y, button='left', buttons=1, clickCount=1)
+        for i in range(1, 6):
+            self.ws.call('Input.dispatchMouseEvent', type='mouseMoved', x=x + dx * i / 5, y=y + dy * i / 5, button='left', buttons=1)
+        self.ws.call('Input.dispatchMouseEvent', type='mouseReleased', x=x + dx, y=y + dy, button='left', buttons=0, clickCount=1)
+
+    def test_hmi_designer_insert_move_resize_delete(self):
+        uid = server.api_edit_create(SAMPLES, self.data, {'project': PROJECT, 'round': 'test', 'kind': 'hmi_screen',
+                                                          'screen': 'Manual'})['id']
+        self.ws.call('Page.navigate', url=self.url + '/?edit=%s&edit_mode=1' % uid)
+        self.wait_for("document.body && document.body.dataset.done === '1' && !!document.querySelector('#ed-canvas .hmi-screen')")
+        self.click("document.querySelector('#palette .item[data-type=\"Button\"]')")
+        self.wait_for("he.insert === 'Button'")
+        self.click("document.querySelector('#ed-canvas .hmi-screen')")                       # the middle of the screen
+        self.wait_for("he.sel === 'Button_1' && he.after.items.some(x => x.name === 'Button_1' && x.left % 8 === 0)")
+        io = "document.querySelector('#ed-canvas .hi[data-name=\"IO_Setpoint\"]')"
+        self.drag(io, 60, 0)                                           # snapped to the 8 px grid (top 220 -> 224)
+        self.wait_for("(x => x.left > 260 && x.left % 8 === 0 && x.top === 224)(he.after.items.find(x => x.name === 'IO_Setpoint'))")
+        self.drag("document.querySelector('#ed-canvas .hh.se')", 40, 20)
+        self.wait_for("(x => x.width > 160 && x.height > 40 && x.width % 8 === 0)(he.after.items.find(x => x.name === 'IO_Setpoint'))")
+        self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete'})); 1")
+        self.wait_for("!he.after.items.some(x => x.name === 'IO_Setpoint')")
+        self.click("document.getElementById('ed-undo')")
+        self.wait_for("he.after.items.some(x => x.name === 'IO_Setpoint')")
+
+
 if __name__ == '__main__':
     unittest.main()

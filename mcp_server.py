@@ -227,6 +227,29 @@ def get_screen(e, a):
     return e.get('/api/hmi/screen', project=a['project'], screen=a['screen'], export_ts=a.get('export_ts'))
 
 
+def list_presets(e, a):
+    return e.get('/api/hmi/presets')
+
+
+def propose_screen(e, a, client=None):
+    new = a.get('new')
+    if new is None:                                       # a screen the export does not have is a new one
+        try:
+            e.get('/api/hmi/screen', project=a['project'], screen=a['screen'])
+            new = False
+        except ToolError:
+            new = True
+    if new and not a.get('after') and not a.get('preset'):
+        raise ToolError('a new screen needs after (a screen model) or preset (see list_presets)')
+    body = dict(project=a['project'], round=a['round'], kind='hmi_screen', screen=a['screen'], new=new, hmi=a.get('hmi'),
+                after=a.get('after'), preset=a.get('preset'), params=a.get('params'), note=a.get('note') or '',
+                by=a.get('by') or (client or {}).get('name') or 'AI')
+    u = e.req('POST', '/api/edits', {k: v for k, v in body.items() if v is not None})
+    d = e.get('/api/edits/' + q(u['id']))
+    return {'id': u['id'], 'state': u['state'], 'new': new, 'errors': d.get('errors'), 'warnings': d.get('warnings'),
+            'changes': d.get('screen_diff'), 'upload_note': d.get('upload_note'), 'url': '%s/?edit=%s' % (e.url, q(u['id']))}
+
+
 def _schema(props, required=()):
     return {'type': 'object', 'properties': props, 'required': list(required), 'additionalProperties': False}
 
@@ -315,6 +338,21 @@ TOOLS = [
     ('get_screen', 'One HMI screen: {name, width, height, background, items: [{name, type, left, top, width, height, text, '
                    'colors, font, bindings: [{property, tag}], events}]}.',
      _schema({'project': S, 'screen': S, 'export_ts': HMI_TS}, ['project', 'screen']), get_screen),
+    ('list_presets', 'Presets for new HMI screens (Machine overview, Alarm page, Manual control, Settings) and their params.',
+     _schema({}), list_presets),
+    ('propose_screen', 'Propose a WinCC Unified screen as an edit in state Proposal: a change of an exported screen ("after" '
+                       '= the whole screen model, start from get_screen and keep item names) or a new screen from "after" '
+                       'or a preset with params {machine, tags: [tag names], width?, height?, screens?}. Returns the id, the '
+                       'changes against the export, rule errors (items outside the screen, unknown tags) and why Upload '
+                       'cannot write it if so. A human reviews and approves it in the editor.',
+     _schema({'project': S, 'round': {'type': 'string', 'description': 'round / topic the edit belongs to'}, 'screen': S,
+              'after': {'type': 'object', 'description': 'screen model {name, width, height, background, items: [...]}'},
+              'preset': {'type': 'string', 'enum': ['machine_overview', 'alarm_page', 'manual_control', 'settings']},
+              'params': {'type': 'object', 'description': '{machine, tags: [names], width, height, screens: [names]}'},
+              'new': {'type': 'boolean', 'description': 'default: true when the HMI export has no screen of this name'},
+              'hmi': {'type': 'string', 'description': 'HMI name (default: the HMI of the newest export)'}, 'note': S,
+              'by': {'type': 'string', 'description': 'author shown in the history (default: the client name)'}},
+             ['project', 'round', 'screen']), propose_screen),
     ('screenshot', 'PNG of an edit (diff), of an HMI screen or of a network as the editor draws it (headless Chrome or Edge).',
      _schema({'edit': S, 'project': S, 'block': S, 'nw': I, 'screen': S, 'width': I, 'height': I,
               'theme': {'type': 'string', 'enum': ['dark', 'light']}}), take_screenshot),
@@ -332,7 +370,7 @@ def call_tool(e, name, a, client=None):
         missing = [k for k in t[2]['required'] if a.get(k) in (None, '')]
         if missing:
             raise ToolError('missing argument(s): %s' % ', '.join(missing))
-        v = t[3](e, a, client) if t[3] is propose_edit else t[3](e, a)
+        v = t[3](e, a, client) if t[3] in (propose_edit, propose_screen) else t[3](e, a)
     except ToolError as err:
         return {'content': [{'type': 'text', 'text': str(err)}], 'isError': True}
     if isinstance(v, list):

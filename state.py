@@ -13,8 +13,8 @@ from datetime import datetime
 # Six states: Signed = written to the project (by hand or by the Writer), Checked = Reader export = proposal.
 # An older state.json with five states loads unchanged (the state names stayed the same).
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
-# what an edit changes: one network's model (and title/comment), block interface members, a new network
-KINDS = ['network', 'interface', 'new_network']
+# what an edit changes: one network's model (and title/comment), block interface members, a new network, an HMI screen
+KINDS = ['network', 'interface', 'new_network', 'hmi_screen']
 LOCK = threading.RLock()
 
 

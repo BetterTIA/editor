@@ -497,7 +497,8 @@ def api_edit_create(root, data, body):
     if kind not in state.KINDS:
         raise state.StateError('kind must be one of %s' % ', '.join(state.KINDS), 400)
     state._file(data, project)                      # checks --data and the project name
-    u = {'interface': _new_interface, 'network': _new_change, 'new_network': _new_net}[kind](root, project, block, body)
+    u = {'interface': _new_interface, 'network': _new_change, 'new_network': _new_net, 'hmi_screen': _new_hmi}[kind](
+        root, project, block, body)
     b = u.pop('_block', None) or _load(root, project, u['block'])[1]
     f = bool(u.pop('f_net', None) or b['attributes'].get('S7_Safety') == 'TRUE' or body.get('f'))
     when, by = state.now(), str(body.get('by') or 'editor')[:80]
@@ -510,6 +511,144 @@ def api_edit_create(root, data, body):
         s['edits'].append(u)
         state.save(data, project, s)
     return u
+
+
+# ---------- HMI screens (H2): an edit of one WinCC Unified screen ----------
+
+def _known_tags(root, project, hmi_name=None):
+    """{tag name: data type} of the PLC tag tables and the HMI tag tables of the newest exports (binding suggestions)."""
+    res = {t['name']: t['type'] for t in catalog.catalog(root, project)['tags']} if project_index(root, project) else {}
+    try:
+        res.update({t['name']: t['type'] for t in hmi.tags(hmi.find(root, project, None, hmi_name)[2])})
+    except KeyError:
+        pass
+    return res
+
+
+def _hmi_after(m, name):
+    """The screen model from the API (trust boundary), named after the edit's screen; wrong shape = 400."""
+    try:
+        return hmi.verify(dict(m, name=name) if isinstance(m, dict) else m)
+    except ValueError as e:
+        raise state.StateError(str(e), 400)
+
+
+def _preset_model(root, project, key, name, params):
+    """A preset's screen model; params {machine?, tags?: [names], width?, height?, screens?: [names]} from the API."""
+    p = params if isinstance(params, dict) else {}
+    tg, scr = p.get('tags') or [], p.get('screens')
+    if not isinstance(tg, list) or len(tg) > 200 or not all(isinstance(t, str) and 0 < len(t) <= 300 for t in tg):
+        raise state.StateError('params.tags must be a list of tag names', 400)
+    if scr is not None and not (isinstance(scr, list) and all(isinstance(x, str) and x for x in scr)):
+        raise state.StateError('params.screens must be a list of screen names', 400)
+    known = _known_tags(root, project)
+    try:
+        return hmi.preset(key, name, _text(p.get('machine'), 'machine', 80) or 'Machine',
+                          [{'name': t, 'type': known.get(t.strip('"'), '')} for t in tg],
+                          int(p.get('width') or 1280), int(p.get('height') or 800), scr)
+    except (ValueError, TypeError) as e:
+        raise state.StateError(str(e), 400)
+
+
+def api_hmi_preset(root, body):
+    """POST /api/hmi/preset {project, preset, screen?, params?} -> the screen model of a preset (saves nothing)."""
+    b = body if isinstance(body, dict) else {}
+    return _preset_model(root, str(b.get('project') or ''), b.get('preset'), _text(b.get('screen'), 'screen', 128) or 'New_screen',
+                         b.get('params'))
+
+
+def _new_hmi(root, project, block, body):
+    """An HMI screen edit: a change of an exported screen (new: false, "after" defaults to the export) or a new screen
+    (new: true) from "after" or a preset."""
+    new = bool(body.get('new'))
+    name = _text(body.get('screen'), 'screen', 128, required=True, bad='\\/:*?"<>|')
+    try:
+        t, h, folder = hmi.find(root, project, None, body.get('hmi') or None)
+    except KeyError:
+        if not new or not body.get('hmi'):
+            raise
+        t, h, folder = None, _text(body['hmi'], 'hmi', 128, bad='\\/:*?"<>|'), None
+    exported = next((s for s in hmi._screens(folder)[0] if s['name'] == name), None) if folder else None
+    if new and exported:
+        raise state.StateError('screen %s is already in the HMI export %s — propose a change of it (new: false)' % (name, t), 400)
+    if not new and not exported:
+        raise state.StateError('screen %s is not in the HMI export %s of %s (a new screen: new: true)' % (name, t, h), 400)
+    if body.get('preset'):
+        after = _preset_model(root, project, body['preset'], name, body.get('params'))
+    elif body.get('after') is not None or new:
+        if body.get('after') is None:
+            raise state.StateError('after: the screen model is required for a new screen (or a preset)', 400)
+        after = _hmi_after(body['after'], name)
+    else:
+        after = exported
+    return {'block': h, 'nw': None, 'title': name, 'hmi': h, 'screen': name, 'new': new, 'after': after,
+            'before': {'export_ts': t, 'screen': exported}, '_block': {'kind': '', 'number': None, 'attributes': {}}}
+
+
+HMI_ATTR = {'left': 'Left', 'top': 'Top', 'width': 'Width', 'height': 'Height', 'text': 'Text', 'background': 'BackColor'}
+
+
+def hmi_writes(u):
+    """Writer calls for an HMI edit: SetHmiItemAttribute / SetHmiDynamizationTag for every changed attribute of the screen
+    and of its existing items. StateError 409 when the edit needs what the Writer cannot do (create a screen or an item,
+    delete an item, change a type or a font, add or remove a binding or a color)."""
+    c = hmi.compare(u['before'].get('screen'), u['after'])
+    why = (['a new screen'] if u.get('new') else []) + ['new item %s' % n for n in c['added']] + \
+        ['deleted item %s' % n for n in c['deleted']] + \
+        ['%s: %s' % (n, x['attr']) for n, ch in [('screen', c['screen'])] + list(c['changed'].items()) for x in ch
+         if x['attr'] == 'type' or x['attr'].startswith('font.') or x['attr'] != 'text' and None in (x['before'], x['after'])]
+    if why:
+        raise state.StateError('Upload cannot make this edit: the Writer has no tool to create screens and items yet '
+                               '(ImportHmiScreen) and none for %s — make the change by hand following the TIA steps'
+                               % ', '.join(why))
+    calls = []
+    for n, ch in [('', c['screen'])] + list(c['changed'].items()):
+        for x in ch:
+            a, base = x['attr'], {'softwarePath': u['hmi'], 'screenName': u['screen'], 'itemName': n, 'dryRun': False}
+            if a.startswith('binding '):
+                calls.append(('SetHmiDynamizationTag', dict(base, property=a[8:], tag=x['after'])))
+            else:
+                attr = a[7:8].upper() + a[8:] if a.startswith('colors.') else HMI_ATTR[a]
+                value = hmi.tia_color(x['after']) if a.startswith('colors.') or a == 'background' else str(x['after'] or '')
+                calls.append(('SetHmiItemAttribute', dict(base, attribute=attr, value=value, **({'culture': 'en-US'} if a == 'text' else {}))))
+    return calls
+
+
+def _upload_hmi(data, uid, u, mcp, timeout, portal):
+    """Approved HMI edit -> TIAC_Writer: GetPortals, Connect, one call per changed attribute -> Signed (by TIAC_Writer)."""
+    calls = hmi_writes(u)
+    if not TIA_LOCK.acquire(blocking=False):
+        raise state.StateError('another Upload / Check is running — wait until it ends')
+    steps = []
+    try:
+        try:
+            with _client(mcp, 'writer', timeout) as k:
+                _connect(k, steps, portal)
+                for nm, arg in calls:
+                    _step(steps, '%s %s %s' % (nm, arg['itemName'] or u['screen'], arg.get('attribute') or arg.get('property')),
+                          lambda: k.call(nm, arg))
+            ok, message = True, ('%d attribute(s) written to screen %s of %s — compile the HMI and save the project in TIA '
+                                 '(the Writer does not call SaveProject)' % (len(calls), u['screen'], u['hmi']))
+        except mcp_client.MCPError as e:
+            ok, message = False, CONNECTION_ERROR + str(e)
+        except Exception as e:                        # whatever stops it must be recorded
+            ok, message = False, 'Upload stopped: %s' % e
+        write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
+        u = _write(data, uid, write, 'Signed' if ok else None, 'TIAC_Writer')
+    finally:
+        TIA_LOCK.release()
+    return {'ok': ok, 'message': write['message'], 'write': write, 'edit': u}
+
+
+def _check_hmi(root, data, uid, u, body):
+    """HMI edit: the screen in the HMI export (newest / given) has the items of the proposal (hmi.check)."""
+    t, _, folder = hmi.find(root, u['project'], str(body['export_ts']) if body.get('export_ts') else None, u['hmi'])
+    match, diffs = hmi.check(u['after'], next((s for s in hmi._screens(folder)[0] if s['name'] == u['screen']), None))
+    note = 'export = proposal (%d items)' % len(u['after']['items']) if match else 'MISMATCH: %s' % '; '.join(diffs[:20])
+    if t == u['before'].get('export_ts'):
+        note += ' · note: the export is the same as before the change'
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note})
+    return {'match': match, 'export_ts': t, 'nw_export': None, 'note': note, 'diffs': diffs, 'edit': u}
 
 
 def api_edit_state(data, uid, body):
@@ -587,6 +726,8 @@ def _non_f(root, project):
 
 
 def _validate(after, f=False, root=None, project=None, before=None):
+    if 'items' in after:                              # an HMI screen
+        return hmi.validate(after, set(_known_tags(root, project)) if root else None)
     if fbd.is_fbd(after):
         return fbd.validate(after, f, _non_f(root, project) if f and root else (), before)
     return model.validate(after)
@@ -597,6 +738,15 @@ def api_edit_detail(data, uid, width=0, root=None):
     _, s, u = state.find(data, uid)
     if u.get('kind') == 'interface':
         res = {'interface': _interface_rows(u), 'diff': {}, 'drawing': None, 'elements': [], 'rungs': [], 'warnings': []}
+    elif u.get('kind') == 'hmi_screen':
+        b = u['before'].get('screen')
+        c = hmi.compare(b, u['after'])
+        res = {'screen_diff': c, 'ghosts': [i for i in (b or {}).get('items', []) if i['name'] in c['deleted']],
+               'diff': {}, 'drawing': None, 'elements': [], 'rungs': [], 'warnings': []}
+        try:
+            hmi_writes(u)
+        except state.StateError as e:
+            res['upload_note'] = str(e)
     else:
         res = _diff_drawing(_before(u), u['after'], width)
         if root:
@@ -731,6 +881,8 @@ def api_check_export(root, data, uid, body):
     _, _, u = state.find(data, uid)
     if u.get('kind') == 'interface':
         return _check_interface(root, data, uid, u, body)
+    if u.get('kind') == 'hmi_screen':
+        return _check_hmi(root, data, uid, u, body)
     t, b = _load(root, u['project'], u['block'], str(body['export_ts']) if body.get('export_ts') else None)
     n, cand = _find_network(b['networks'], u)
     notes, new, language = [], u.get('kind') == 'new_network', 'FBD' if fbd.is_fbd(u['after']) else 'LAD'
@@ -801,7 +953,10 @@ def api_edit_after(data, uid, body, root=None):
         project, s, u = state.find(data, uid)
         if u['state'] != 'Proposal':
             raise state.StateError('the proposal can be changed only in state Proposal (now %s)' % u['state'])
-        if u.get('kind') == 'interface':
+        if u.get('kind') == 'hmi_screen':
+            if body.get('after') is not None:
+                u['after'] = _hmi_after(body['after'], u['screen'])
+        elif u.get('kind') == 'interface':
             if body.get('section') is not None:
                 u['section'] = _section(body['section'])
             if body.get('members') is not None:
@@ -973,6 +1128,17 @@ def _pick_portal(inst, wanted=None):
     return next((x for x in inst if wanted and str(x['portalId']) == str(wanted)), None) or (inst[0] if len(inst) == 1 else None)
 
 
+def _connect(k, steps, portal):
+    """GetPortals first — Connect without portalId would start TIA Portal when none is running — then Connect {portalId}."""
+    inst = portal_instances(_step(steps, 'GetPortals', lambda: k.call('GetPortals', {}))) or []
+    if not inst:
+        raise SnapshotError('TIA Portal is not running — open the project in TIA Portal first (Upload does not start TIA)')
+    chosen = _pick_portal(inst, portal)
+    if chosen is None:
+        raise SnapshotError('More than one TIA Portal instance is running — choose one in the status bar')
+    _step(steps, 'Connect', lambda: k.call('Connect', {'portalId': chosen['portalId']}))
+
+
 def _write(data, uid, write, new_state, by):
     """Store the Upload/Check record in u['writes'] and on success change the state (if nobody changed it meanwhile)."""
     with state.LOCK:
@@ -1004,6 +1170,8 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
         raise state.StateError('Upload only in state Approved (now %s)' % u['state'])
     if _is_f_edit(root, u):
         raise state.StateError('F-block: no Upload — make the change by hand following the TIA steps')
+    if u.get('kind') == 'hmi_screen':
+        return _upload_hmi(data, uid, u, mcp, timeout, portal)
     tia = _tia(s, u['project'], data)
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
@@ -1015,15 +1183,7 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
         sp, block = tia['softwarePath'], u['block']
         try:
             with _client(mcp, 'writer', timeout) as k:
-                # GetPortals first: Connect without portalId would start TIA Portal when none is running
-                inst = portal_instances(step('GetPortals', lambda: k.call('GetPortals', {}))) or []
-                if not inst:
-                    raise SnapshotError('TIA Portal is not running — open the project in TIA Portal first '
-                                        '(Upload does not start TIA)')
-                chosen = _pick_portal(inst, portal)
-                if chosen is None:
-                    raise SnapshotError('More than one TIA Portal instance is running — choose one in the status bar')
-                step('Connect', lambda: k.call('Connect', {'portalId': chosen['portalId']}))
+                _connect(k, steps, portal)
                 grp = tia.get('groupPath')
                 if not grp:
                     fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
@@ -1073,24 +1233,29 @@ def api_check(root, data, uid, mcp, timeout=300):
     project, s, u = state.find(data, uid)
     if u['state'] != 'Signed':
         raise state.StateError('Check only in state Signed (now %s)' % u['state'])
-    tia = _tia(s, project, data)
-    try:                                              # PLC and group from the existing export of the block
-        t0, fpath, _ = find_block(root, project, u['block'])
-        parts = os.path.relpath(fpath, os.path.join(root, project, t0))[:-len('.s7dcl')].replace('\\', '/').split('/')
-    except KeyError:
-        parts = [tia.get('plcName') or tia['softwarePath'], 'Blocks', u['block']]
-    if tia.get('groupPath'):
-        parts = parts[:2] + [x for x in tia['groupPath'].split('/') if x] + [u['block']]
+    if u.get('kind') == 'hmi_screen':                 # the screens of the HMI into a new folder of the export root
+        tool, arg, index = 'export_hmi_to_folder', {'hmiName': u['hmi'], 'include': ['screens'], 'pathPrefixes': ['Screens']}, \
+            lambda: set(hmi.exports(root, project))
+    else:
+        tia = _tia(s, project, data)
+        try:                                          # PLC and group from the existing export of the block
+            t0, fpath, _ = find_block(root, project, u['block'])
+            parts = os.path.relpath(fpath, os.path.join(root, project, t0))[:-len('.s7dcl')].replace('\\', '/').split('/')
+        except KeyError:
+            parts = [tia.get('plcName') or tia['softwarePath'], 'Blocks', u['block']]
+        if tia.get('groupPath'):
+            parts = parts[:2] + [x for x in tia['groupPath'].split('/') if x] + [u['block']]
+        tool, arg, index = 'export_to_folder', {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
+                                                'plcName': tia.get('plcName') or parts[0]}, lambda: set(project_index(root, project))
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
     steps, k_res = [], None
     try:
-        before = set(project_index(root, project))
+        before = index()
         try:
             with _client(mcp, 'reader', timeout) as k:
-                texts = _reader_export(k, {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
-                                           'plcName': tia.get('plcName') or parts[0]}, steps)
-            new_items = set(project_index(root, project)) - before
+                texts = _reader_export(k, arg, steps, tool=tool)
+            new_items = index() - before
             ts = [x for x in re.findall(r'\d{8}-\d{6}', ' '.join(texts)) if x in new_items] or sorted(new_items)
             if not ts:
                 raise s7dcl_write.WriteError("no Reader export found in the editor's export root (%s\\%s) — response: %s"
@@ -1995,6 +2160,8 @@ ROUTES = [
                                                    int(h.q.get('width', '0')))),
     ('GET', r'/api/catalog', lambda h: api_catalog(*_project(h))),
     ('GET', r'/api/hmi/screens', lambda h: hmi.api_screens(*_project(h), h.q.get('export_ts'), h.q.get('hmi'))),
+    ('GET', r'/api/hmi/presets', lambda h: hmi.list_presets()),
+    ('POST', r'/api/hmi/preset', lambda h: api_hmi_preset(h.root_for(h.body_project()), h._body())),
     ('GET', r'/api/hmi/screen', lambda h: hmi.api_screen(*_project(h), h.q.get('screen', ''), h.q.get('export_ts'),
                                                          h.q.get('hmi'))),
     ('POST', r'/api/layout', lambda h: api_layout(h.root_for(h.body_project()), h._body())),

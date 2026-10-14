@@ -210,13 +210,16 @@ def verify(m):
         b = x.get('bindings') or []
         if not isinstance(b, list) or not all(isinstance(z, dict) for z in b):
             raise ValueError('%s: bindings must be [{property, tag}]' % nm)
-        it['bindings'] = [{'property': _str(z.get('property'), '%s: binding property' % nm, 64, True),
-                           'tag': _str(z.get('tag'), '%s: binding tag' % nm, 300, True)} for z in b]
+        it['bindings'] = [dict({'property': _str(z.get('property'), '%s: binding property' % nm, 64, True),
+                                'tag': _str(z.get('tag'), '%s: binding tag' % nm, 300, True)}, **({'indirect': True} if z.get('indirect') else {}))
+                          for z in b]
         if x.get('events'):
             if not isinstance(x['events'], list) or not all(isinstance(z, dict) for z in x['events']):
                 raise ValueError('%s: events must be [{event, script?}]' % nm)
             it['events'] = [{'event': _str(z.get('event'), '%s: event' % nm, 64, True),
                              'script': _str(z.get('script'), '%s: script' % nm, 20000)} for z in x['events']]
+        if x.get('visible') is False:
+            it['visible'] = False
         res['items'].append(it)
     return res
 
