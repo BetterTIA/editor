@@ -25,13 +25,16 @@ steps a person takes, and each step is recorded.
 | ![FBD editor with the palette](tests/screenshots/fbd_editor.png) | ![TIA steps for making the change by hand](tests/screenshots/tia_steps.png) |
 | FBD editor: palette, insertion points, rule check, element properties | TIA steps: the same change as instructions for TIA Portal |
 
-It is the third tool of the BetterTIA set:
+It is one of the four tools of the [BetterTIA](https://github.com/BetterTIA) set:
 
 | Tool | Role |
 |---|---|
 | [reader](https://github.com/BetterTIA/reader) | reads a TIA Portal project through Openness and exports it to a folder (read-only MCP server) |
 | [writer](https://github.com/BetterTIA/writer) | writes to a TIA Portal project through Openness (MCP server) |
 | **editor** (this repository) | draws a network from the export, lets you compose a change and tracks it until it is in the project |
+| [watch](https://github.com/BetterTIA/watch) | reads live values from the running PLC through TIA Portal (read-only MCP server) |
+
+All four are developed, used and tested only with TIA Portal V21.
 
 > Status: early and experimental. Everything here is tested against the bundled sample project only;
 > writing a network back to a live TIA Portal has not been verified yet.
