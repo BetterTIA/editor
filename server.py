@@ -758,6 +758,8 @@ def api_edit_detail(data, uid, width=0, root=None):
     refused = root and u.get('kind') != 'hmi_screen' and document_import_refused(root, u)
     if refused:
         res['upload_note'] = refused
+    elif u.get('group'):
+        res['upload_note'] = 'member of group %s — Upload is on the group page (members in order)' % u['group']['id']
     res['tia'] = s.get('tia')
     k = u.get('checks') or []
     if state.rank(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
@@ -1205,12 +1207,16 @@ def document_import_refused(root, u):
     return None
 
 
-def api_upload(root, data, uid, mcp, timeout=300, portal=None):
+def api_upload(root, data, uid, mcp, timeout=300, portal=None, in_group=False):
     """Approved non-safety change -> TIAC_Writer: GetPortals, Connect {portalId}, ResolveObjectPath, export the block as documents,
-    replace the network, PreviewImport, ImportFromDocuments Override -> Signed (by TIAC_Writer)."""
+    replace the network, PreviewImport, ImportFromDocuments Override -> Signed (by TIAC_Writer).
+    A group member only through the group Upload (in_group): one member alone leaves the block half changed (E8)."""
     _, s, u = state.find(data, uid)
     if u['state'] != 'Approved':
         raise state.StateError('Upload only in state Approved (now %s)' % u['state'])
+    if u.get('group') and not in_group:
+        raise state.StateError('%s is member %d of group %s — upload the group (members in order), not one member: '
+                               'alone it leaves the block half changed' % (uid, u['group']['order'], u['group']['id']))
     if _is_f_edit(root, u):
         raise state.StateError('F-block: no Upload — make the change by hand following the TIA steps')
     if u.get('kind') == 'hmi_screen':
@@ -1272,6 +1278,11 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
             ok, message, preview = False, str(e), None
         except Exception as e:                        # whatever stops it (also after the import) must be recorded
             ok, message, preview = False, 'Upload stopped: %s' % e, None
+        if not ok and os.listdir(work):              # E7: keep the documents of a failed attempt for the diagnosis
+            keep = os.path.join(data, state.check_name(u['project']), 'upload-failed',
+                                '%s-%s' % (uid, state.now().replace(':', '').replace('-', '')))
+            shutil.copytree(work, keep, dirs_exist_ok=True)
+            message += ' · the documents of this attempt are kept in %s' % keep
         write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
         if preview is not None:
             write['preview'] = preview[:4000]
@@ -2260,7 +2271,7 @@ def _add_project(h):
 def _group_upload(h, gid):
     _demo_guard(h, _group_members(h.data, gid)[2][0]['id'])
     return api_group_upload(h.root_of, h.data, gid, lambda uid: api_upload(
-        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h)))
+        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h), in_group=True))
 
 
 def _changelog(h, name):

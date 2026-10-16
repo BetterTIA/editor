@@ -435,7 +435,11 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 anything is written; a group checks every member first) where the documents import is known to break the block: an
 **OB** (the import loses the event class, number and parameters) and a block with **GRAPH** — itself or a static
 multi-instance whose type is exported as SimaticML with `<ProgrammingLanguage>GRAPH` (the import fails). Those are made
-by hand or through SimaticML (`ExportXmlBlock` → edit → `ImportXmlBlock` → `CompileBlock`). The server starts
+by hand or through SimaticML (`ExportXmlBlock` → edit → `ImportXmlBlock` → `CompileBlock`). A **group member** is
+uploaded only with its group (409 otherwise — one member alone leaves the block half changed). When an Upload fails,
+the documents of the attempt are kept in `<--data>\<project>\upload-failed\<id>-<time>\` (the message names the folder).
+When the export check cannot find a change (e.g. TIA took a new network only as two networks), a person records the
+result by hand on a Signed edit ("Record a check by hand…" → `POST /api/check` with a note). The server starts
 TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 1. `GetPortals {}` → `Connect {portalId}` (the instance attached in the status, otherwise the only running one). No
    instance → `ok: false` "TIA Portal is not running" and **no `Connect`** (Upload never starts TIA Portal); several

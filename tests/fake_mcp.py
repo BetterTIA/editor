@@ -130,6 +130,8 @@ def writer(a, nm, arg):
         return json.dumps({'groupPath': arg['groupPath'], 'overwrite': blocks})
     if nm == 'ImportFromDocuments':
         block = arg['fileNameWithoutExtension']
+        if a.fail_import:                             # the real Writer says no more than this
+            raise ValueError("Failed importing '%s' from documents" % block)
         target = os.path.join(a.state, *[x for x in arg['groupPath'].split('/') if x])
         copy_tree(arg['importPath'], target, block)
         with open(os.path.join(a.state, 'imports.jsonl'), 'a', encoding='utf-8') as f:
@@ -342,6 +344,7 @@ def main():
     ap.add_argument('--no-hmi', action='store_true', help='Reader: the project has no Unified HMI')
     ap.add_argument('--inconsistent', action='store_true', help='Writer: blocks export only after CompileBlock')
     ap.add_argument('--slow', type=float, default=0)
+    ap.add_argument('--fail-import', action='store_true', help='Writer: ImportFromDocuments fails')
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)
     fn = writer if a.role == 'writer' else reader

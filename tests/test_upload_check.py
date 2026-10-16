@@ -4,6 +4,7 @@ The export root and the "TIA project" of the fake servers are in temp: the Write
 from --state after an import), the import writes to --state; the Reader exports from --state to a new folder in the
 server's export root."""
 import contextlib
+import glob
 import http.client
 import io
 import json
@@ -197,6 +198,24 @@ class TestUploadCheck(unittest.TestCase):
         self.assertIn('cannot be started', r['message'])
         s, r = self.req('GET', '/api/edits/%s' % uid)
         self.assertEqual((r['tia'], len(r['edit']['writes'])), (TIA, 2))
+
+    def test_failed_import_keeps_documents_and_member_needs_group(self):
+        """E7: a failed import keeps the documents of the attempt; E8: a group member is uploaded only with its group."""
+        self.stop()
+        self.start('--fail-import')
+        self.set_tia()
+        uid = self.proposal(ops=self.OPS)
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertEqual((s, r['ok'], r['edit']['state']), (200, False, 'Approved'))
+        self.assertIn("Failed importing 'FB_Conveyor'", r['message'])
+        keep = r['message'].split('are kept in ')[1]
+        self.assertTrue(keep.startswith(os.path.join(self.data, PROJECT, 'upload-failed', uid + '-')), keep)
+        self.assertTrue(glob.glob(os.path.join(keep, '**', 'FB_Conveyor.s7dcl'), recursive=True))
+        uid2 = self.proposal(nw=2)
+        self.req('POST', '/api/groups', {'edit_ids': [uid, uid2]})
+        s, e = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertEqual(s, 409)
+        self.assertIn('upload the group', e['error'])
 
     def test_upload_tia_not_running_does_not_connect(self):
         self.stop()

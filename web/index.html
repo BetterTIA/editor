@@ -763,12 +763,15 @@ async function showEdit(uid, error) {
       : `<button id="upload" class="tia" ${canTia && !d.upload_note ? '' : 'disabled'} title="${esc(d.upload_note || (!canTia ? 'fill in the TIA settings for the project first'
           : u.kind === 'hmi_screen' ? 'TIAC_Writer sets the changed attributes and tag dynamizations of the screen items → Signed'
           : 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed'))}">Upload to TIA</button>` +
-        (d.upload_note ? `<span class="fblock" title="${esc(d.upload_note)}">⚠ Upload cannot write this edit — make it by hand following the TIA steps</span>` : '')) : '') +
+        (d.upload_note ? `<span class="fblock">⚠ ${esc(d.upload_note)}</span>` : '')) : '') +
     (u.state === 'Signed' ? `<button id="check" class="tia check" ${canTia ? '' : 'disabled'} title="${canTia ? 'TIAC_Reader exports it and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
     (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : u.state === 'Disapproved' ? '' : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
     (DELETABLE.includes(u.state) ? `<button id="del-edit" class="danger" title="removes the edit${u.group ? ' (it leaves its group)' : ''}; only before it is written to TIA">Delete edit</button>` : '') +
     `<span class="progress" id="progress"></span>` +
-    `</div>` + disapproveHtml(u.state, u.disapproved) + `</div>` +
+    `</div>` + disapproveHtml(u.state, u.disapproved) +
+    (u.state === 'Signed' ? `<details class="disapprove"><summary>Record a check by hand…</summary>` +
+      `<textarea id="hand-note" rows="2" placeholder="what you checked, e.g. written as two networks NW 5 + NW 6 with the same logic"></textarea>` +
+      `<button id="hand-match">✓ Match</button> <button id="hand-mismatch">✗ Mismatch</button></details>` : '') + `</div>` +
     (d.errors.length ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.length})</b> — open it in the editor and fix:<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
     d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
@@ -822,6 +825,13 @@ async function showEdit(uid, error) {
     } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
   };
   onDisapprove(`/api/edits/${enc(u.id)}/state`, x => showEdit(uid, x));
+  // E9: the export check cannot find the change (e.g. TIA took a new network only as two) — a person records the result
+  for (const [id, match] of [['hand-match', true], ['hand-mismatch', false]]) if ($(id)) $(id).onclick = async () => {
+    const note = $('hand-note').value.trim();
+    if (!note) { $('hand-note').focus(); return; }
+    try { await api('/api/check', 'POST', {edit_id: u.id, match, export_ts: '', note: 'by hand: ' + note}); await showEdit(uid); }
+    catch (e) { await showEdit(uid, e.message); }
+  };
   armDelete('del-edit', `/api/edits/${enc(u.id)}`, () => { location.href = u.group ? `?group=${enc(u.group.id)}` : `?project=${enc(u.project)}`; });
   for (const b of m.querySelectorAll('button[data-state]')) {
     b.onclick = async () => {
