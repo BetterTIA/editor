@@ -139,6 +139,10 @@ class TestValidation(unittest.TestCase):
         m, _ = model.insert(nw(1), {'r': 0, 'k': 0}, catalog.element(CAT, 'TON'))
         ch = self.errors(m)
         self.assertTrue(any('Missing instance' in c for c in ch) and any('Missing PT' in c for c in ch))
+        pid = dict(catalog.element(CAT, 'TON'), name='PID_Temp', instance='"PID_1"',      # E2: PID inputs are optional
+                   inputs=[{'pin': 'Setpoint', 'operand': '#Sp'}, {'pin': 'Disturbance', 'operand': ''}])
+        m, _ = model.insert(nw(1), {'r': 0, 'k': 0}, pid)
+        self.assertFalse([c for c in self.errors(m) if 'PID_Temp' in c])
         m, _ = model.insert(nw(1), {'r': 0, 'k': 0}, catalog.element(CAT, 'NO'))
         self.assertTrue(any('Missing operand' in c for c in self.errors(m)))
         m = nw(1)

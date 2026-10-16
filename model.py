@@ -323,10 +323,16 @@ def validate(model):
             if 'below' in p and not (p.get('below') or '').strip():
                 ch.append({'id': p['id'], 'error': 'Missing edge memory bit: %s' % nm})
             if p.get('call') == 'instruction':          # inputs are mandatory for an instruction (optional for an FB)
-                empty_pins = [x['pin'] for x in p['inputs'] if not x['operand'].strip()]
+                empty_pins = [x['pin'] for x in p['inputs'] if not x['operand'].strip()
+                              and p.get('name') not in ALL_INPUTS_OPTIONAL]
                 if empty_pins:
                     ch.append({'id': p['id'], 'error': 'Missing %s: %s' % (', '.join(empty_pins), nm)})
     return ch
+
+
+# instructions whose inputs all have defaults in TIA (an empty pin is fine), e.g. the PID technology instructions —
+# shortcut: only these are listed; add an instruction when a false "Missing …" shows up
+ALL_INPUTS_OPTIONAL = {'PID_Compact', 'PID_3Step', 'PID_Temp'}
 
 
 def _display_name(p):
