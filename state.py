@@ -145,10 +145,11 @@ def projects(data):
 
 
 def new_id(data):
-    """Change ids are unique across all projects (so ?edit=U001 does not need the project)."""
+    """Change ids are unique across all projects (so ?edit=U001 does not need the project); a deleted id is not reused."""
     n = 0
     for p in projects(data):
-        for u in load(data, p)['edits']:
+        s = load(data, p)
+        for u in s['edits'] + [x for x in s.get('deleted') or [] if x.get('kind') == 'edit']:
             m = re.fullmatch(r'U(\d+)', u['id'])
             if m:
                 n = max(n, int(m.group(1)))

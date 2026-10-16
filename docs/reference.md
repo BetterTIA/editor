@@ -240,6 +240,12 @@ has in the exported block).
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
 | POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}` |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
+| DELETE | `/api/groups/<id>[?edits=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — only when each is Proposal, Approved or Disapproved, else 409 → `{project, group, deleted}` |
+| DELETE | `/api/edits/<id>` | deletes an edit not yet written (Proposal, Approved, Disapproved; else 409); a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
+
+Deleted edits and groups stay in `state.json` as tombstones (`deleted: [{id, kind: edit|group, time, by, …}]`): their
+ids are never given again and the changelog lists them (kind `deleted`). A group member written another way after a
+failed group Upload is moved to Signed on its own ("Written by hand → Signed" in the member list), then checked.
 
 Each member stores `group: {id: "G001", order, name?}`; group ids are unique across projects. The group's state is the
 **lowest** state of its members. In the tree a group is one expandable item with that state above the rounds; the group

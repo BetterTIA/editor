@@ -100,6 +100,37 @@ class TestGroups(unittest.TestCase):
         s, g = self.req('POST', '/api/groups/G001/state', {'state': 'Proposal'})
         self.assertEqual((s, g['state']), (200, 'Proposal'))
 
+    def test_delete_edit_and_group(self):
+        """E3: delete an edit / a group before it is written; ids are not reused; the changelog lists it."""
+        iface, new, change = self.three()
+        self.req('POST', '/api/groups', {'edit_ids': [iface, new, change], 'name': 'old idea'})
+        s, r = self.req('DELETE', '/api/edits/' + new)                                 # a member leaves the group
+        self.assertEqual((s, r['deleted']), (200, [new]))
+        _, g = self.req('GET', '/api/groups/G001')
+        self.assertEqual([(m['id'], m['order']) for m in g['members']], [(iface, 1), (change, 2)])
+        self.assertEqual(self.req('GET', '/api/edits/' + new)[0], 404)
+        self.req('POST', '/api/groups/G001/state', {'state': 'Approved'})
+        self.req('POST', '/api/edits/%s/state' % change, {'state': 'Signed'})
+        s, r = self.req('DELETE', '/api/groups/G001?edits=1')                          # a written member blocks it
+        self.assertEqual(s, 409)
+        self.assertIn('%s (Signed)' % change, r['error'])
+        self.assertEqual(self.req('DELETE', '/api/edits/' + change)[0], 409)
+        s, r = self.req('DELETE', '/api/groups/G001')                                  # ungroup: the edits stay
+        self.assertEqual((s, r['deleted']), (200, []))
+        self.assertEqual(self.req('GET', '/api/groups/G001')[0], 404)
+        self.assertEqual(self.req('DELETE', '/api/edits/' + iface)[0], 200)
+        a = self.edit(nw=7, title_after='x')
+        b = self.edit(nw=6, title_after='y')
+        self.assertEqual(a, 'U004')                                      # deleted U002 / U003 are not reused
+        s, g = self.req('POST', '/api/groups', {'edit_ids': [a, b]})
+        self.assertEqual(g['id'], 'G002')
+        s, r = self.req('DELETE', '/api/groups/G002?edits=1')
+        self.assertEqual((s, sorted(r['deleted'])), (200, sorted([a, b])))
+        _, log = self.req('GET', '/api/projects/%s/changelog' % PROJECT)
+        dl = [x['summary'] for x in log['items'] if x['kind'] == 'deleted']
+        self.assertEqual(len(dl), 6, dl)                                 # 4 edits + ungroup G001 + G002
+        self.assertIn('deleted group G001 (edits %s, %s · old idea)' % (iface, change), dl)
+
     def test_upload_in_order_and_check(self):
         iface, new, change = self.three()
         self.req('POST', '/api/groups', {'edit_ids': [change, new, iface]})            # any order: Upload sorts by kind
