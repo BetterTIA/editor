@@ -755,6 +755,9 @@ def api_edit_detail(data, uid, width=0, root=None):
         if 'title_after' in u or 'comment_after' in u:
             res['texts'] = {k: [u.get(old) or '', u.get(k, u.get(old) or '')]
                             for k, old in (('title_after', 'title'), ('comment_after', 'comment_before')) if k in u}
+    refused = root and u.get('kind') != 'hmi_screen' and document_import_refused(root, u)
+    if refused:
+        res['upload_note'] = refused
     res['tia'] = s.get('tia')
     k = u.get('checks') or []
     if state.rank(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
@@ -1167,6 +1170,41 @@ def _is_f_edit(root, u):
         return True
 
 
+XML_WAY = 'make the change by hand (TIA steps) or through SimaticML (ExportXmlBlock → edit → ImportXmlBlock → CompileBlock)'
+
+
+def _graph_blocks(root, project, names):
+    """Names (of `names`) that are GRAPH blocks — the Reader exports those as SimaticML (.xml), not as documents."""
+    xml = catalog._latest(root, project, '.xml')
+    res = set()
+    for n in names:
+        f = xml.get(n + '.xml')
+        if f:
+            with open(f, encoding='utf-8-sig', errors='replace') as h:
+                if '<ProgrammingLanguage>GRAPH</ProgrammingLanguage>' in h.read(200_000):
+                    res.add(n)
+    return res
+
+
+def document_import_refused(root, u):
+    """E4 / E5: an edit that ImportFromDocuments would break -> the reason, else None.
+    An OB loses its event class, number and parameters; an FB with a GRAPH multi-instance fails to import."""
+    if (u.get('block_kind') or '').upper() == 'OB':
+        return ('OB: importing documents loses the OB event class, number and parameters — Upload refused; %s, '
+                'then check the OB number and event class' % XML_WAY)
+    try:
+        _, iface = block_interface(root, u['project'], u['block'])
+    except KeyError:
+        return None
+    types = {m['name']: m['type'].strip().strip('"') for m in iface.get('Static', [])}
+    graph = _graph_blocks(root, u['project'], set(types.values()) | {u['block']})
+    hit = ['%s : "%s"' % (k, t) for k, t in types.items() if t in graph]
+    if hit or u['block'] in graph:
+        return ('Block with GRAPH (%s): importing documents fails for it — Upload refused; %s'
+                % (', '.join(hit) or 'the block itself', XML_WAY))
+    return None
+
+
 def api_upload(root, data, uid, mcp, timeout=300, portal=None):
     """Approved non-safety change -> TIAC_Writer: GetPortals, Connect {portalId}, ResolveObjectPath, export the block as documents,
     replace the network, PreviewImport, ImportFromDocuments Override -> Signed (by TIAC_Writer)."""
@@ -1177,6 +1215,9 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None):
         raise state.StateError('F-block: no Upload — make the change by hand following the TIA steps')
     if u.get('kind') == 'hmi_screen':
         return _upload_hmi(data, uid, u, mcp, timeout, portal)
+    refused = document_import_refused(root, u)
+    if refused:
+        raise state.StateError(refused)
     tia = _tia(s, u['project'], data)
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
@@ -2173,6 +2214,9 @@ def api_group_upload(root_of, data, gid, upload):
     not_ready = ['%s (%s)' % (u['id'], u['state']) for u in members if u['state'] != 'Approved']
     if not_ready:
         raise state.StateError('Upload of a group only when every member is Approved: %s' % ', '.join(not_ready))
+    refused = ['%s: %s' % (u['id'], r) for u in members for r in [document_import_refused(root_of(u['id']), u)] if r]
+    if refused:                                       # before the first write, not halfway through the group
+        raise state.StateError('; '.join(refused))
     res = []
     for u in sorted(members, key=lambda u: (UPLOAD_ORDER.get(u.get('kind', 'network'), 2), u['group']['order'])):
         r = upload(u['id'])

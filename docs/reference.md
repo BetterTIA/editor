@@ -431,7 +431,12 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 
 ## Upload and Check
 **Upload** — `POST /api/edits/<id>/upload` (only **Approved** and a non-F change; F-block, another state, missing
-`tia`, another Upload/Check running → **409**). The server starts TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
+`tia`, another Upload/Check running → **409**). Also refused (409, and `upload_note` in `GET /api/edits/<id>`, before
+anything is written; a group checks every member first) where the documents import is known to break the block: an
+**OB** (the import loses the event class, number and parameters) and a block with **GRAPH** — itself or a static
+multi-instance whose type is exported as SimaticML with `<ProgrammingLanguage>GRAPH` (the import fails). Those are made
+by hand or through SimaticML (`ExportXmlBlock` → edit → `ImportXmlBlock` → `CompileBlock`). The server starts
+TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 1. `GetPortals {}` → `Connect {portalId}` (the instance attached in the status, otherwise the only running one). No
    instance → `ok: false` "TIA Portal is not running" and **no `Connect`** (Upload never starts TIA Portal); several
    instances and none attached → `ok: false` "More than one TIA Portal instance…"; nothing else is done,

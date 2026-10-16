@@ -95,6 +95,28 @@ class TestUploadCheck(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
         self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {'softwarePath': 1})[0], 400)
 
+    def test_upload_refused_for_graph_instance_and_ob(self):
+        """E4 / E5: documents import breaks an FB with a GRAPH multi-instance and an OB — refused before any write."""
+        self.set_tia()
+        uid = self.proposal(ops=self.OPS)
+        f = os.path.join(self.root, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')
+        with open(f, encoding='utf-8-sig') as h:
+            text = h.read()
+        with open(f, 'w', encoding='utf-8') as h:
+            h.write(text.replace('        Belt_Running : Bool;\n', '        Belt_Running : Bool;\n        Seq : "FB_Sequence";\n', 1))
+        with open(os.path.join(self.root, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FB_Sequence.xml'), 'w', encoding='utf-8') as h:
+            h.write('<Document><SW.Blocks.FB><AttributeList><ProgrammingLanguage>GRAPH</ProgrammingLanguage></AttributeList>'
+                    '</SW.Blocks.FB></Document>')
+        _, d = self.req('GET', '/api/edits/' + uid)
+        self.assertIn('GRAPH (Seq : "FB_Sequence")', d['upload_note'])
+        s, e = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertEqual(s, 409)
+        self.assertIn('ImportXmlBlock', e['error'])
+        u = server.state.find(self.data, uid)[2]
+        self.assertIsNone(server.document_import_refused(self.root, dict(u, block='FB_Belt')))
+        self.assertIn('OB event class', server.document_import_refused(self.root, dict(u, block_kind='OB')))
+        self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
+
     def test_upload_compiles_an_inconsistent_block(self):
         self.stop()
         self.start('--inconsistent')                  # TIA exports no inconsistent block: compile it, export again
