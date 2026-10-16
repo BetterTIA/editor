@@ -45,7 +45,8 @@ All four are developed, used and tested only with TIA Portal V21.
 - Editor with a palette of instructions and of the project's own blocks, insertion points, branches,
   undo/redo and validation of LAD/FBD rules.
 - A tree of changes per network with six states:
-  `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
+  `Proposal → Approved → Signed → Checked → Uploaded → Tested`, plus **Disapproved** with a reason the AI
+  agent reads to propose a fix.
 - Shows the difference between the network before and after a change and generates step-by-step
   instructions for making the same change by hand in TIA Portal.
 - "Export = proposal" check: compares a fresh export with the approved change.

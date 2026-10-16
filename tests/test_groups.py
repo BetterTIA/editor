@@ -84,6 +84,22 @@ class TestGroups(unittest.TestCase):
         self.assertEqual([x['edit'] for x in p['parts']], [iface, new, change])
         self.assertIn('### 2. %s — FB10 "FB_Conveyor" · NW 2+ (new): Jam detection' % new, p['markdown'])
 
+    def test_disapproved_group_and_mcp(self):
+        iface, new, change = self.three()
+        self.req('POST', '/api/groups', {'edit_ids': [iface, new, change]})
+        self.req('POST', '/api/edits/%s/state' % change, {'state': 'Approved'})
+        s, g = self.req('POST', '/api/groups/G001/state', {'state': 'Disapproved', 'reason': 'jam needs a timer'})
+        self.assertEqual((s, g['state'], g['next'], g['previous']), (200, 'Disapproved', None, 'Proposal'))
+        e = mcp_server.Editor(self.url)
+        x = json.loads(mcp_server.call_tool(e, 'get_edit', {'id': new})['content'][0]['text'])
+        self.assertEqual((x['edit']['state'], x['edit']['disapproved']['reason']), ('Disapproved', 'jam needs a timer'))
+        x = json.loads(mcp_server.call_tool(e, 'list_edits', {'state': 'Disapproved'})['content'][0]['text'])
+        self.assertEqual(len(x['edits']), 3)
+        self.req('POST', '/api/edits/%s/state' % iface, {'state': 'Proposal'})
+        self.assertEqual(self.req('GET', '/api/groups/G001')[1]['state'], 'Disapproved')    # while one member is
+        s, g = self.req('POST', '/api/groups/G001/state', {'state': 'Proposal'})
+        self.assertEqual((s, g['state']), (200, 'Proposal'))
+
     def test_upload_in_order_and_check(self):
         iface, new, change = self.three()
         self.req('POST', '/api/groups', {'edit_ids': [change, new, iface]})            # any order: Upload sorts by kind

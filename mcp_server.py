@@ -26,7 +26,7 @@ import uuid
 
 import screenshot as shot
 from procedure import where
-from state import STATES
+from state import ALL_STATES
 
 PROTOCOL = '2025-06-18'
 VERSION = '0.1'
@@ -96,7 +96,7 @@ def _summary(u):
             'block': u['block'], 'nw': u['nw'], 'where': where(u),
             'title': u.get('title'), 'language': u.get('language'), 'f': u.get('f'), 'state': u['state'],
             'author': u.get('author'), 'time': u.get('time'), 'note': u.get('note'),
-            'last_check': k[-1] if k else None}
+            'disapproved': u.get('disapproved'), 'last_check': k[-1] if k else None}
 
 
 def list_edits(e, a):
@@ -278,8 +278,9 @@ TOOLS = [
                     'pure bit-logic FBD.',
      _schema({'project': S, 'block': S, 'nw': I, 'export_ts': TS}, ['project', 'block', 'nw']), get_network),
     ('list_edits', 'Edits (changes) with their state, optionally filtered by project and state.',
-     _schema({'project': S, 'state': {'type': 'string', 'enum': STATES}}), list_edits),
-    ('get_edit', 'One edit: before/after models, diff marks, rule errors, checks, writes, history and the TIA steps.',
+     _schema({'project': S, 'state': {'type': 'string', 'enum': ALL_STATES}}), list_edits),
+    ('get_edit', 'One edit: before/after models, diff marks, rule errors, checks, writes, history and the TIA steps. '
+                 'In state Disapproved, edit.disapproved.reason says why a person rejected it — fix that with update_edit.',
      _schema({'id': S}, ['id']), get_edit),
     ('propose_edit', 'Create a new edit in state Proposal. kind "network" (default): an "after" model of network nw and/or its new title / comment '
                      '(title_after, comment_after). '
@@ -299,7 +300,7 @@ TOOLS = [
               'by': {'type': 'string', 'description': 'author shown in the history (default: the client name)'}},
              ['project', 'round', 'block']), propose_edit),
     ('update_edit', 'Change a Proposal: the "after" model of a network edit, the members/section of an interface edit, '
-                    'and the note.',
+                    'and the note. A Disapproved edit goes back to Proposal with the change.',
      _schema({'id': S, 'after': MODEL, 'note': S, 'section': SECTION, 'members': MEMBERS,
               'title': {'type': 'string', 'description': 'new_network: title'},
               'comment': {'type': 'string', 'description': 'new_network: comment'},

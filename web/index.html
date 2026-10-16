@@ -11,7 +11,7 @@
   --text: #e7eaee; --muted: #9ba5b1; --accent: #4cc9e0; --accent-ink: #062530; --accent-soft: rgba(76, 201, 224, .14);
   --wire: #8c96a1; --operand: #e7eaee; --warning: #f0a050; --select: rgba(76, 201, 224, .14);
   --added: #6bd97e; --changed: #f0a050; --deleted: #ff7a7a;
-  --s-Proposal: #a3acb7; --s-Approved: #4cc9e0; --s-Signed: #c49bff; --s-Checked: #3ad1b5; --s-Uploaded: #f2c94c; --s-Tested: #6bd97e;
+  --s-Proposal: #a3acb7; --s-Approved: #4cc9e0; --s-Signed: #c49bff; --s-Checked: #3ad1b5; --s-Uploaded: #f2c94c; --s-Tested: #6bd97e; --s-Disapproved: #ff7a7a;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 12px rgba(0, 0, 0, .25);
   --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --r-sm: 5px; --r: 8px;
@@ -23,7 +23,7 @@
   --text: #161b21; --muted: #56606c; --accent: #0a6f8a; --accent-ink: #ffffff; --accent-soft: rgba(10, 111, 138, .10);
   --wire: #59636e; --operand: #161b21; --warning: #b45309; --select: rgba(10, 111, 138, .10);
   --added: #15803d; --changed: #c2410c; --deleted: #b91c1c;
-  --s-Proposal: #5b6573; --s-Approved: #0a6f8a; --s-Signed: #7c3aed; --s-Checked: #0f766e; --s-Uploaded: #8a5a00; --s-Tested: #15803d;
+  --s-Proposal: #5b6573; --s-Approved: #0a6f8a; --s-Signed: #7c3aed; --s-Checked: #0f766e; --s-Uploaded: #8a5a00; --s-Tested: #15803d; --s-Disapproved: #b91c1c;
   --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 2px 8px rgba(16, 24, 40, .06);
   color-scheme: light;
 }
@@ -127,7 +127,7 @@ ul.select a { color: var(--text); text-decoration: none; } ul.select a:hover { c
 .legend .p { color: var(--added); } .legend .z { color: var(--changed); } .legend .s { color: var(--deleted); } .legend .e { color: var(--warning); }
 /* ---------- states: chip + dot, stepper ---------- */
 .s-Proposal { --sc: var(--s-Proposal); } .s-Approved { --sc: var(--s-Approved); } .s-Signed { --sc: var(--s-Signed); }
-.s-Checked { --sc: var(--s-Checked); } .s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); }
+.s-Checked { --sc: var(--s-Checked); } .s-Uploaded { --sc: var(--s-Uploaded); } .s-Tested { --sc: var(--s-Tested); } .s-Disapproved { --sc: var(--s-Disapproved); }
 .state { display: inline-flex; gap: 5px; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
          margin: 0 6px; border: 1px solid color-mix(in srgb, var(--sc) 60%, transparent); color: var(--sc);
          background: color-mix(in srgb, var(--sc) 12%, transparent); white-space: nowrap; line-height: 18px; }
@@ -154,6 +154,9 @@ ul.select a { color: var(--text); text-decoration: none; } ul.select a:hover { c
 .buttons .sep { width: 1px; align-self: stretch; background: var(--edge); margin: 0 var(--s1); }
 .buttons button.tia { border-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--accent-soft); }
 .buttons .fblock { font-size: 12px; color: var(--warning); }
+details.disapprove { margin-top: var(--s2); font-size: 13px; }
+details.disapprove textarea { display: block; width: min(640px, 100%); margin: var(--s1) 0; font: inherit; }
+.disapproved { margin-top: var(--s2); white-space: pre-wrap; }
 .progress { font-size: 12px; color: var(--muted); }
 .mark-errors { color: var(--warning); font-weight: 600; }
 details.panel { border: 1px solid var(--edge); border-radius: var(--r); background: var(--panel); margin: 0 0 var(--s3); }
@@ -605,7 +608,7 @@ function treeHtml(st, activeId) {
     h += `<div class="u0">${esc(p.project)}</div>`;
     const groups = group(p.edits.filter(u => u.group).sort((a, b) => a.group.order - b.group.order), u => u.group.id);
     for (const [gid, ug] of [...groups].sort()) {
-      const low = STATES[Math.min(...ug.map(u => STATES.indexOf(u.state)))];
+      const low = ug.some(u => u.state === 'Disapproved') ? 'Disapproved' : STATES[Math.min(...ug.map(u => STATES.indexOf(u.state)))];
       const on = gid === activeId || ug.some(u => u.id === activeId);
       h += `<details class="grp${gid === activeId ? ' active' : ''}"${on ? ' open' : ''}><summary><a class="c" href="?group=${enc(gid)}">${esc(gid)}</a>` +
            `<span class="note">${esc(ug[0].group.name || `${ug.length} edits`)}</span><span class="state s-${esc(low)}">${esc(low)}</span></summary>` +
@@ -760,9 +763,9 @@ async function showEdit(uid, error) {
           : 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed'))}">Upload to TIA</button>` +
         (d.upload_note ? `<span class="fblock" title="${esc(d.upload_note)}">⚠ Upload cannot write this edit — make it by hand following the TIA steps</span>` : '')) : '') +
     (u.state === 'Signed' ? `<button id="check" class="tia check" ${canTia ? '' : 'disabled'} title="${canTia ? 'TIAC_Reader exports it and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
-    (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
+    (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : u.state === 'Disapproved' ? '' : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
     `<span class="progress" id="progress"></span>` +
-    `</div></div>` +
+    `</div>` + disapproveHtml(u.state, u.disapproved) + `</div>` +
     (d.errors.length ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.length})</b> — open it in the editor and fix:<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
     d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
@@ -815,6 +818,7 @@ async function showEdit(uid, error) {
       await showEdit(uid);
     } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
   };
+  onDisapprove(`/api/edits/${enc(u.id)}/state`, x => showEdit(uid, x));
   for (const b of m.querySelectorAll('button[data-state]')) {
     b.onclick = async () => {
       try { await api(`/api/edits/${enc(u.id)}/state`, 'POST', {state: b.dataset.state, by: 'user'}); await showEdit(uid); }
@@ -824,6 +828,22 @@ async function showEdit(uid, error) {
   if ($('model')) canvas($('model'), d, d.diff);
   if ($('hmi-model')) $('hmi-model').appendChild(hmiFrame(u.after, $('hmi-model').clientWidth || 900, u.new ? {} : hmiMarks(d.screen_diff), d.ghosts));
   try { procedurePanel(await api(`/api/edits/${enc(u.id)}/procedure`)); } catch (e) { /* no TIA steps */ }
+}
+// Disapproved: a person rejects a Proposal / Approved edit with a reason the AI reads (get_edit) to propose a fix
+function disapproveHtml(st, last) {
+  return (['Proposal', 'Approved'].includes(st) ? `<details class="disapprove"><summary>Disapprove…</summary>` +
+      `<textarea id="dis-reason" rows="3" placeholder="why it is rejected — the AI reads it and proposes a fix"></textarea>` +
+      `<button id="dis-send">Disapprove</button></details>` : '') +
+    (last ? `<div class="${st === 'Disapproved' ? 'warning' : 'hint'} disapproved"><b>${st === 'Disapproved' ? '✗ Disapproved' : 'Last disapproved'}</b> ` +
+      `by ${esc(last.by)} · ${esc(last.time.replace('T', ' '))}: ${esc(last.reason)}</div>` : '');
+}
+function onDisapprove(path, reload) {
+  if ($('dis-send')) $('dis-send').onclick = async () => {
+    const reason = $('dis-reason').value.trim();
+    if (!reason) { $('dis-reason').focus(); return; }
+    try { await api(path, 'POST', {state: 'Disapproved', reason, by: 'user'}); await reload(); }
+    catch (e) { await reload(e.message); }
+  };
 }
 // ---------- E5: a group of edits = one change ----------
 async function showGroup(gid, message) {
@@ -842,7 +862,8 @@ async function showGroup(gid, message) {
     (g.next ? `<button class="forward" data-gstate="${esc(g.next)}" title="moves every member; refused when one of them cannot move">${esc(g.next)} →</button>` : '') +
     `</div><div class="buttons">` +
     (g.state === 'Approved' && !g.f ? `<button id="g-upload" class="tia" title="members in order: interface, new networks, changes; stops at the first failure">Upload group to TIA</button>` : '') +
-    `<button id="g-check" title="export check of every member">Check export (all members)</button><span class="progress" id="progress"></span></div></div>` +
+    `<button id="g-check" title="export check of every member">Check export (all members)</button><span class="progress" id="progress"></span></div>` +
+    disapproveHtml(g.state, null) + `</div>` +
     (message ? `<div class="warning"><b>⚠ ${esc(message)}</b></div>` : '') +
     `<details class="panel" open><summary>Members <span class="sum">in the order they are made</span></summary><div class="body members">` +
     g.members.map(m => `<div><span class="n">${m.order}.</span><a class="c" href="?edit=${enc(m.id)}">${esc(m.id)}</a><span class="state s-${esc(m.state)}">${esc(m.state)}</span>` +
@@ -853,6 +874,7 @@ async function showGroup(gid, message) {
     try { await api(`/api/groups/${enc(gid)}/state`, 'POST', {state: b.dataset.gstate, by: 'user'}); await showGroup(gid); }
     catch (e) { await showGroup(gid, e.message); }
   };
+  onDisapprove(`/api/groups/${enc(gid)}/state`, x => showGroup(gid, x));
   const run = (id, path, text, done) => { if ($(id)) $(id).onclick = async () => {
     for (const b of $('content').querySelectorAll('.buttons button')) b.disabled = true;
     $('progress').textContent = text;
@@ -921,7 +943,7 @@ async function showChangelog(project) {
   $('content').innerHTML = projectTabs(project, 'changelog') +
     `<h1>Changelog <span class="c">${esc(project)}</span></h1>` +
     `<p class="comment">What changed in the project and when: proposals, approvals, writes to TIA, export checks and snapshots.</p>` +
-    `<div class="tools"><label>State <select id="log-state"><option value="">all</option>${STATES.map(x => `<option ${x === f.state ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` +
+    `<div class="tools"><label>State <select id="log-state"><option value="">all</option>${[...STATES, 'Disapproved'].map(x => `<option ${x === f.state ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` +
     `<label>Block <select id="log-block"><option value="">all</option>${blocks.map(b => `<option ${b === f.block ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select></label>` +
     `<span class="sep"></span><button id="log-copy" title="the same list as a Markdown table per day">Copy as Markdown</button><span class="hint" id="log-copied"></span></div>` +
     (r.items.length ? [...days].reverse().map(([d, xs]) => `<details class="panel" open><summary>${esc(d)} <span class="sum">${xs.length} event${xs.length === 1 ? '' : 's'}</span></summary>` +

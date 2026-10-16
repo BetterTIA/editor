@@ -57,6 +57,23 @@ class TestStateMachine(unittest.TestCase):
         u['checks'].append({'match': False})
         state.change_state(u, 'Checked', 'user')                      # a step back to Checked is not blocked by the check
 
+    def test_disapproved_side_state(self):
+        u = self.u('Approved')
+        with self.assertRaises(state.StateError) as e:
+            state.change_state(u, 'Disapproved', 'user', '  ')
+        self.assertEqual(e.exception.code, 400)
+        state.change_state(u, 'Disapproved', 'user', ' wrong output ')
+        self.assertEqual((u['state'], u['disapproved']['reason'], u['history'][-1]['reason']),
+                         ('Disapproved', 'wrong output', 'wrong output'))
+        self.assertEqual((state.transitions(u), state.rank('Disapproved')), ((None, 'Proposal'), 0))
+        for s in ('Approved', 'Signed'):
+            with self.assertRaises(state.StateError):
+                state.change_state(dict(u), s, 'user')
+        state.change_state(u, 'Proposal', 'AI')
+        self.assertEqual((u['state'], u['disapproved']['reason']), ('Proposal', 'wrong output'))   # stays readable
+        with self.assertRaises(state.StateError):
+            state.change_state(self.u('Signed'), 'Disapproved', 'user', 'too late')
+
     def test_old_state_with_five_states(self):
         d = tempfile.mkdtemp()
         try:
@@ -167,6 +184,19 @@ class TestApiEdits(unittest.TestCase):
         self.assertEqual(self.req('POST', '/api/edits/U999/state', {'state': 'Approved'})[0], 404)
         _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
         self.assertEqual([h['state'] for h in st['edits'][0]['history']], ['Proposal', 'Approved', 'Signed', 'Checked'])
+
+    def test_disapproved_via_api(self):
+        _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=2' % PROJECT)
+        self.create()
+        self.assertEqual(self.req('POST', '/api/edits/U001/state', {'state': 'Disapproved'})[0], 400)    # no reason
+        s, u = self.req('POST', '/api/edits/U001/state', {'state': 'Disapproved', 'reason': 'use the NC contact', 'by': 'user'})
+        self.assertEqual((s, u['state'], u['disapproved']['reason']), (200, 'Disapproved', 'use the NC contact'))
+        _, d = self.req('GET', '/api/edits/U001')
+        self.assertEqual((d['next'], d['previous']), (None, 'Proposal'))
+        s, r = self.req('POST', '/api/edits/U001/after', {'after': after_nw2(net), 'note': 'NC contact'})   # a new proposal
+        self.assertEqual((s, r['edit']['state'], r['edit']['history'][-1]['by']), (200, 'Proposal', 'editor'))
+        _, log = self.req('GET', '/api/projects/%s/changelog' % PROJECT)
+        self.assertIn('Proposal → Disapproved: use the NC contact', [x['summary'] for x in log['items']])
 
     def test_detail_for_ui(self):
         self.create()

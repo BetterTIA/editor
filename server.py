@@ -656,7 +656,7 @@ def api_edit_state(data, uid, body):
         raise state.StateError('the body must be a JSON object', 400)
     with state.LOCK:
         project, s, u = state.find(data, uid)
-        state.change_state(u, body.get('state'), body.get('by'))
+        state.change_state(u, body.get('state'), body.get('by'), body.get('reason'))
         state.save(data, project, s)
     return u
 
@@ -756,7 +756,7 @@ def api_edit_detail(data, uid, width=0, root=None):
                             for k, old in (('title_after', 'title'), ('comment_after', 'comment_before')) if k in u}
     res['tia'] = s.get('tia')
     k = u.get('checks') or []
-    if state.STATES.index(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
+    if state.rank(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
         res['warnings'].insert(0, 'The last export check is a MISMATCH, but the change is already %s — the state does not go '
                                      'back by itself; check what was written to the project.' % u['state'])
     following, previous = state.transitions(u)
@@ -946,13 +946,16 @@ def _lines(t):
 
 def api_edit_after(data, uid, body, root=None):
     """Save a proposal (editor "Save proposal", update_edit): the "after" model of a network edit, the members/section of an
-    interface edit, the note. Only in state Proposal; rule errors do not block saving."""
+    interface edit, the note. Only in state Proposal or Disapproved (the new proposal reopens it as Proposal); rule
+    errors do not block saving."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     with state.LOCK:
         project, s, u = state.find(data, uid)
-        if u['state'] != 'Proposal':
-            raise state.StateError('the proposal can be changed only in state Proposal (now %s)' % u['state'])
+        if u['state'] not in ('Proposal', state.DISAPPROVED):
+            raise state.StateError('the proposal can be changed only in state Proposal or Disapproved (now %s)' % u['state'])
+        if u['state'] == state.DISAPPROVED:
+            state.change_state(u, 'Proposal', body.get('by') or u.get('author') or 'AI')
         if u.get('kind') == 'hmi_screen':
             if body.get('after') is not None:
                 u['after'] = _hmi_after(body['after'], u['screen'])
@@ -1773,7 +1776,8 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
         add(u.get('time'), 'proposed', u.get('note') or 'proposal', u, u.get('author'))
         for i, h in enumerate(hist):
             if i:                                     # the first entry is the proposal itself
-                add(h.get('time'), 'state', '%s → %s' % (hist[i - 1]['state'], h['state']), u, h.get('by'))
+                add(h.get('time'), 'state', '%s → %s' % (hist[i - 1]['state'], h['state']) +
+                    (': ' + h['reason'] if h.get('reason') else ''), u, h.get('by'))
         reader_ts = set()
         for w in u.get('writes') or []:
             steps = w.get('steps') or []
@@ -1992,14 +1996,16 @@ def _group_members(data, gid):
 
 
 def _group_view(project, gid, members):
-    low = min(state.STATES.index(u['state']) for u in members)
-    g = {'id': gid, 'project': project, 'name': members[0]['group'].get('name') or '', 'state': state.STATES[low],
+    low = min(state.rank(u['state']) for u in members)
+    no = any(u['state'] == state.DISAPPROVED for u in members)
+    g = {'id': gid, 'project': project, 'name': members[0]['group'].get('name') or '',
+         'state': state.DISAPPROVED if no else state.STATES[low],
          'f': any(u.get('f') for u in members), 'blocks': sorted({u['block'] for u in members}),
          'members': [{'id': u['id'], 'order': u['group']['order'], 'kind': u.get('kind', 'network'), 'block': u['block'],
                       'where': procedure.header(u), 'state': u['state'], 'f': bool(u.get('f')), 'note': u.get('note') or ''}
                      for u in members]}
-    g['next'] = state.STATES[low + 1] if low + 1 < len(state.STATES) else None
-    g['previous'] = state.STATES[low - 1] if low > 0 else None
+    g['next'] = state.STATES[low + 1] if low + 1 < len(state.STATES) and not no else None
+    g['previous'] = 'Proposal' if no else state.STATES[low - 1] if low > 0 else None
     if g['f']:
         g['f_note'] = 'one F-signature change — write all members, then compile the safety program'
     return g
@@ -2051,15 +2057,15 @@ def api_group_state(data, gid, body):
             if u['state'] == target:
                 continue
             try:
-                state.change_state(json.loads(json.dumps(u)), target, body.get('by'))    # a trial on a copy
+                state.change_state(json.loads(json.dumps(u)), target, body.get('by'), body.get('reason'))  # a trial on a copy
             except state.StateError as e:
                 why.append('%s: %s' % (u['id'], e))
         if why:
             raise state.StateError('the group cannot move to %s — %s' % (target, '; '.join(why)),
-                                   400 if target not in state.STATES else 409)
+                                   400 if target not in state.ALL_STATES else 409)
         for u in members:
             if u['state'] != target:
-                state.change_state(u, target, body.get('by'))
+                state.change_state(u, target, body.get('by'), body.get('reason'))
         state.save(data, project, s)
     return api_group(data, gid)
 

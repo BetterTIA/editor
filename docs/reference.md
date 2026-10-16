@@ -141,6 +141,10 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
   (a later mismatch locks it again), otherwise **409**. `checked_allowed` in `GET /api/edits/<id>`.
 - **Uploaded** / **Tested** are set by the user.
 - Only one step forward or back at a time.
+- **Disapproved** is a side state: from Proposal or Approved with `{state: "Disapproved", reason}` (the reason is
+  required, 400 without it). It is kept in `disapproved: {reason, time, by}` and in the history, and stays there after
+  the edit is reopened, so an AI agent reads it (`get_edit`, `list_edits`) and proposes a fix. A new proposal
+  (`/after`, `update_edit`) or `{state: "Proposal"}` reopens it. A group with a Disapproved member is Disapproved.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -148,8 +152,8 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 | PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
 | POST | `/api/edits` | new change `{project, round, block, nw, after, note}` → 201, state Proposal, author `editor` |
 | GET | `/api/edits/<id>[?width=]` | change + drawing of "after" with `diff` marks (`added` / `changed`, ghosts `x:<id>` = `deleted`), `next`, `previous`, `checked_allowed`, `errors`, `tia`, `warnings` |
-| POST | `/api/edits/<id>/state` | `{state, by}` — one step forward/back; Checked only after a matching check, otherwise 409 with the reason |
-| PUT/POST | `/api/edits/<id>/after` | saves the "after" model (Proposal only; rule errors do not block saving) → `{edit, errors}` |
+| POST | `/api/edits/<id>/state` | `{state, by, reason?}` — one step forward/back; Checked only after a matching check, otherwise 409 with the reason; Disapproved needs `reason` |
+| PUT/POST | `/api/edits/<id>/after` | saves the "after" model (Proposal or Disapproved → back to Proposal; rule errors do not block saving) → `{edit, errors}` |
 | POST | `/api/check` | `{edit_id, match, export_ts, note}` — records the result of comparing an export with the proposal by hand (automatic: see [Export check](#export-check)) |
 
 The `after` model has the same shape as `/api/network` (`elements` + `rungs`; the server computes `wires` and
@@ -703,7 +707,7 @@ error of the editor = `isError: true` with its message):
 | `list_edits` | `project?`, `state?` | edit summaries `{id, project, round, block, nw, title, language, f, state, author, time, note, last_check}` |
 | `get_edit` | `id` | `edit` (before/after, checks, writes, history), `diff`, `errors`, `warnings`, `next`/`previous`, `checked_allowed`, `tia`, `procedure` (markdown), `url` |
 | `propose_edit` | `project`, `round`, `block`, `kind?` + per kind: `nw`, `after?`, `title_after?`, `comment_after?` (network) · `section`, `members` (interface) · `after_nw`, `title`, `after`, `comment?`, `language?` (new_network); `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout`, `warnings` include the #operand warning |
-| `update_edit` | `id`, `after?`, `note?`, `section?`, `members?`, `title?`, `comment?`, `title_after?`, `comment_after?` | changes a Proposal → `{id, state, errors}` |
+| `update_edit` | `id`, `after?`, `note?`, `section?`, `members?`, `title?`, `comment?`, `title_after?`, `comment_after?` | changes a Proposal (a Disapproved edit goes back to Proposal) → `{id, state, errors}` |
 | `create_group` | `edit_ids`, `name?` | `POST /api/groups` → the group + `url` |
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |

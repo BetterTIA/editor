@@ -13,6 +13,10 @@ from datetime import datetime
 # Six states: Signed = written to the project (by hand or by the Writer), Checked = Reader export = proposal.
 # An older state.json with five states loads unchanged (the state names stayed the same).
 STATES = ['Proposal', 'Approved', 'Signed', 'Checked', 'Uploaded', 'Tested']
+# side state off the chain: a person rejects a Proposal / Approved edit with a reason (for the AI to read);
+# a new proposal (update) or "← Proposal" reopens it
+DISAPPROVED = 'Disapproved'
+ALL_STATES = STATES + [DISAPPROVED]
 # what an edit changes: one network's model (and title/comment), block interface members, a new network, an HMI screen
 KINDS = ['network', 'interface', 'new_network', 'hmi_screen']
 LOCK = threading.RLock()
@@ -95,8 +99,8 @@ def verify_structure(obj):
         raise StateError('tia must be {softwarePath, plcName, groupPath?} (strings)', 400)
     ids = set()
     for u in obj['edits']:
-        if not isinstance(u, dict) or not isinstance(u.get('id'), str) or u.get('state') not in STATES:
-            raise StateError('a change needs an id and a state from %s' % STATES, 400)
+        if not isinstance(u, dict) or not isinstance(u.get('id'), str) or u.get('state') not in ALL_STATES:
+            raise StateError('a change needs an id and a state from %s' % ALL_STATES, 400)
         if u['id'] in ids:
             raise StateError('duplicate id %s' % u['id'], 400)
         ids.add(u['id'])
@@ -167,19 +171,39 @@ def checked_allowed(u):
     return bool(k) and k[-1].get('match') is True
 
 
+def rank(s):
+    """Position in the chain; Disapproved counts as Proposal."""
+    return 0 if s == DISAPPROVED else STATES.index(s)
+
+
 def transitions(u):
     """-> (next state | None, previous state | None)"""
+    if u['state'] == DISAPPROVED:
+        return None, 'Proposal'
     i = STATES.index(u['state'])
     return (STATES[i + 1] if i + 1 < len(STATES) else None, STATES[i - 1] if i > 0 else None)
 
 
-def change_state(u, new_value, by):
-    if new_value not in STATES:
+def change_state(u, new_value, by, reason=None):
+    if new_value not in ALL_STATES:
         raise StateError('unknown state %r' % (new_value,), 400)
-    i, j = STATES.index(u['state']), STATES.index(new_value)
-    if abs(i - j) != 1:
-        raise StateError('transition %s → %s is not allowed (only one step forward or back)' % (u['state'], new_value))
-    if new_value == 'Checked' and j > i and not checked_allowed(u):
-        raise StateError('Checked only after an export check with a match (Check / POST /api/check)')
+    if DISAPPROVED in (u['state'], new_value):
+        if not (new_value == DISAPPROVED and u['state'] in ('Proposal', 'Approved')
+                or u['state'] == DISAPPROVED and new_value == 'Proposal'):
+            raise StateError('transition %s → %s is not allowed (Disapproved only from Proposal or Approved, '
+                             'and back only to Proposal)' % (u['state'], new_value))
+        reason = reason.strip()[:4000] if isinstance(reason, str) else ''
+        if new_value == DISAPPROVED and not reason:
+            raise StateError('Disapproved needs a reason: why the edit is rejected (the AI reads it to propose a fix)', 400)
+    else:
+        i, j = STATES.index(u['state']), STATES.index(new_value)
+        if abs(i - j) != 1:
+            raise StateError('transition %s → %s is not allowed (only one step forward or back)' % (u['state'], new_value))
+        if new_value == 'Checked' and j > i and not checked_allowed(u):
+            raise StateError('Checked only after an export check with a match (Check / POST /api/check)')
+    h = {'state': new_value, 'time': now(), 'by': by or 'user'}
+    if new_value == DISAPPROVED:
+        h['reason'] = reason
+        u['disapproved'] = dict(h)                    # the latest rejection stays readable after a reopen
     u['state'] = new_value
-    u.setdefault('history', []).append({'state': new_value, 'time': now(), 'by': by or 'user'})
+    u.setdefault('history', []).append(h)
