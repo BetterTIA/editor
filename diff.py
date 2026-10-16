@@ -26,6 +26,24 @@ def compare(before, after):
     return diff, deleted
 
 
+def box_pin_changes(before, after, changed):
+    """LAD boxes (calls, instructions) marked changed: which pins changed and whether the box itself (name, instance,
+    template) did -> {id: {inputs: [pin], outputs: [pin], above: bool}}; same shape as fbd.pin_changes."""
+    P = {p['id']: p for p in before.get('elements', [])}
+    rest = lambda x: _j({k: v for k, v in x.items() if k not in ('id', 'inputs', 'outputs')})
+    res = {}
+    for q in after.get('elements', []):
+        p = P.get(q['id'])
+        if q['id'] not in changed or q['type'] != 'box' or p is None:
+            continue
+        pi = {v['pin']: v['operand'] for v in p.get('inputs') or []}
+        po = {v['pin']: v['operand'] for v in p.get('outputs') or []}
+        res[q['id']] = {'inputs': [v['pin'] for v in q.get('inputs') or [] if pi.get(v['pin']) != v['operand']],
+                        'outputs': [v['pin'] for v in q.get('outputs') or [] if po.get(v['pin']) != v['operand']],
+                        'above': rest(p) != rest(q)}
+    return res
+
+
 def _nodes(rungs):
     u = {'powerrail'}
     for r in rungs:

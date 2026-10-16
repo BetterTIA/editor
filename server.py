@@ -693,7 +693,8 @@ def _diff_drawing(before, after, width=0):
         warnings.append('Deleted (no place in the drawing): %s' % ', '.join(
             '%s %s' % (P[i]['type'], P[i].get('operand') or P[i].get('name') or '') for i in unplaced))
     return {'elements': elements, 'rungs': rungs, 'layout': lay, 'drawing': drawing, 'diff': marks,
-            'warnings': warnings}
+            'warnings': warnings,
+            'pin_diff': diff.box_pin_changes(before, after, {i for i, z in changes.items() if z == 'changed'})}
 
 
 def _diff_drawing_fbd(before, after, changes, deleted, width):

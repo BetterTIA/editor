@@ -74,6 +74,22 @@ class TestStateMachine(unittest.TestCase):
         with self.assertRaises(state.StateError):
             state.change_state(self.u('Signed'), 'Disapproved', 'user', 'too late')
 
+    def test_box_pin_changes(self):
+        """E1: one changed pin of a LAD call marks that pin, not the whole box."""
+        _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)
+        n = b['networks'][3]
+        before = {'elements': n['elements'], 'rungs': n['rungs']}
+        after = json.loads(json.dumps(before))
+        bx = next(p for p in after['elements'] if p['type'] == 'box')
+        bx['inputs'][3]['operand'] = '#Reset_Belt'
+        bx['outputs'][1]['operand'] = '"Fault_Belt2"'
+        changes, _ = diff.compare(before, after)
+        self.assertEqual(diff.box_pin_changes(before, after, set(changes)),
+                         {bx['id']: {'inputs': ['Reset'], 'outputs': ['Fault'], 'above': False}})
+        bx['instance'] = '"DB_Belt2"'
+        self.assertTrue(diff.box_pin_changes(before, after, set(changes))[bx['id']]['above'])
+        self.assertEqual(server._diff_drawing(before, after)['pin_diff'][bx['id']]['inputs'], ['Reset'])
+
     def test_old_state_with_five_states(self):
         d = tempfile.mkdtemp()
         try:

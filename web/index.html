@@ -108,7 +108,7 @@ svg .mask { fill: var(--panel); stroke: none; }
 svg .neg { fill: var(--panel); stroke-width: 1.6; }
 svg .node { fill: var(--wire); stroke: none; }
 svg .hit-pin { fill: transparent; cursor: pointer; }
-svg g.d-changed text.without-changes { fill: var(--operand); font-weight: normal; }   /* FBD: on a changed box only the changed pins */
+svg g.d-changed text.without-changes { fill: var(--operand); font-weight: normal; }   /* on a changed box only the changed pins */
 svg g.d-added .el, svg g.d-added .box { stroke: var(--added); stroke-width: 2.6; }
 svg g.d-added text, svg g.d-added .symbol { fill: var(--added); font-weight: bold; }
 svg g.d-changed .el, svg g.d-changed .box { stroke: var(--changed); stroke-width: 2.6; }
@@ -466,28 +466,29 @@ function negate(g, d) {
   el(g, 'line', {class: 'el', x1: cx + 15, y1: y - 9, x2: cx + 15, y2: y + 9});
   el(g, 'text', {x: cx, y: y + 4, 'text-anchor': 'middle', class: 'symbol'}, 'NOT');
 }
-function box(g, d, p) {
+function box(g, d, p, z) {      // z: pin diff of a changed box — only the changed pins stay highlighted
   const {bx, bw, y_hl, rows, rows_r} = d;
   const top = y_hl - 13, bottom = Math.max(...rows, ...rows_r) + 11;
+  const quiet = (e, change) => { if (z && !change && e) e.classList.add('without-changes'); };
   el(g, 'rect', {class: 'box', x: bx, y: top, width: bw, height: bottom - top, rx: 2});
-  el(g, 'text', {x: bx + bw / 2, y: y_hl + 4, 'text-anchor': 'middle', class: 'symbol'}, p.name || '');
-  if (p.template) el(g, 'text', {x: bx + bw / 2, y: y_hl + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.template);
-  if (p.instance) description(g, bx + bw / 2, top - 6, p.instance);
+  quiet(el(g, 'text', {x: bx + bw / 2, y: y_hl + 4, 'text-anchor': 'middle', class: 'symbol'}, p.name || ''), z && z.above);
+  if (p.template) quiet(el(g, 'text', {x: bx + bw / 2, y: y_hl + L + 4, 'text-anchor': 'middle', class: 'pin'}, p.template), z && z.above);
+  if (p.instance) quiet(description(g, bx + bw / 2, top - 6, p.instance), z && z.above);
   // inputs: [power, ...inputs]
   [{pin: p.power[0], operand: null}, ...p.inputs].forEach((pin, i) => {
-    const yy = rows[i];
+    const yy = rows[i], chg = i > 0 && z && z.inputs.includes(pin.pin);
     const feed = String(pin.operand).startsWith('wire#');   // feed: the wire comes all the way from the left cell
     if (i > 0) el(g, 'line', {class: 'wire', x1: feed ? d.x : bx - 12, y1: yy, x2: bx, y2: yy});
-    if (pin.pin) el(g, 'text', {x: bx + 5, y: yy + 4, class: 'pin'}, pin.pin);
-    if (i > 0 && !feed) description(g, bx - 15, yy + 4, pin.operand, 'end');
+    if (pin.pin) quiet(el(g, 'text', {x: bx + 5, y: yy + 4, class: 'pin'}, pin.pin), chg);
+    if (i > 0 && !feed) quiet(description(g, bx - 15, yy + 4, pin.operand, 'end'), chg);
   });
   [{pin: p.power[1], operand: null}, ...p.outputs].forEach((pin, i) => {
-    const yy = rows_r[i];
+    const yy = rows_r[i], chg = i > 0 && z && z.outputs.includes(pin.pin);
     if (i > 0) el(g, 'line', {class: 'wire', x1: bx + bw, y1: yy, x2: bx + bw + 12, y2: yy});
-    if (pin.pin) el(g, 'text', {x: bx + bw - 5, y: yy + 4, 'text-anchor': 'end', class: 'pin'}, pin.pin);
-    if (i > 0) description(g, bx + bw + 15, yy + 4, pin.operand, 'start');
+    if (pin.pin) quiet(el(g, 'text', {x: bx + bw - 5, y: yy + 4, 'text-anchor': 'end', class: 'pin'}, pin.pin), chg);
+    if (i > 0) quiet(description(g, bx + bw + 15, yy + 4, pin.operand, 'start'), chg);
   });
-  if (p.below) description(g, bx + bw / 2, bottom + 14, p.below);
+  if (p.below) quiet(description(g, bx + bw / 2, bottom + 14, p.below), z && z.above);
 }
 // FBD (F1): geometry from the FBD layout — boxes with pins, negation as a circle, orthogonal signals, tap nodes
 function drawFBD(net, diff) {
@@ -547,7 +548,7 @@ function draw(net, diff) {
     else if (p.type.startsWith('coil') || p.type === 'ret') coil(g, d, p);
     else if (p.type === 'comparison') comparison(g, d, p);
     else if (p.type === 'not') negate(g, d);
-    else box(g, d, p);
+    else box(g, d, p, (net.pin_diff || {})[d.id]);
   }
   el(svg, 'line', {class: 'rail', x1: k.rail.x, y1: k.rail.y1, x2: k.rail.x, y2: k.rail.y2});
   if (k.empty) el(svg, 'text', {x: k.rail.x + 14, y: k.height / 2 + 4, class: 'empty'}, 'Empty network — nothing to draw.');
