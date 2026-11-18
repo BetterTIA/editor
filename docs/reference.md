@@ -610,6 +610,16 @@ networks from `/api/network?ts=` and `POST /api/layout {before, after, align: tr
 changed orange, deleted red); an added / removed network is drawn whole in green / red. Screenshots:
 `tests\screenshots\project_changelog.png`, `project_versions.png`.
 
+**Compare exports** — `GET /api/compare-exports?a=&b=[&project=&block=][&detail=1:1,3:4]` (MCP `compare_exports`).
+A / B = full path of a `.s7dcl` (its `.s7res` beside it) or a snapshot timestamp together with `project` and `block`.
+→ `{summary: {same, changed, added, removed, networks_a, networks_b}, networks: [{nw_a, nw_b, title, language, status,
+code_changed, title_change?, comment_change?, lines? (added / removed), diff? (only for pairs named in detail)}],
+truncated, notes}`; the list holds only non-same networks (max 200), a diff is cut at 200 lines.
+- The code of each network has `MLC_…` ids masked and is paired with `difflib.SequenceMatcher` (equal runs 1:1, a
+  replaced run by position, the rest added / removed). Titles and comments are resolved from the `.s7res` and compared
+  apart, so a text change shows although the masked code is equal (`code_changed: false`). A moved network is
+  reported as removed + added. `detail` = `A number:B number` pairs. UI: project tab **Compare**.
+
 ## HMI screens (WinCC Unified)
 The editor shows the screens of a **WinCC Unified** HMI and lets you propose a changed or a new screen as an edit of
 kind `hmi_screen`, with the same states, tree, groups and checks as a network edit.
