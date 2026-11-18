@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V21" />
+  <SW.Blocks.FB ID="0">
+    <AttributeList>
+      <Name>FB_Sequence</Name>
+      <Number>21</Number>
+      <ProgrammingLanguage>GRAPH</ProgrammingLanguage>
+    </AttributeList>
+  </SW.Blocks.FB>
+</Document>

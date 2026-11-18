@@ -1,0 +1,2 @@
+# SimaticML fixtures are compared byte for byte (BOM, CRLF as TIA writes them)
+tests/samples/simaticml/** -text

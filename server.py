@@ -26,6 +26,7 @@ import procedure
 import diff
 import s7dcl
 import s7dcl_write
+import simaticml
 import state
 
 TS = re.compile(r'^\d{8}-\d{6}$')
@@ -287,14 +288,15 @@ def api_state(data, project=None):
 
 
 def api_state_tia(root, data, project, body):
-    """PUT /api/state/tia?project= {softwarePath, plcName?, groupPath?}: only the TIA settings change, under the lock
-    (empty values are dropped, {} clears them)."""
+    """PUT /api/state/tia?project= {softwarePath, plcName?, groupPath?, upload?}: only the TIA settings change, under the
+    lock (empty values are dropped, {} clears them). upload = 'xml' writes every Upload through SimaticML (default: only
+    where documents fail — OB, GRAPH, new network)."""
     if not project_index(root, project):
         raise KeyError('unknown project')
-    if not isinstance(body, dict) or set(body) - {'softwarePath', 'plcName', 'groupPath'} \
-            or not all(isinstance(v, str) for v in body.values()):
-        raise state.StateError('tia must be {softwarePath, plcName?, groupPath?} (strings)', 400)
-    t = {k: v.strip() for k, v in body.items() if v.strip()}
+    if not isinstance(body, dict) or set(body) - {'softwarePath', 'plcName', 'groupPath', 'upload'} \
+            or not all(isinstance(v, str) for v in body.values()) or body.get('upload', '').strip() not in ('', 'auto', 'xml'):
+        raise state.StateError('tia must be {softwarePath, plcName?, groupPath?, upload?: auto|xml} (strings)', 400)
+    t = {k: v.strip() for k, v in body.items() if v.strip() and not (k == 'upload' and v.strip() == 'auto')}
     with state.LOCK:
         s = state.load(data, project)
         s['tia'] = t
@@ -755,9 +757,12 @@ def api_edit_detail(data, uid, width=0, root=None):
         if 'title_after' in u or 'comment_after' in u:
             res['texts'] = {k: [u.get(old) or '', u.get(k, u.get(old) or '')]
                             for k, old in (('title_after', 'title'), ('comment_after', 'comment_before')) if k in u}
-    refused = root and u.get('kind') != 'hmi_screen' and document_import_refused(root, u)
+    why = root and u.get('kind') != 'hmi_screen' and xml_reason(root, u, s.get('tia'))
+    refused = why and xml_refused(root, u)
+    if why:
+        res['upload_via'] = 'SimaticML (%s)' % why
     if refused:
-        res['upload_note'] = refused
+        res['upload_note'] = 'Upload through SimaticML (%s) refused — %s; make the change by hand (TIA steps)' % (why, refused)
     elif u.get('group'):
         res['upload_note'] = 'member of group %s — Upload is on the group page (members in order)' % u['group']['id']
     res['tia'] = s.get('tia')
@@ -1172,9 +1177,6 @@ def _is_f_edit(root, u):
         return True
 
 
-XML_WAY = 'make the change by hand (TIA steps) or through SimaticML (ExportXmlBlock → edit → ImportXmlBlock → CompileBlock)'
-
-
 def _graph_blocks(root, project, names):
     """Names (of `names`) that are GRAPH blocks — the Reader exports those as SimaticML (.xml), not as documents."""
     xml = catalog._latest(root, project, '.xml')
@@ -1188,22 +1190,67 @@ def _graph_blocks(root, project, names):
     return res
 
 
-def document_import_refused(root, u):
-    """E4 / E5: an edit that ImportFromDocuments would break -> the reason, else None.
-    An OB loses its event class, number and parameters; an FB with a GRAPH multi-instance fails to import."""
+def xml_reason(root, u, tia=None):
+    """E4 / E5 / E7: why the edit is written through SimaticML (ExportXmlBlock → edit → ImportXmlBlock) instead of documents
+    -> text, else None. ImportFromDocuments loses an OB's event class and number, fails for an FB with GRAPH (also as a
+    multi-instance) and for a new network; the TIA setting upload = xml sends every Upload this way."""
     if (u.get('block_kind') or '').upper() == 'OB':
-        return ('OB: importing documents loses the OB event class, number and parameters — Upload refused; %s, '
-                'then check the OB number and event class' % XML_WAY)
+        return 'OB: documents would lose its event class and number'
     try:
         _, iface = block_interface(root, u['project'], u['block'])
     except KeyError:
-        return None
+        iface = {}
     types = {m['name']: m['type'].strip().strip('"') for m in iface.get('Static', [])}
     graph = _graph_blocks(root, u['project'], set(types.values()) | {u['block']})
     hit = ['%s : "%s"' % (k, t) for k, t in types.items() if t in graph]
     if hit or u['block'] in graph:
-        return ('Block with GRAPH (%s): importing documents fails for it — Upload refused; %s'
-                % (', '.join(hit) or 'the block itself', XML_WAY))
+        return 'block with GRAPH (%s): importing documents fails for it' % (', '.join(hit) or 'the block itself')
+    if u.get('kind') == 'new_network':
+        return 'new network: importing documents fails for it'
+    if (tia or {}).get('upload') == 'xml':
+        return 'TIA settings: every Upload through SimaticML'
+    return None
+
+
+ELEMENTARY = re.compile(r'(?i)^(bool|byte|word|dword|lword|u?s?int|u?d?int|u?lint|l?real|l?time|s5time|date|tod|ltod|'
+                        r'time_of_day|dt|ldt|dtl|char|wchar|w?string(\[\d+\])?|variant|void|any|pointer|db_any|hw_\w+|'
+                        r'block_\w+|array\b.*)$')
+
+
+def _call_params(root, project, xml_text=''):
+    """-> call_params(name, 'FB'|'FC') for simaticml: TIA's own CallInfo in the export, else the callee's interface from the
+    newest snapshot (FC with its Ret_Val); None when the block is unknown."""
+    known = simaticml.call_info(xml_text) if xml_text else {}
+    blocks = {b['name']: b for b in catalog.catalog(root, project)['blocks']} if project_index(root, project) else {}
+
+    def params(name, kind):
+        if (name, kind) in known:
+            return known[(name, kind)]
+        b = blocks.get(name)
+        if not b or b['kind'] != kind:
+            return None
+        # shortcut: a type that is not elementary is taken as a PLC type / FB ("…"); a struct pin would need its own case
+        typ = lambda t: t if ELEMENTARY.match(t) else '"%s"' % t
+        res = [(x['name'], sec, typ(x['type'])) for k, sec in (('inputs', 'Input'), ('outputs', 'Output'), ('inout', 'InOut'))
+               for x in b['interface'].get(k, [])]
+        if kind == 'FC':
+            m = re.search(r'^FUNCTION\s+(?:"[^"]+"|\S+)\s*:\s*("?[^"\s]+"?)', s7dcl.read(find_block(root, project, name)[1]), re.M)
+            if m and m.group(1).strip('"').lower() != 'void':
+                res.append(('Ret_Val', 'Return', typ(m.group(1).strip('"'))))
+        return res
+    return params
+
+
+def xml_refused(root, u):
+    """What the XML way cannot write of the edit (checked before any write) -> text, else None."""
+    if u.get('kind') == 'interface':
+        return None
+    known = _call_params(root, u['project'])
+    cp = lambda name, kind: known(name, kind) or 'any'        # the export's CallInfo decides at Upload, before the import
+    for m in ([u['before']] if u.get('kind', 'network') == 'network' else []) + [u['after']]:
+        why = simaticml.unsupported(m, cp)
+        if why:
+            return why
     return None
 
 
@@ -1221,10 +1268,11 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None, in_group=False):
         raise state.StateError('F-block: no Upload — make the change by hand following the TIA steps')
     if u.get('kind') == 'hmi_screen':
         return _upload_hmi(data, uid, u, mcp, timeout, portal)
-    refused = document_import_refused(root, u)
-    if refused:
-        raise state.StateError(refused)
     tia = _tia(s, u['project'], data)
+    why = xml_reason(root, u, tia)
+    if why:
+        r = api_upload_xml(root, data, [u], mcp, timeout, portal, tia, why)
+        return {'ok': r['ok'], 'message': r['message'], 'write': r['write'], 'edit': state.find(data, uid)[2]}
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
     steps, work = [], tempfile.mkdtemp(prefix='tiac_upload_')
@@ -1291,6 +1339,153 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None, in_group=False):
         shutil.rmtree(work, ignore_errors=True)
         TIA_LOCK.release()
     return {'ok': ok, 'message': write['message'], 'write': write, 'edit': u}
+
+
+def _reason(e):
+    """Text of a failed step + the Writer's errorDetail (inner Openness messages) when its answer carries one."""
+    t = str(e)
+    i = t.find('{')
+    if i >= 0:
+        try:
+            j = json.loads(t[i:])
+            d = next((v for k, v in j.items() if k.lower() == 'errordetail'), None) if isinstance(j, dict) else None
+            if d:
+                t += ' · detail: ' + ('; '.join(map(str, d)) if isinstance(d, list) else str(d))
+        except ValueError:
+            pass
+    return t
+
+
+def _compiled(r):
+    """CompileBlock answer -> raise when it reports errors (the Writer also raises, this covers an answer without it)."""
+    try:
+        j = json.loads(r)
+    except (TypeError, ValueError):
+        return r
+    if isinstance(j, dict) and (str(j.get('state', '')).lower() == 'error' or (j.get('errorCount') or 0) > 0):
+        raise s7dcl_write.WriteError('compiling failed: %s' % r[:600])
+    return r
+
+
+def _content_hash(r):
+    try:
+        j = json.loads(r)
+    except (TypeError, ValueError):
+        return None
+    return next((v for k, v in j.items() if k.lower() == 'contenthash' and v), None) if isinstance(j, dict) else None
+
+
+def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
+    """Upload through SimaticML (E4/E5/E7) of edits (one edit or a group, all Approved, non-safety), one import per block:
+    ExportXmlBlock → edit the export (interface → new networks → changes) → ImportXmlBlock {expectedContentHash} →
+    CompileBlock → for an OB GetBlockInfo (number, event class, cycle as before). E8: when anything after the first
+    import fails, every block already imported gets its export from before the write back (ImportXmlBlock + CompileBlock);
+    the edits stay Approved. -> {ok, message, write}"""
+    project = members[0]['project']
+    order = sorted(members, key=lambda u: (UPLOAD_ORDER.get(u.get('kind', 'network'), 2), (u.get('group') or {}).get('order', 0)))
+    refused = ['%s: %s' % (u['id'], r) for u in order for r in [xml_refused(root, u)] if r]
+    if refused:                                       # before the first write
+        raise state.StateError('Upload through SimaticML (%s) refused — %s; make the change by hand (TIA steps)'
+                               % (why, '; '.join(refused)))
+    if not TIA_LOCK.acquire(blocking=False):
+        raise state.StateError('another Upload / Check is running — wait until it ends')
+    steps, work, done, restore = [], tempfile.mkdtemp(prefix='tiac_upload_xml_'), [], []
+
+    def step(name, fn):
+        return _step(steps, name, fn)
+    try:
+        sp = tia['softwarePath']
+        blocks = list(dict.fromkeys(u['block'] for u in order))
+        try:
+            with _client(mcp, 'writer', timeout) as k:
+                _connect(k, steps, portal)
+                try:
+                    for block in blocks:
+                        grp = tia.get('groupPath')
+                        if not grp:
+                            fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
+                                'ResolveObjectPath', {'softwarePath': sp, 'name': block, 'kind': 'block'})))
+                            grp = fpath.rsplit('/', 1)[0] if '/' in fpath else ''
+                        bpath = (grp + '/' if grp else '') + block
+                        folder = os.path.join(work, 'export', block)
+                        export = lambda: k.call('ExportXmlBlock', {'softwarePath': sp, 'blockPath': bpath,
+                                                                   'exportPath': folder, 'preservePath': False})
+                        r = step('ExportXmlBlock', export)
+                        file = os.path.join(folder, block + '.xml')
+                        if not os.path.exists(file):          # TIA exports no inconsistent block
+                            step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                            r = step('ExportXmlBlock', export)
+                        if not os.path.exists(file):
+                            raise s7dcl_write.WriteError('the Writer did not export %s.xml — compile the block in TIA' % block)
+                        with open(file, 'rb') as f:
+                            raw = f.read()
+                        bom, text = raw.startswith(b'\xef\xbb\xbf'), raw.decode('utf-8-sig')
+                        mine = [u for u in order if u['block'] == block]
+                        new, notes = step('Edit the SimaticML', lambda: simaticml.edit_block(
+                            text, mine, lambda nets, u: _find_network(nets, u)[0], _call_params(root, project, text)))
+                        steps[-1]['message'] = ('%s: %s' % (block, '; '.join(notes)))[:1000]
+                        out = os.path.join(work, 'import', block + '.xml')
+                        os.makedirs(os.path.dirname(out), exist_ok=True)
+                        _write_text(out, bom, new)
+                        arg = {'softwarePath': sp, 'groupPath': grp, 'importPath': out}
+                        h = _content_hash(r)
+                        if h:
+                            arg['expectedContentHash'] = h
+                        done.append((block, bpath, grp, file))     # from now on the block may be changed: restore on failure
+                        try:
+                            step('ImportXmlBlock', lambda: k.call('ImportXmlBlock', arg))
+                        except Exception as e:
+                            if 'state_changed' in str(e):         # refused before the write: someone else's change stays
+                                done.pop()
+                            raise
+                        step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                        ob = simaticml.ob_attributes(text)
+                        if ob:
+                            info = step('GetBlockInfo', lambda: k.call('GetBlockInfo', {'softwarePath': sp, 'blockPath': bpath}))
+                            bad = simaticml.ob_mismatch(ob, info)
+                            if bad:
+                                steps[-1].update(ok=False, message=('OB changed: ' + bad)[:1000])
+                                raise simaticml.XmlError('OB %s after the import: %s' % (block, bad))
+                    ok, message = True, ('written through SimaticML (%s; %s, group %s) — save the project in TIA (the Writer '
+                                         'does not call SaveProject)') % (why, sp, tia.get('groupPath') or '/')
+                except Exception as e:
+                    ok, message = False, 'Upload stopped: %s' % _reason(e)
+                    for block, bpath, grp, file in reversed(done):     # E8: back to the export from before the write
+                        try:
+                            step('Restore: ImportXmlBlock', lambda: k.call('ImportXmlBlock', {
+                                'softwarePath': sp, 'groupPath': grp, 'importPath': file}))
+                            step('Restore: CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                            restore.append('%s restored from the export before the write' % block)
+                        except Exception as e2:
+                            restore.append('%s NOT RESTORED (%s) — check it in TIA, its export from before the write is '
+                                           'kept below' % (block, _reason(e2)[:300]))
+                            ok = None                           # marks: keep the files
+        except mcp_client.MCPError as e:
+            ok, message = False, CONNECTION_ERROR + _reason(e)
+        except SnapshotError as e:
+            ok, message = False, str(e)
+        except Exception as e:
+            ok, message = False, 'Upload stopped: %s' % _reason(e)
+        if restore:
+            message += ' · ' + '; '.join(restore)
+        elif done and not ok:
+            message += ' · the block(s) %s may be changed and were not restored — check them in TIA' % ', '.join(b[0] for b in done)
+            ok = None
+        if not ok and os.path.isdir(work) and os.listdir(work):   # E7: keep the files of a failed attempt
+            keep = os.path.join(data, state.check_name(project), 'upload-failed',
+                                '%s-%s' % (order[0]['id'], state.now().replace(':', '').replace('-', '')))
+            shutil.copytree(work, keep, dirs_exist_ok=True)
+            message += ' · the XML files of this attempt are kept in %s' % keep
+        ok = bool(ok)
+        write = {'time': state.now(), 'tool': 'TIAC_Writer', 'via': 'SimaticML', 'steps': steps, 'ok': ok, 'message': message}
+        if len(order) > 1:
+            write['edits'] = [u['id'] for u in order]
+        for u in order:
+            _write(data, u['id'], write, 'Signed' if ok else None, 'TIAC_Writer')
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        TIA_LOCK.release()
+    return {'ok': ok, 'message': message, 'write': write, 'edits': [u['id'] for u in order]}
 
 
 def api_check(root, data, uid, mcp, timeout=300):
@@ -2215,19 +2410,24 @@ def api_group_check(root_of, data, gid):
     return {'group': gid, 'match': all(x['match'] for x in res), 'results': res, 'view': api_group(data, gid)}
 
 
-def api_group_upload(root_of, data, gid, upload):
+def api_group_upload(root_of, data, gid, upload, upload_xml=None):
     """Upload of the members (Approved, non-F) one by one: interface edits, then new networks, then network changes;
-    stops at the first failure. upload(uid) = api_upload for one edit."""
-    _, _, members = _group_members(data, gid)
+    stops at the first failure. upload(uid) = api_upload for one edit. When one member needs SimaticML (xml_reason), the
+    whole group goes that way: upload_xml(members, tia, why) = api_upload_xml, one import per block."""
+    project, s, members = _group_members(data, gid)
     if any(u.get('f') for u in members):
         raise state.StateError('F-block in the group: no Upload — make the changes by hand following the TIA steps, '
                                'then compile the safety program once')
     not_ready = ['%s (%s)' % (u['id'], u['state']) for u in members if u['state'] != 'Approved']
     if not_ready:
         raise state.StateError('Upload of a group only when every member is Approved: %s' % ', '.join(not_ready))
-    refused = ['%s: %s' % (u['id'], r) for u in members for r in [document_import_refused(root_of(u['id']), u)] if r]
-    if refused:                                       # before the first write, not halfway through the group
-        raise state.StateError('; '.join(refused))
+    tia = s.get('tia') or next((p.get('tia') for p in state.registry(data) if p['name'] == project), None) or {}
+    why = next((r for u in members for r in [xml_reason(root_of(u['id']), u, tia)] if r), None)
+    if why and upload_xml:
+        r = upload_xml(members, _tia(s, project, data), why)
+        return {'group': gid, 'ok': r['ok'], 'via': 'SimaticML',
+                'results': [{'edit': x, 'ok': r['ok'], 'message': r['message']} for x in r['edits']],
+                'view': api_group(data, gid)}
     res = []
     for u in sorted(members, key=lambda u: (UPLOAD_ORDER.get(u.get('kind', 'network'), 2), u['group']['order'])):
         r = upload(u['id'])
@@ -2271,7 +2471,9 @@ def _add_project(h):
 def _group_upload(h, gid):
     _demo_guard(h, _group_members(h.data, gid)[2][0]['id'])
     return api_group_upload(h.root_of, h.data, gid, lambda uid: api_upload(
-        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h), in_group=True))
+        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h), in_group=True),
+        lambda members, tia, why: api_upload_xml(h.root_of(members[0]['id']), h.data, members, h.mcp, h.mcp_timeout,
+                                                 _portal(h), tia, why))
 
 
 def _changelog(h, name):

@@ -96,8 +96,8 @@ class TestUploadCheck(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
         self.assertEqual(self.req('PUT', '/api/state/tia?project=%s' % PROJECT, {'softwarePath': 1})[0], 400)
 
-    def test_upload_refused_for_graph_instance_and_ob(self):
-        """E4 / E5: documents import breaks an FB with a GRAPH multi-instance and an OB — refused before any write."""
+    def test_graph_instance_and_ob_go_through_simaticml(self):
+        """E4 / E5: documents import breaks an FB with a GRAPH multi-instance and an OB — they go through SimaticML."""
         self.set_tia()
         uid = self.proposal(ops=self.OPS)
         f = os.path.join(self.root, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FB_Conveyor.s7dcl')
@@ -109,14 +109,21 @@ class TestUploadCheck(unittest.TestCase):
             h.write('<Document><SW.Blocks.FB><AttributeList><ProgrammingLanguage>GRAPH</ProgrammingLanguage></AttributeList>'
                     '</SW.Blocks.FB></Document>')
         _, d = self.req('GET', '/api/edits/' + uid)
-        self.assertIn('GRAPH (Seq : "FB_Sequence")', d['upload_note'])
-        s, e = self.req('POST', '/api/edits/%s/upload' % uid)
-        self.assertEqual(s, 409)
-        self.assertIn('ImportXmlBlock', e['error'])
+        self.assertIn('GRAPH (Seq : "FB_Sequence")', d['upload_via'])
+        self.assertNotIn('upload_note', d)
         u = server.state.find(self.data, uid)[2]
-        self.assertIsNone(server.document_import_refused(self.root, dict(u, block='FB_Belt')))
-        self.assertIn('OB event class', server.document_import_refused(self.root, dict(u, block_kind='OB')))
-        self.assertFalse(os.path.exists(os.path.join(self.tia, 'imports.jsonl')))       # nothing was written
+        self.assertIsNone(server.xml_reason(self.root, dict(u, block='FB_Belt')))
+        self.assertIn('event class', server.xml_reason(self.root, dict(u, block_kind='OB')))
+        self.assertIn('every Upload', server.xml_reason(self.root, dict(u, block='FB_Belt'), {'upload': 'xml'}))
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid)
+        self.assertTrue(r['ok'], r)
+        self.assertEqual([k['step'] for k in r['edit']['writes'][0]['steps']][3:],
+                         ['ExportXmlBlock', 'Edit the SimaticML', 'ImportXmlBlock', 'CompileBlock'])
+        self.assertEqual([x['tool'] for x in self.calls()].count('ImportFromDocuments'), 0)
+
+    def calls(self):
+        with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:
+            return [json.loads(r) for r in f]
 
     def test_upload_compiles_an_inconsistent_block(self):
         self.stop()

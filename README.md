@@ -51,7 +51,9 @@ All four are developed, used and tested only with TIA Portal V21.
   instructions for making the same change by hand in TIA Portal.
 - "Export = proposal" check: compares a fresh export with the approved change.
 - Optional `Upload` (through the writer) and `Check` (through the reader) for non-safety blocks. Networks of
-  fail-safe blocks are never uploaded; they are changed by hand.
+  fail-safe blocks are never uploaded; they are changed by hand. OBs, blocks with GRAPH and new networks are written
+  through SimaticML (export → edit the XML → import → compile, the original export goes back when that fails);
+  what the XML way cannot write is refused before Upload — see [docs/reference.md](docs/reference.md#upload-through-simaticml).
 - A changelog of the project and a comparison of two snapshots (versions), see below.
 - An MCP server (`mcp_server.py`), so an AI agent can read projects and networks, propose a change, check an export
   and take a screenshot — on top of a small HTTP API.

@@ -1,0 +1,43 @@
+{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_BlockNumber := "20";
+    S7_Version := "0.1"
+}
+FUNCTION_BLOCK "FB_Station"
+    VAR_INPUT
+        Enable : Bool;
+        Init : Bool;
+    END_VAR
+    VAR_OUTPUT
+        Lamp : Bool;
+    END_VAR
+    VAR
+        Seq : "FB_Sequence";
+        Run : Bool;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Enable )
+            #Seq(
+                OFF_SQ :=  ,
+                INIT_SQ := #Init
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_2"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( #Run )
+            Coil( #Lamp )
+        END_RUNG
+    END_NETWORK
+END_FUNCTION_BLOCK

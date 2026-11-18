@@ -763,7 +763,7 @@ async function showEdit(uid, error) {
       : `<button id="upload" class="tia" ${canTia && !d.upload_note ? '' : 'disabled'} title="${esc(d.upload_note || (!canTia ? 'fill in the TIA settings for the project first'
           : u.kind === 'hmi_screen' ? 'TIAC_Writer sets the changed attributes and tag dynamizations of the screen items → Signed'
           : 'TIAC_Writer writes the network into the TIA project (export block → replace network → import Override) → Signed'))}">Upload to TIA</button>` +
-        (d.upload_note ? `<span class="fblock">⚠ ${esc(d.upload_note)}</span>` : '')) : '') +
+        (d.upload_note ? `<span class="fblock">⚠ ${esc(d.upload_note)}</span>` : d.upload_via ? `<span class="hint">via ${esc(d.upload_via)}</span>` : '')) : '') +
     (u.state === 'Signed' ? `<button id="check" class="tia check" ${canTia ? '' : 'disabled'} title="${canTia ? 'TIAC_Reader exports it and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
     (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : u.state === 'Disapproved' ? '' : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
     (DELETABLE.includes(u.state) ? `<button id="del-edit" class="danger" title="removes the edit${u.group ? ' (it leaves its group)' : ''}; only before it is written to TIA">Delete edit</button>` : '') +
@@ -795,6 +795,7 @@ async function showEdit(uid, error) {
     `<label>softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1"></label>` +
     `<label>plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1"></label>` +
     `<label>groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(Writer looks it up)"></label>` +
+    `<label title="default: SimaticML only where documents fail (OB, GRAPH, new network)"><input type="checkbox" id="tia-xml"${d.tia?.upload === 'xml' ? ' checked' : ''}> every Upload through SimaticML (XML)</label>` +
     `<button id="tia-save">Save</button></div></details>`;
   if ($('edit_mode')) $('edit_mode').onclick = () => { location.href = `?edit=${enc(u.id)}&edit_mode=1`; };
   if ($('check-export')) $('check-export').onclick = async () => {
@@ -820,7 +821,8 @@ async function showEdit(uid, error) {
   $('tia-save').onclick = async () => {
     try {
       await api(`/api/state/tia?project=${enc(u.project)}`, 'PUT',
-                    {softwarePath: $('tia-sp').value, plcName: $('tia-plc').value, groupPath: $('tia-grp').value});
+                    {softwarePath: $('tia-sp').value, plcName: $('tia-plc').value, groupPath: $('tia-grp').value,
+                     upload: $('tia-xml').checked ? 'xml' : ''});
       await showEdit(uid);
     } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
   };
