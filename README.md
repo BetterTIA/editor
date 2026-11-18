@@ -36,8 +36,8 @@ It is one of the four tools of the [BetterTIA](https://github.com/BetterTIA) set
 
 All four are developed, used and tested only with TIA Portal V21.
 
-> Status: early and experimental. Everything here is tested against the bundled sample project only;
-> writing a network back to a live TIA Portal has not been verified yet.
+> Status: in use on real projects. Upload (through the Writer) and the export check have run against a live
+> TIA Portal V21; the automated tests use the bundled sample project and fake servers only, so expect rough edges.
 
 ## What it does
 
@@ -65,6 +65,10 @@ All four are developed, used and tested only with TIA Portal V21.
   a network edit that uses a `#operand` the interface lacks gets a warning pointing at the interface edit.
 - **Group** — several edits that make one change (e.g. two statics, a new network, a renamed network): one state,
   TIA steps of all members in order, Upload in order (interface → new networks → changes), one check.
+
+A group can carry a Deck `card` (id or link, e.g. `#123`) and a `card_title`; the edit tree can be filtered by card.
+Edits can be deleted in any state (an edit already written to TIA needs an explicit confirmation; only the editor's
+state goes, TIA is never touched), one by one or with **Clean up…** (filter, preview, backup of `state.json`).
 
 Fail-safe blocks get every kind of edit as a proposal with TIA steps; Upload stays refused for them.
 
@@ -148,7 +152,7 @@ client does not start in this folder. The home page shows the same blocks to cop
 **AI: connected (&lt;client&gt;)** once the agent is attached.
 
 Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
-`create_group`, `get_group`, `run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
+`delete_edit`, `cleanup_edits`, `create_group`, `update_group`, `list_groups`, `get_group`, `run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
 `compare_snapshots`, `list_screens`, `get_screen`, `list_presets`, `propose_screen`, `screenshot` — see
 [docs/reference.md](docs/reference.md#mcp-server).
 

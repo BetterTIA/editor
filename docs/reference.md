@@ -234,14 +234,17 @@ has in the exported block).
 **Groups** — several edits that make one change (e.g. two statics + a new network that uses them + a renamed network):
 | Method | Path | Body → answer |
 |---|---|---|
-| POST | `/api/groups` | `{edit_ids: [...] in order, name?}` → 201 the group; at least two edits of one project, none in another group (409) |
-| GET | `/api/groups/<id>` | `{id, project, name, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
+| POST | `/api/groups` | `{edit_ids: [...] in order, name?, card?, card_title?, task?, goal?}` → 201 the group; at least two edits of one project, none in another group (409) |
+| GET | `/api/groups` | `?project=&card=&state=` → `{groups: [...]}` (the group shape below); `card` is an exact match. A group whose name starts with `#<card> ` and has no `card` field gets `card` / `card_title` derived from the name when the state is loaded |
+| POST | `/api/groups/<id>` | `{name?, card?, card_title?}` — only the given fields change; an empty `card` / `card_title` is cleared (not derived again) |
+| POST | `/api/cleanup` | `{project?, states?, group?, card?, all?, dry_run?, force?, by?}` — deletes many edits (editor state only, TIA is not touched). A filter or `all: true` is required (400). `dry_run` (default **true**) → `{dry_run, count, needs_force: [ids written to TIA], edits: [{id, project, state, where, group}]}`; `dry_run: false` first copies `state.json` to `<data>/backups/state-<project>-<time>.json` (`backups` in the reply), written states (Signed and later) need `force: true` (else 409); tombstones and the changelog as for a single delete |
+| GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
 | POST | `/api/groups/<id>/state` | `{state, by}` — every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
 | POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}` |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
-| DELETE | `/api/groups/<id>[?edits=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — only when each is Proposal, Approved or Disapproved, else 409 → `{project, group, deleted}` |
-| DELETE | `/api/edits/<id>` | deletes an edit not yet written (Proposal, Approved, Disapproved; else 409); a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
+| DELETE | `/api/groups/<id>[?edits=1][&force=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — an edit already written (Signed and later) only with `force=1`, else 409 → `{project, group, deleted}` |
+| DELETE | `/api/edits/<id>` | deletes an edit (editor state only, TIA is not touched): Proposal, Approved, Disapproved; an edit already written (Signed and later) only with `?force=1`, else 409; a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
 
 Deleted edits and groups stay in `state.json` as tombstones (`deleted: [{id, kind: edit|group, time, by, …}]`): their
 ids are never given again and the changelog lists them (kind `deleted`). A group member written another way after a
@@ -723,7 +726,11 @@ error of the editor = `isError: true` with its message):
 | `get_edit` | `id` | `edit` (before/after, checks, writes, history), `diff`, `errors`, `warnings`, `next`/`previous`, `checked_allowed`, `tia`, `procedure` (markdown), `url` |
 | `propose_edit` | `project`, `round`, `block`, `kind?` + per kind: `nw`, `after?`, `title_after?`, `comment_after?` (network) · `section`, `members` (interface) · `after_nw`, `title`, `after`, `comment?`, `language?` (new_network); `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout`, `warnings` include the #operand warning |
 | `update_edit` | `id`, `after?`, `note?`, `section?`, `members?`, `title?`, `comment?`, `title_after?`, `comment_after?` | changes a Proposal (a Disapproved edit goes back to Proposal) → `{id, state, errors}` |
-| `create_group` | `edit_ids`, `name?` | `POST /api/groups` → the group + `url` |
+| `delete_edit` | `id`, `force?` | `DELETE /api/edits/<id>` (`force: true` = `?force=1`, also an edit written to TIA; only on a person's explicit instruction) |
+| `cleanup_edits` | `project?`, `states?`, `group?`, `card?`, `all?`, `dry_run?` (default true), `force?` | `POST /api/cleanup` |
+| `create_group` | `edit_ids`, `name?`, `card?`, `card_title?` | `POST /api/groups` → the group + `url` |
+| `update_group` | `id`, `name?`, `card?`, `card_title?` | `POST /api/groups/<id>` → the group |
+| `list_groups` | `project?`, `card?`, `state?` | `GET /api/groups` |
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
 | `get_procedure` | `id` | the TIA steps as markdown text |

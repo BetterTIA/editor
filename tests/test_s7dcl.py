@@ -113,8 +113,8 @@ class TestDuplicateMlc(unittest.TestCase):
     def test_titles_by_position_when_the_id_repeats(self):
         d = tempfile.mkdtemp()
         with open(os.path.join(d, 'FB_X.s7dcl'), 'w', encoding='utf-8') as f:
-            f.write('FUNCTION_BLOCK "FB_X"\n{ S7_BlockNumber := "1" }\nBEGIN\n'.replace('\n', '\n'))
-            for t in ('A', 'B'):
+            f.write('FUNCTION_BLOCK "FB_X"\n{ S7_BlockNumber := "1" }\nBEGIN\n')
+            for _ in range(2):
                 f.write('{ S7_Language := "LAD"; S7_NetworkTitle := "MLC_1" }\nNETWORK\nEND_NETWORK\n')
         with open(os.path.join(d, 'FB_X.s7res'), 'w', encoding='utf-8') as f:
             f.write('MultiLingualTexts:\n  - id: MLC_1\n    en-US: First\n  - id: MLC_1\n    en-US: Second\n')

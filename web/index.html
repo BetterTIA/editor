@@ -621,7 +621,8 @@ const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // coi
 
 // edit tree: project → round → block → NW → edit
 function treeHtml(st, activeId) {
-  let h = '<h2>Edits</h2><div class="tree">';
+  let h = '<h2>Edits <a href="?cleanup=1" class="hint" style="display:inline;padding:0" title="delete many edits by filter">Clean up…</a></h2>' +
+    '<input id="card-filter" placeholder="filter by Deck card (#123)" style="width:calc(100% - 24px);margin:0 12px 6px"><div class="tree">';
   if (!st.projects.length) h += '<p class="empty">No edits yet — open a network and press Propose edit, or let an AI agent propose one.</p>';
   const group = (field, key) => {
     const m = new Map();
@@ -640,8 +641,8 @@ function treeHtml(st, activeId) {
     for (const [gid, ug] of [...groups].sort()) {
       const low = ug.some(u => u.state === 'Disapproved') ? 'Disapproved' : STATES[Math.min(...ug.map(u => STATES.indexOf(u.state)))];
       const on = gid === activeId || ug.some(u => u.id === activeId);
-      let gh = `<details class="grp${gid === activeId ? ' active' : ''}"${on ? ' open' : ''}><summary><a class="c" href="?group=${enc(gid)}">${esc(gid)}</a>` +
-           `<span class="note">${esc(ug[0].group.name || `${ug.length} edits`)}</span><span class="state s-${esc(low)}">${esc(low)}</span></summary>` +
+      let gh = `<details class="grp${gid === activeId ? ' active' : ''}" data-card="${esc(ug[0].group.card || '')}"${on ? ' open' : ''}><summary><a class="c" href="?group=${enc(gid)}">${esc(gid)}</a>` +
+           `<span class="note">${ug[0].group.card ? `<b>${esc(ug[0].group.card)}</b> ` : ''}${esc(ug[0].group.name || `${ug.length} edits`)}</span><span class="state s-${esc(low)}">${esc(low)}</span></summary>` +
            ug.map(u => `<a class="u4 ${u.id === activeId ? 'active' : ''}" href="?edit=${enc(u.id)}" title="${esc(editWhere(u))}"><span class="c">${esc(u.id)}</span>` +
                        `<span class="state s-${esc(u.state)}">${esc(u.state)}</span><span class="note">${esc(editWhere(u))}</span></a>`).join('') + `</details>`;
       emit(ug[0].group.task, gh, on);
@@ -688,6 +689,11 @@ function editWhere(u) {
 const treeKey = u => ['interface', 'new_network', 'hmi_screen'].includes(u.kind) ? u.kind + ':' + u.id : 'nw:' + u.nw;
 const treeOrder = u => u.kind === 'interface' || u.kind === 'hmi_screen' ? -1 : u.kind === 'new_network' ? u.after_nw + 0.5 : u.nw;
 let lastState = {projects: []};
+document.addEventListener('input', e => {             // card filter of the edit tree: hides groups of other cards
+  if (e.target.id !== 'card-filter') return;
+  const v = e.target.value.trim();
+  document.querySelectorAll('.tree details.grp').forEach(d => { d.hidden = !!v && !(d.dataset.card || '').includes(v); });
+});
 async function loadTree(activeId) {
   try { lastState = await api('/api/state'); return treeHtml(lastState, activeId); }
   catch (e) { return `<h2>Edits</h2><p class="warning">⚠ ${esc(e.message)}</p>`; }
@@ -798,7 +804,7 @@ async function showEdit(uid, error) {
         (d.upload_note ? `<span class="fblock">⚠ ${esc(d.upload_note)}</span>` : '')) : '') +
     (u.state === 'Signed' ? `<button id="check" class="tia check" ${canTia ? '' : 'disabled'} title="${canTia ? 'TIAC_Reader exports it and compares it with the proposal; on a match → Checked' : 'fill in the TIA settings for the project first'}">Check in TIA</button>` : '') +
     (u.state === 'Proposal' ? (u.kind === 'interface' ? '' : `<button id="edit_mode">Edit</button>`) : u.state === 'Disapproved' ? '' : `<button id="check-export" title="compares the latest Reader export with the proposal and records a check">Check export</button>`) +
-    (DELETABLE.includes(u.state) ? `<button id="del-edit" class="danger" title="removes the edit${u.group ? ' (it leaves its group)' : ''}; only before it is written to TIA">Delete edit</button>` : '') +
+    `<button id="del-edit" class="danger" title="removes the edit from the editor${u.group ? ' (it leaves its group)' : ''}; TIA is not touched">Delete edit${DELETABLE.includes(u.state) ? '' : ' (written to TIA)'}</button>` +
     `<span class="progress" id="progress"></span>` +
     `</div>` + disapproveHtml(u.state, u.disapproved) +
     (u.state === 'Signed' ? `<details class="disapprove"><summary>Record a check by hand…</summary>` +
@@ -864,7 +870,7 @@ async function showEdit(uid, error) {
     try { await api('/api/check', 'POST', {edit_id: u.id, match, export_ts: '', note: 'by hand: ' + note}); await showEdit(uid); }
     catch (e) { await showEdit(uid, e.message); }
   };
-  armDelete('del-edit', `/api/edits/${enc(u.id)}`, () => { location.href = u.group ? `?group=${enc(u.group.id)}` : `?project=${enc(u.project)}`; });
+  armDelete('del-edit', `/api/edits/${enc(u.id)}${DELETABLE.includes(u.state) ? '' : '?force=1'}`, () => { location.href = u.group ? `?group=${enc(u.group.id)}` : `?project=${enc(u.project)}`; });
   for (const b of m.querySelectorAll('button[data-state]')) {
     b.onclick = async () => {
       try { await api(`/api/edits/${enc(u.id)}/state`, 'POST', {state: b.dataset.state, by: 'user'}); await showEdit(uid); }
@@ -880,7 +886,7 @@ const DELETABLE = ['Proposal', 'Approved', 'Disapproved'];      // not yet writt
 function armDelete(id, path, done, ask = 'Click again to delete') {
   const b = $(id);
   if (b) b.onclick = async () => {
-    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = ask; return; }
+    if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = path.includes('force=1') ? 'Written to TIA — click again to delete from the editor only (TIA stays)' : ask; return; }
     try { await api(path, 'DELETE'); done(); } catch (e) { b.textContent = '⚠ ' + e.message; }
   };
 }
@@ -900,16 +906,48 @@ function onDisapprove(path, reload) {
     catch (e) { await reload(e.message); }
   };
 }
+// ---------- clean up: delete many edits by filter (dry run first, backup of state.json before the real run) ----------
+async function showCleanup() {
+  $('nw').innerHTML = await loadTree(null);
+  const projects = (lastState?.projects || []).map(p => p.project);
+  $('info').textContent = 'clean up edits';
+  $('content').innerHTML = `<h1>Clean up edits</h1><p class="hint">Deletes edits from the editor only - TIA is not touched. Ids are not reused and the changelog keeps a record; state.json is copied to the backups folder first.</p>` +
+    `<div class="tools"><label>Project <select id="cl-project"><option value="">(all)</option>${projects.map(p => `<option>${esc(p)}</option>`).join('')}</select></label> ` +
+    `<label>Card <input id="cl-card" placeholder="#123"></label> <label>Group <input id="cl-group" placeholder="G001"></label></div>` +
+    `<div class="tools">${[...STATES, 'Disapproved'].map(s => `<label><input type="checkbox" class="cl-state" value="${s}"> ${s}</label>`).join(' ')}` +
+    ` <label><input type="checkbox" id="cl-all"> everything</label></div>` +
+    `<div class="buttons"><button id="cl-preview">Preview</button><button id="cl-run" class="danger" hidden></button></div><div id="cl-out"></div>`;
+  const body = dry => ({project: $('cl-project').value || undefined, card: $('cl-card').value.trim() || undefined, group: $('cl-group').value.trim() || undefined,
+    states: [...document.querySelectorAll('.cl-state:checked')].map(x => x.value), all: $('cl-all').checked || undefined, dry_run: dry});
+  const reset = () => { $('cl-run').hidden = true; delete $('cl-run').dataset.armed; };
+  document.querySelectorAll('#content input, #content select').forEach(x => x.onchange = reset);
+  $('cl-preview').onclick = async () => {
+    reset();
+    const b = body(true); if (!b.states.length) delete b.states;
+    try {
+      const r = await api('/api/cleanup', 'POST', b);
+      $('cl-out').innerHTML = `<p><b>${r.count}</b> edit(s) would be deleted${r.needs_force.length ? `, <b>${r.needs_force.length}</b> of them already written to TIA` : ''}.</p>` +
+        `<ul>${r.edits.map(x => `<li><span class="c">${esc(x.id)}</span> ${esc(x.project)} · ${esc(x.state)} · ${esc(x.where)}${x.group ? ' · ' + esc(x.group) : ''}</li>`).join('')}</ul>`;
+      const run = $('cl-run'); run.hidden = !r.count; run.textContent = `Delete ${r.count} edit(s)`;
+      run.onclick = async () => {
+        if (!run.dataset.armed) { run.dataset.armed = '1'; run.textContent = r.needs_force.length ? `Includes edits written to TIA - click again to delete ${r.count} from the editor only` : `Click again to delete ${r.count}`; return; }
+        try { const d = await api('/api/cleanup', 'POST', Object.assign(b, {dry_run: false, force: r.needs_force.length > 0}));
+              $('cl-out').innerHTML = `<p>Deleted ${d.count}. Backup: ${d.backups.map(esc).join(', ')}</p>`; reset(); $('nw').innerHTML = await loadTree(null); }
+        catch (e) { run.textContent = '⚠ ' + e.message; }
+      };
+    } catch (e) { $('cl-out').innerHTML = `<p class="warning">⚠ ${esc(e.message)}</p>`; }
+  };
+}
 // ---------- E5: a group of edits = one change ----------
 async function showGroup(gid, message) {
   const g = await api(`/api/groups/${enc(gid)}`);
   $('info').textContent = `${g.project} · group ${g.id}`;
   document.title = `BetterTIA Editor — group ${g.id}`;
   $('nw').innerHTML = await loadTree(g.id);
-  const at = STATES.indexOf(g.state);
+  const at = STATES.indexOf(g.state), wr = g.members.some(m => !DELETABLE.includes(m.state));
   $('content').innerHTML = `<div class="edit-head">` +
     `<h1><span class="c">${esc(g.id)}</span> ${esc(g.name || 'group of edits')}</h1>` +
-    `<div class="header"><span class="state s-${esc(g.state)}">${esc(g.state)}</span> ${g.members.length} edits · ${g.blocks.map(esc).join(', ')} · the group state is the lowest state of its members</div>` +
+    `<div class="header">${g.card ? `<b title="Deck card">${esc(g.card)}</b> ${esc(g.card_title)} · ` : ''}<span class="state s-${esc(g.state)}">${esc(g.state)}</span> ${g.members.length} edits · ${g.blocks.map(esc).join(', ')} · the group state is the lowest state of its members</div>` +
     (g.f ? `<div class="warning"><b>⚠ F-block:</b> ${esc(g.f_note)}. No Upload — make the members by hand following the TIA steps.</div>` : '') +
     `<div class="buttons">` +
     (g.previous ? `<button data-gstate="${esc(g.previous)}">← ${esc(g.previous)}</button>` : '') +
@@ -919,7 +957,7 @@ async function showGroup(gid, message) {
     (g.state === 'Approved' && !g.f ? `<button id="g-upload" class="tia" title="members in order: interface, new networks, changes; stops at the first failure">Upload group to TIA</button>` : '') +
     `<button id="g-check" title="export check of every member">Check export (all members)</button>` +
     `<button id="g-ungroup" title="the edits stay, each with its own state">Ungroup</button>` +
-    (g.members.every(m => DELETABLE.includes(m.state)) ? `<button id="g-delete" class="danger" title="deletes the group and all its edits; only before they are written to TIA">Delete group and edits</button>` : '') +
+    `<button id="g-delete" class="danger" title="deletes the group and all its edits from the editor; TIA is not touched">Delete group and edits${wr ? ' (written to TIA)' : ''}</button>` +
     `<span class="progress" id="progress"></span></div>` +
     disapproveHtml(g.state, null) + `</div>` +
     (message ? `<div class="warning"><b>⚠ ${esc(message)}</b></div>` : '') +
@@ -941,7 +979,7 @@ async function showGroup(gid, message) {
     catch (e) { await showGroup(gid, e.message); }
   };
   armDelete('g-ungroup', `/api/groups/${enc(gid)}`, () => { location.href = `?project=${enc(g.project)}`; }, 'Click again to ungroup');
-  armDelete('g-delete', `/api/groups/${enc(gid)}?edits=1`, () => { location.href = `?project=${enc(g.project)}`; });
+  armDelete('g-delete', `/api/groups/${enc(gid)}?edits=1${wr ? '&force=1' : ''}`, () => { location.href = `?project=${enc(g.project)}`; });
   const run = (id, path, text, done) => { if ($(id)) $(id).onclick = async () => {
     for (const b of $('content').querySelectorAll('.buttons button')) b.disabled = true;
     $('progress').textContent = text;
@@ -2017,6 +2055,7 @@ async function start() {
   if (q.get('edit') && q.get('edit_mode') === '1') await editor(q.get('edit'));
   else if (q.get('edit')) await showEdit(q.get('edit'));
   else if (q.get('group')) await showGroup(q.get('group'));
+  else if (q.get('cleanup')) await showCleanup();
   else if (project && block) await showNetwork(project, block);
   else if (project && q.get('screen')) { $('nw').innerHTML = await loadTree(null); await showScreen(project, q.get('screen')); }
   else if (project) {
