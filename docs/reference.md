@@ -611,7 +611,7 @@ changed orange, deleted red); an added / removed network is drawn whole in green
 `tests\screenshots\project_changelog.png`, `project_versions.png`.
 
 **Compare exports** — `GET /api/compare-exports?a=&b=[&project=&block=][&detail=1:1,3:4]` (MCP `compare_exports`).
-A / B = full path of a `.s7dcl` (its `.s7res` beside it) or a snapshot timestamp together with `project` and `block`.
+A / B = full path of a `.s7dcl` inside an export root (default root or a registered project; anything else answers 404; its `.s7res` beside it) or a snapshot timestamp together with `project` and `block`.
 → `{summary: {same, changed, added, removed, networks_a, networks_b}, networks: [{nw_a, nw_b, title, language, status,
 code_changed, title_change?, comment_change?, lines? (added / removed), diff? (only for pairs named in detail)}],
 truncated, notes}`; the list holds only non-same networks (max 200), a diff is cut at 200 lines.
