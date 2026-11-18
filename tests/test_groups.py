@@ -131,6 +131,18 @@ class TestGroups(unittest.TestCase):
         self.assertEqual(len(dl), 6, dl)                                 # 4 edits + ungroup G001 + G002
         self.assertIn('deleted group G001 (edits %s, %s · old idea)' % (iface, change), dl)
 
+    def test_task_and_mcp_delete_edit(self):
+        a = self.edit(nw=7, title_after='x')
+        b = self.edit(nw=6, title_after='y')
+        s, g = self.req('POST', '/api/groups', {'edit_ids': [a, b], 'task': 'TASK021', 'goal': 'jam'})
+        self.assertEqual(g['task'], {'id': 'TASK021', 'goal': 'jam'})
+        s, g = self.req('POST', '/api/groups/G001/task', {'task': ''})
+        self.assertIsNone(g['task'])
+        e = mcp_server.Editor(self.url)
+        r = json.loads(mcp_server.call_tool(e, 'delete_edit', {'id': a})['content'][0]['text'])
+        self.assertEqual(r['deleted'], [a])
+        self.assertEqual(self.req('GET', '/api/edits/' + a)[0], 404)
+
     def test_upload_in_order_and_check(self):
         iface, new, change = self.three()
         self.req('POST', '/api/groups', {'edit_ids': [change, new, iface]})            # any order: Upload sorts by kind

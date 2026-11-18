@@ -76,7 +76,10 @@ header .info { color: var(--muted); font-size: 13px; min-width: 0; overflow: hid
 .demo-banner span { background: var(--warning); padding: 1px 10px; border-radius: var(--r-sm); }
 .demo-banner:empty { padding: 0; }
 /* ---------- layout ---------- */
-.main { display: grid; grid-template-columns: 290px 1fr; min-height: 0; }
+.main { display: grid; grid-template-columns: var(--aside-w, 290px) 1fr; min-height: 0; position: relative; }
+#nw-resizer { position: absolute; top: 0; bottom: 0; left: calc(var(--aside-w, 290px) - 3px); width: 6px; cursor: col-resize; z-index: 5; }
+#nw-resizer:hover, #nw-resizer.drag { background: var(--select); }
+.main.home #nw-resizer { display: none; }
 aside { border-right: 1px solid var(--edge); overflow: auto; background: var(--panel); padding-bottom: var(--s4); }
 aside h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: var(--s4) var(--s3) var(--s2); }
 aside a { display: block; padding: 5px var(--s3); color: var(--text); text-decoration: none;
@@ -183,7 +186,7 @@ details.panel > .body.canvas-body .canvas { border-radius: var(--r-sm); }
 details.tia-settings .body input { font: 12px var(--mono); width: 150px; margin: 2px 6px 2px 2px; }
 details.tia-settings .body label { color: var(--muted); font-size: 12px; }
 /* ---------- editor ---------- */
-.main.edit { grid-template-columns: 290px 1fr 260px; }
+.main.edit { grid-template-columns: var(--aside-w, 290px) 1fr 260px; }
 #palette { border-left: 1px solid var(--edge); border-right: 0; }
 #palette input { width: calc(100% - 24px); margin: var(--s1) var(--s3) var(--s2); }
 #palette .item { display: flex; gap: var(--s2); align-items: center; padding: 4px var(--s3); cursor: grab; border-left: 3px solid transparent;
@@ -231,6 +234,11 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 .texts > div { padding: 2px 0; } .texts .old { color: var(--deleted); text-decoration: line-through; } .texts .new { color: var(--added); }
 .texts .hint { display: inline-block; min-width: 70px; }
 .tools input.wide { width: 260px; }
+.tree details.task > summary { list-style: none; cursor: pointer; display: flex; gap: 6px; align-items: baseline; padding: 4px var(--s3); font-weight: 700; background: var(--panel); border-bottom: 1px solid var(--edge); }
+.tree details.task > summary::-webkit-details-marker { display: none; }
+.tree details.task > summary::before { content: '▸'; color: var(--muted); } .tree details.task[open] > summary::before { content: '▾'; }
+.tree details.task > summary .note { font-weight: 400; white-space: normal; }
+.tree details.task > details.grp { margin-left: 10px; }
 .tree details.grp > summary { list-style: none; cursor: pointer; display: flex; gap: 6px; align-items: center; padding: 3px var(--s3) 3px 22px;
                              font-size: 12px; white-space: nowrap; overflow: hidden; }
 .tree details.grp > summary::-webkit-details-marker { display: none; }
@@ -345,7 +353,7 @@ svg .frame-error { fill: color-mix(in srgb, var(--warning) 10%, transparent); st
 .hi.d-deleted { outline: 3px dashed var(--deleted); outline-offset: 1px; opacity: .5; }
 .hi.sel { outline: 3px solid var(--accent); outline-offset: 2px; z-index: 5; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--edge-strong); vertical-align: -2px; margin-right: 4px; }
-.main.screen { grid-template-columns: 290px 1fr 300px; }
+.main.screen { grid-template-columns: var(--aside-w, 290px) 1fr 300px; }
 #palette.hmi-props { padding: 0 var(--s3) var(--s4); }
 #palette.hmi-props h2 { margin-left: 0; }
 .hmi-screen.grid::before { content: ''; position: absolute; inset: 0; pointer-events: none;
@@ -382,6 +390,7 @@ table.changes .added { color: var(--added); } table.changes .changed { color: va
 <header><a href="/" class="brand" aria-label="BetterTIA Editor, home"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M3 2v18" stroke="var(--accent)" stroke-width="3"/><path d="M3 11h5M14 11h5M8 6v10M14 6v10" stroke="var(--accent)" stroke-width="2" fill="none"/></svg>BetterTIA Editor</a><a href="/" id="home-link">Home</a><span class="info" id="info">viewer and editor</span><span class="status" id="status"></span><button id="theme" title="switch light / dark theme" aria-label="switch theme">&#9680;</button></header>
 <div class="main">
   <aside id="nw"></aside>
+  <div id="nw-resizer" title="Drag to resize the left panel"></div>
   <main id="content"></main>
   <aside id="palette" hidden></aside>
 </div>
@@ -595,6 +604,19 @@ async function showExports(project) {
     `<span>Take a New snapshot on the <a href="/">home page</a>, or add a folder with a Reader export.</span></div>`;
 }
 const enc = encodeURIComponent;
+(function () {            // drag handle for the width of the left panel; remembered per browser
+  const root = document.documentElement, bar = document.getElementById('nw-resizer');
+  const set = w => root.style.setProperty('--aside-w', Math.max(200, Math.min(window.innerWidth - 400, w)) + 'px');
+  try { const w = parseInt(localStorage.getItem('nw-width'), 10); if (w) set(w); } catch (e) {}
+  if (!bar) return;
+  bar.addEventListener('pointerdown', ev => {
+    bar.setPointerCapture(ev.pointerId); bar.classList.add('drag');
+    const move = e => set(e.clientX - document.querySelector('.main').getBoundingClientRect().left);
+    const up = () => { bar.classList.remove('drag'); bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up);
+      try { localStorage.setItem('nw-width', parseInt(getComputedStyle(root).getPropertyValue('--aside-w'), 10)); } catch (e) {} };
+    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up);
+  });
+})();
 const canvasWidth = () => Math.max(600, $('content').clientWidth - 40);   // coils at the right edge of the window, as in TIA
 
 // edit tree: project → round → block → NW → edit
@@ -609,13 +631,23 @@ function treeHtml(st, activeId) {
   for (const p of st.projects) {
     h += `<div class="u0">${esc(p.project)}</div>`;
     const groups = group(p.edits.filter(u => u.group).sort((a, b) => a.group.order - b.group.order), u => u.group.id);
+    const tasks = new Map();                                   // task id → {goal, html, on}: collapsible parent of groups
+    const emit = (task, html, on) => {
+      if (!task) { h += html; return; }
+      if (!tasks.has(task.id)) { tasks.set(task.id, {goal: task.goal || '', html: '', on: false}); }
+      const t = tasks.get(task.id); t.html += html; t.on = t.on || on; t.goal = t.goal || task.goal || '';
+    };
     for (const [gid, ug] of [...groups].sort()) {
       const low = ug.some(u => u.state === 'Disapproved') ? 'Disapproved' : STATES[Math.min(...ug.map(u => STATES.indexOf(u.state)))];
       const on = gid === activeId || ug.some(u => u.id === activeId);
-      h += `<details class="grp${gid === activeId ? ' active' : ''}"${on ? ' open' : ''}><summary><a class="c" href="?group=${enc(gid)}">${esc(gid)}</a>` +
+      let gh = `<details class="grp${gid === activeId ? ' active' : ''}"${on ? ' open' : ''}><summary><a class="c" href="?group=${enc(gid)}">${esc(gid)}</a>` +
            `<span class="note">${esc(ug[0].group.name || `${ug.length} edits`)}</span><span class="state s-${esc(low)}">${esc(low)}</span></summary>` +
            ug.map(u => `<a class="u4 ${u.id === activeId ? 'active' : ''}" href="?edit=${enc(u.id)}" title="${esc(editWhere(u))}"><span class="c">${esc(u.id)}</span>` +
                        `<span class="state s-${esc(u.state)}">${esc(u.state)}</span><span class="note">${esc(editWhere(u))}</span></a>`).join('') + `</details>`;
+      emit(ug[0].group.task, gh, on);
+    }
+    for (const [tid, t] of tasks) {
+      h += `<details class="task"${t.on ? ' open' : ''}><summary><span class="c">${esc(tid)}</span><span class="note" title="${esc(t.goal)}">${esc(t.goal)}</span></summary>${t.html}</details>`;
     }
     for (const [, uk] of group(p.edits.filter(u => !u.group), u => String(u.round ?? '').trim().toLowerCase())) {
       h += `<div class="u1">Round: ${esc(String(uk[0].round ?? '').trim())}</div>`;

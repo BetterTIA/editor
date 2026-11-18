@@ -2056,7 +2056,7 @@ def _group_members(data, gid):
 def _group_view(project, gid, members):
     low = min(state.rank(u['state']) for u in members)
     no = any(u['state'] == state.DISAPPROVED for u in members)
-    g = {'id': gid, 'project': project, 'name': members[0]['group'].get('name') or '',
+    g = {'id': gid, 'project': project, 'name': members[0]['group'].get('name') or '', 'task': members[0]['group'].get('task'),
          'state': state.DISAPPROVED if no else state.STATES[low],
          'f': any(u.get('f') for u in members), 'blocks': sorted({u['block'] for u in members}),
          'members': [{'id': u['id'], 'order': u['group']['order'], 'kind': u.get('kind', 'network'), 'block': u['block'],
@@ -2093,8 +2093,31 @@ def api_group_create(data, body):
         s = found[0][1]
         by_id = {u['id']: u for u in s['edits']}
         name = str(body.get('name') or '')[:120]
+        task = _task_of(body)
         for i, x in enumerate(ids, 1):
-            by_id[x]['group'] = dict({'id': gid, 'order': i}, **({'name': name} if name else {}))
+            by_id[x]['group'] = dict({'id': gid, 'order': i}, **({'name': name} if name else {}), **({'task': task} if task else {}))
+        state.save(data, project, s)
+    return api_group(data, gid)
+
+
+def _task_of(body):
+    """{task: 'TASK021', goal?: '...'} -> {'id', 'goal'} (a collapsible parent of groups in the edit tree) or None."""
+    t = str(body.get('task') or '').strip()[:40]
+    return {'id': t, 'goal': str(body.get('goal') or '').strip()[:300]} if t else None
+
+
+def api_group_task(data, gid, body):
+    """POST /api/groups/<gid>/task {task, goal?} sets the task of the group; an empty task removes it."""
+    if not isinstance(body, dict):
+        raise state.StateError('the body must be a JSON object', 400)
+    with state.LOCK:
+        project, s, members = _group_members(data, gid)
+        task = _task_of(body)
+        for u in members:
+            if task:
+                u['group']['task'] = task
+            else:
+                u['group'].pop('task', None)
         state.save(data, project, s)
     return api_group(data, gid)
 
@@ -2329,6 +2352,7 @@ ROUTES = [
     ('GET', G, lambda h, gid: api_group(h.data, gid)),
     ('DELETE', G, lambda h, gid: api_group_delete(h.data, gid, h.q.get('edits') in ('1', 'true'), h.q.get('by'))),
     ('POST', G + '/state', lambda h, gid: api_group_state(h.data, gid, h._body())),
+    ('POST', G + '/task', lambda h, gid: api_group_task(h.data, gid, h._body())),
     ('GET', G + '/procedure', lambda h, gid: api_group_procedure(h.data, gid, h.root_for(_group_members(h.data, gid)[0]))),
     ('POST', G + '/check-export', lambda h, gid: api_group_check(h.root_of, h.data, gid)),
     ('POST', G + '/upload', _group_upload),

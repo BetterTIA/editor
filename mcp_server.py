@@ -140,6 +140,10 @@ def update_edit(e, a):
     return {'id': r['edit']['id'], 'state': r['edit']['state'], 'errors': r['errors']}
 
 
+def delete_edit(e, a):
+    return e.req('DELETE', '/api/edits/' + q(a['id']))
+
+
 def create_group(e, a):
     g = e.req('POST', '/api/groups', {'edit_ids': a['edit_ids'], 'name': a.get('name') or ''})
     return dict(g, url='%s/?group=%s' % (e.url, q(g['id'])))
@@ -305,6 +309,9 @@ TOOLS = [
               'title': {'type': 'string', 'description': 'new_network: title'},
               'comment': {'type': 'string', 'description': 'new_network: comment'},
               'title_after': TITLE_AFTER, 'comment_after': COMMENT_AFTER}, ['id']), update_edit),
+    ('delete_edit', 'Delete an edit that is not yet written to TIA (Proposal, Approved or Disapproved). The deletion is '
+                    'recorded in the changelog. Only on a person\'s explicit instruction.',
+     _schema({'id': S}, ['id']), delete_edit),
     ('create_group', 'Group edits that make one change together (e.g. interface members + new networks + changes of one '
                      'block), in the order they are made. The group has one state (the lowest of its members); a person '
                      'moves, uploads and checks it as a whole in the editor.',
