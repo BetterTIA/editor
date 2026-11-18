@@ -76,6 +76,13 @@ class TestNetdiff(unittest.TestCase):
             s, r = get('a=%s&b=%s&detail=2:3' % (self.a, self.b))
             self.assertEqual((s, r['summary']['changed'], 'diff' in r['networks'][2]), (200, 2, True))
             self.assertEqual(get('a=%s&b=%s' % (self.a, self.dir + '/nope.s7dcl'))[0], 404)
+            self.assertEqual(get('a=%s&b=%s' % (self.a, os.path.abspath(__file__)[:-3] + '.s7dcl'))[0], 404)
+            outside = os.path.join(tempfile.gettempdir(), 'outside_x.s7dcl')
+            shutil.copy(self.a, outside)
+            try:
+                self.assertEqual(get('a=%s&b=%s' % (outside, self.b))[0], 404)      # outside the export roots
+            finally:
+                os.remove(outside)
             self.assertEqual(get('a=%s&b=%s&detail=x' % (self.a, self.b))[0], 400)
             self.assertEqual(get('a=20261012-120000&b=20261012-130000')[0], 404)     # snapshot needs project + block
         finally:

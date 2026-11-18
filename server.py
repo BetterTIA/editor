@@ -2040,18 +2040,22 @@ def api_compare(root, data, project, a, b, block=None):
     return {'project': project, 'from': a, 'to': b, 'blocks': blocks}
 
 
-def _export_path(root, project, ref, block):
-    """A .s7dcl path as it is, or a snapshot timestamp of the project (+ block)."""
+def _export_path(root, project, ref, block, roots=()):
+    """A .s7dcl path (only inside the export roots), or a snapshot timestamp of the project (+ block)."""
     if ref.lower().endswith('.s7dcl'):
-        if not os.path.isfile(ref):
+        real = os.path.realpath(ref)
+        if not any(os.path.commonpath([real, os.path.realpath(r)]) == os.path.realpath(r) for r in roots if r
+                   and os.path.splitdrive(real)[0].lower() == os.path.splitdrive(os.path.realpath(r))[0].lower()):
+            raise KeyError('file not found: %s' % ref)       # outside the export roots: same answer as a missing file
+        if not os.path.isfile(real):
             raise KeyError('file not found: %s' % ref)
-        return ref
+        return real
     if not (project and block):
         raise KeyError('a snapshot timestamp needs project and block')
     return find_block(root, project, block, ref)[1]
 
 
-def api_compare_exports(root, project, a, b, block=None, detail=''):
+def api_compare_exports(root, project, a, b, block=None, detail='', data=None):
     """Two exports of a block (.s7dcl paths or snapshot timestamps) -> networks same / changed / added / removed.
     detail = "1:1,3:4" -> unified diff of those network pairs (A number : B number)."""
     try:
@@ -2061,7 +2065,8 @@ def api_compare_exports(root, project, a, b, block=None, detail=''):
     except ValueError:
         raise ValueError('detail is a list like 1:1,3:4')
     try:
-        return netdiff.compare(_export_path(root, project, a, block), _export_path(root, project, b, block), pairs)
+        roots = [root] + [p['export_root'] for p in state.registry(data)] if data is not None else [root]
+        return netdiff.compare(_export_path(root, project, a, block, roots), _export_path(root, project, b, block, roots), pairs)
     except s7dcl.SourceParseError as e:
         raise ValueError('cannot be read: %s' % e)
 
@@ -2491,8 +2496,8 @@ ROUTES = [
     ('GET', P + '/compare', lambda h, name: api_compare(h.root_for(name), h.data, name, h.q.get('from', ''), h.q.get('to', ''),
                                                         h.q.get('block'))),
     ('GET', r'/api/compare-exports', lambda h: api_compare_exports(
-        h.root_for(h.q.get('project')) if h.q.get('project') else None, h.q.get('project'), h.q.get('a', ''), h.q.get('b', ''),
-        h.q.get('block'), h.q.get('detail', ''))),
+        h.root_for(h.q.get('project')), h.q.get('project'), h.q.get('a', ''), h.q.get('b', ''),
+        h.q.get('block'), h.q.get('detail', ''), h.data)),
     ('GET', r'/api/jobs', lambda h: {'jobs': list(h.jobs.values())}),
     ('GET', r'/api/jobs/([\w-]+)', lambda h, jid: h.jobs[jid]),
     ('GET POST', r'/api/tia/status', _tia_status),
