@@ -152,7 +152,7 @@ def api_block(root, project, block, ts=None):
     t, b = _load(root, project, block, ts)
     return {'project': project, 'ts': t, 'block': b['name'], 'file': block, 'kind': b['kind'],
             'number': b['number'], 'language': b['language'], 'title': b['title'],
-            'networks': [{'nw': n['nw'], 'language': n['language'], 'title': n['title']} for n in b['networks']]}
+            'networks': [dict({'nw': n['nw'], 'language': n['language'], 'title': n['title']}, **{k: v for k, v in n.items() if k.endswith(('_ambiguous', '_candidates'))}) for n in b['networks']]}
 
 
 def api_blocks(root, project, ts=None):
@@ -188,7 +188,7 @@ def api_network(root, project, block, nw, ts=None, width=0):
         raise KeyError('network does not exist')
     n = b['networks'][nw - 1]
     res = {'project': project, 'ts': t, 'block': b['name'], 'file': block, 'kind': b['kind'],
-           'number': b['number'], 'nw': nw, 'language': n['language'], 'title': n['title'],
+           'number': b['number'], 'nw': nw, 'language': n['language'], 'title': n['title'], **{k: v for k, v in n.items() if k.endswith(('_ambiguous', '_candidates'))},
            'f': b['attributes'].get('S7_Safety') == 'TRUE',
            'comment': n['comment'], 'elements': n.get('elements', []), 'rungs': n.get('rungs', []),
            'wires': s7dcl.wires(n) if n['language'] == 'LAD' else [],

@@ -105,18 +105,29 @@ class TestParser(unittest.TestCase):
         self.assertEqual(s7dcl.text_mlc(t, 'MLC_neni'), '')
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestDuplicateMlc(unittest.TestCase):
-    def test_titles_by_position_when_the_id_repeats(self):
+    """An MLC id repeated in the .s7res: records come in the order of the uses, a network's title before its comment."""
+    DCL = ('FUNCTION_BLOCK "FB_X"\n{ S7_BlockNumber := "1" }\nBEGIN\n'
+           '{ S7_Language := "LAD"; S7_NetworkComment := "MLC_1"; S7_NetworkTitle := "MLC_2" }\nNETWORK\nEND_NETWORK\n'
+           '{ S7_Language := "LAD"; S7_NetworkComment := "MLC_2"; S7_NetworkTitle := "MLC_1" }\nNETWORK\nEND_NETWORK\n')
+
+    def load(self, records):
         d = tempfile.mkdtemp()
         with open(os.path.join(d, 'FB_X.s7dcl'), 'w', encoding='utf-8') as f:
-            f.write('FUNCTION_BLOCK "FB_X"\n{ S7_BlockNumber := "1" }\nBEGIN\n')
-            for _ in range(2):
-                f.write('{ S7_Language := "LAD"; S7_NetworkTitle := "MLC_1" }\nNETWORK\nEND_NETWORK\n')
+            f.write(self.DCL)
         with open(os.path.join(d, 'FB_X.s7res'), 'w', encoding='utf-8') as f:
-            f.write('MultiLingualTexts:\n  - id: MLC_1\n    en-US: First\n  - id: MLC_1\n    en-US: Second\n')
-        b = s7dcl.load_block(os.path.join(d, 'FB_X.s7dcl'))
-        self.assertEqual([n['title'] for n in b['networks']], ['First', 'Second'])
+            f.write('MultiLingualTexts:\n' + ''.join('  - id: %s\n    en-US: %s\n' % r for r in records))
+        return s7dcl.load_block(os.path.join(d, 'FB_X.s7dcl'))['networks']
+
+    def test_title_before_comment_by_use_order(self):
+        n = self.load([('MLC_2', 'T1'), ('MLC_1', 'C1'), ('MLC_1', 'T2'), ('MLC_2', 'C2')])
+        self.assertEqual([(x['title'], x['comment']) for x in n], [('T1', 'C1'), ('T2', 'C2')])
+
+    def test_unverified_order_is_ambiguous_not_guessed(self):
+        n = self.load([('MLC_1', 'A'), ('MLC_1', 'B'), ('MLC_2', 'C'), ('MLC_2', 'D')])
+        self.assertEqual((n[0]['title'], n[0]['title_ambiguous'], n[0]['title_candidates']), ('', True, ['C', 'D']))
+        self.assertEqual((n[0]['comment'], n[0]['comment_candidates']), ('', ['A', 'B']))
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -146,24 +146,53 @@ def text_mlc(texts, ident, languages=('cs-CZ', 'en-US')):
 
 # ---------- block ----------
 
+def _mlc_uses(text):
+    """Every `S7_x := "MLC_..."` in the order the .s7res lists its records: braces in file order, inside one brace the network
+    title before the comment, then the rest (the file order of the attributes inside a brace differs from the .s7res order)."""
+    first = {'S7_NetworkTitle': 0, 'S7_NetworkComment': 1}
+    uses = []
+    for m in re.finditer(r'\{[^{}]*\}', text):
+        g = re.findall(r'(S7_\w+)\s*:=\s*"(MLC_[^"]*)"', m.group(0))
+        uses += sorted(g, key=lambda x: first.get(x[0], 2))
+    return uses
+
+
 def load_block(path_s7dcl):
+    """Titles and comments. An MLC id can repeat in the .s7res with different texts; the k-th use of the id then reads the
+    k-th record, but only when the whole record order of the file agrees with the order of the uses (verified on every
+    file of a 1692-file export set with a repeated id). Otherwise the title is '' and `title_ambiguous` / `title_candidates`
+    (and the same for the comment) list the texts — never a guess."""
     text = read(path_s7dcl)
     block = parse_block(text)
-    entries = load_s7res_entries(path_s7dcl[:-len('.s7dcl')] + '.s7res')
-    used = {}
+    path_res = path_s7dcl[:-len('.s7dcl')] + '.s7res'
+    entries = load_s7res_entries(path_res)
+    uses = _mlc_uses(text)
+    res_ids = re.findall(r'^\s*-\s+id:\s*(\S+)\s*$', read(path_res), re.M) if os.path.exists(path_res) else []
+    trusted = [i for _, i in uses] == res_ids
+    seen, ks = {}, {}
+    for a, i in uses:                                  # (attribute, id) -> record index of each use, in file order
+        seen[i] = seen.get(i, -1) + 1
+        ks.setdefault((a, i), []).append(seen[i])
+    nxt = {}
 
-    def mlc(ident):
-        """The k-th use of an id in the block (header, then networks in order) reads the k-th entry of that id in the
-        .s7res; titles of different networks can share an id. shortcut: with one entry per id it is the plain lookup."""
+    def mlc(attr, ident, into):
         e = entries.get(ident)
-        if not e:
-            return text_mlc({}, ident)
-        k = used[ident] = used.get(ident, -1) + 1
-        return text_mlc({ident: e[min(k, len(e) - 1)]}, ident)
-    block['title'] = mlc(block['attributes'].get('S7_BlockTitle'))
+        if not e or len(e) == 1:
+            return text_mlc({ident: e[0]} if e else {}, ident)
+        j = nxt[(attr, ident)] = nxt.get((attr, ident), -1) + 1
+        if trusted and j < len(ks.get((attr, ident), ())):
+            return text_mlc({ident: e[min(ks[(attr, ident)][j], len(e) - 1)]}, ident)
+        cand = [text_mlc({ident: x}, ident) for x in e]
+        if len(set(cand)) == 1:
+            return cand[0]
+        key = 'comment' if attr == 'S7_NetworkComment' else 'title'
+        into[key + '_ambiguous'] = True
+        into[key + '_candidates'] = cand
+        return ''
+    block['title'] = mlc('S7_BlockTitle', block['attributes'].get('S7_BlockTitle'), block)
     for nw in block['networks']:
-        nw['title'] = mlc(nw['attributes'].get('S7_NetworkTitle'))
-        nw['comment'] = mlc(nw['attributes'].get('S7_NetworkComment'))
+        nw['title'] = mlc('S7_NetworkTitle', nw['attributes'].get('S7_NetworkTitle'), nw)
+        nw['comment'] = mlc('S7_NetworkComment', nw['attributes'].get('S7_NetworkComment'), nw)
     return block
 
 

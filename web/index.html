@@ -701,7 +701,7 @@ async function loadTree(activeId) {
 }
 function networksHtml(b, nw, url) {
   return `<h2>${esc(b.block)} — networks</h2>` + b.networks.map(n =>
-    `<a class="${n.nw === nw ? 'active' : ''}" href="${url(n.nw)}"><span class="c">NW ${n.nw}</span>${esc(n.title || '')}` +
+    `<a class="${n.nw === nw ? 'active' : ''}" href="${url(n.nw)}"><span class="c">NW ${n.nw}</span>${n.title_ambiguous ? `<span class="warning" title="the title id repeats in the block texts and the order is not certain: ${esc((n.title_candidates || []).join(' | '))}">⚠ ambiguous</span>` : esc(n.title || '')}` +
     `${n.language !== 'LAD' ? `<span class="j">${esc(n.language || '?')}</span>` : ''}</a>`).join('');
 }
 function canvas(m, net, diff) {
@@ -727,7 +727,7 @@ async function showNetwork(project, block) {
   $('nw').innerHTML = tree + networksHtml(b, nw, n => link({nw: n}));
   const net = await api(`/api/network?project=${enc(project)}&block=${enc(block)}&nw=${nw}&width=${canvasWidth()}`);
   const m = $('content');
-  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${esc(net.title || '')}</h1>` +
+  m.innerHTML = `<h1><span class="c">NW ${net.nw}:</span> ${net.title_ambiguous ? `<span class="warning">⚠ title ambiguous — candidates: ${net.title_candidates.map(esc).join(' | ')}</span>` : esc(net.title || '')}</h1>` +
     (net.comment ? `<p class="comment">${esc(net.comment)}</p>` : '') +
     net.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('');
   const fbd = net.language === 'FBD' && net.drawing;
