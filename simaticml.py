@@ -596,21 +596,29 @@ def ob_attributes(text):
     return {k: a[k] for k in OB_KEYS if k in a} if tag == 'SW.Blocks.OB' else None
 
 
-def ob_mismatch(expected, info):
-    """Exported OB attributes vs the attributes of GetBlockInfo (JSON text or dict) -> reason, else None. Number and event
-    class must be reported; a cyclic interrupt's cycle too."""
+def _info_attrs(info):
+    """GetBlockInfo answer (JSON text or dict) -> {attribute name: value text}; None when it is not JSON."""
     import json
     if isinstance(info, str):
         try:
             info = json.loads(info)
         except ValueError:
-            return 'GetBlockInfo did not answer JSON — the OB number and event class cannot be checked'
+            return None
     items = next((v for k, v in (info or {}).items() if k.lower() == 'attributes'), None) or []
     got = {}
     for x in items:
         x = {k.lower(): v for k, v in x.items()} if isinstance(x, dict) else {}
         if x.get('name'):
             got[x['name']] = '' if x.get('value') is None else str(x['value'])
+    return got
+
+
+def ob_mismatch(expected, info):
+    """Exported OB attributes vs the attributes of GetBlockInfo (JSON text or dict) -> reason, else None. Number and event
+    class must be reported; a cyclic interrupt's cycle too (only when the export carries it)."""
+    got = _info_attrs(info)
+    if got is None:
+        return 'GetBlockInfo did not answer JSON — the OB number and event class cannot be checked'
     bad = []
     for k, v in expected.items():
         must = k in ('Number', 'SecondaryType') or (k == 'CyclicTime' and expected.get('SecondaryType') == 'CyclicInterrupt')
@@ -620,6 +628,20 @@ def ob_mismatch(expected, info):
             continue
         if got[k].strip().lower() != v.strip().lower():
             bad.append('%s %s, before the write %s' % (k, got[k], v))
+    return '; '.join(bad) or None
+
+
+OB_TIMING = re.compile(r'(?i)cycl|phase|event|prior|^number$|secondary')
+
+
+def info_changed(before, after):
+    """GetBlockInfo before vs after the import -> the OB attributes (number, event class, cycle time, phase, priority) that
+    differ, else None. The SimaticML export of an OB does not carry its cycle time, so only this comparison sees it."""
+    b, a = _info_attrs(before), _info_attrs(after)
+    if b is None or a is None:
+        return None
+    bad = ['%s %s, before the write %s' % (k, a.get(k, '(missing)'), v) for k, v in b.items()
+           if OB_TIMING.search(k) and a.get(k, '').strip().lower() != v.strip().lower()]
     return '; '.join(bad) or None
 
 

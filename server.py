@@ -1431,6 +1431,8 @@ def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
                         h = _content_hash(r)
                         if h:
                             arg['expectedContentHash'] = h
+                        ob = simaticml.ob_attributes(text)
+                        info0 = step('GetBlockInfo before', lambda: k.call('GetBlockInfo', {'softwarePath': sp, 'blockPath': bpath})) if ob else None
                         done.append((block, bpath, grp, file))     # from now on the block may be changed: restore on failure
                         try:
                             step('ImportXmlBlock', lambda: k.call('ImportXmlBlock', arg))
@@ -1439,10 +1441,9 @@ def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
                                 done.pop()
                             raise
                         step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
-                        ob = simaticml.ob_attributes(text)
                         if ob:
                             info = step('GetBlockInfo', lambda: k.call('GetBlockInfo', {'softwarePath': sp, 'blockPath': bpath}))
-                            bad = simaticml.ob_mismatch(ob, info)
+                            bad = simaticml.ob_mismatch(ob, info) or simaticml.info_changed(info0, info)
                             if bad:
                                 steps[-1].update(ok=False, message=('OB changed: ' + bad)[:1000])
                                 raise simaticml.XmlError('OB %s after the import: %s' % (block, bad))

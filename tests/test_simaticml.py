@@ -250,6 +250,14 @@ class TestEditBlock(unittest.TestCase):
         self.assertIn('<NetworkSource />', new.split('Cycle counter')[0].split('CompileUnits')[1])
 
 
+class TestObInfo(unittest.TestCase):
+    def test_cycle_time_lost_in_the_import_is_seen(self):
+        info = lambda c: json.dumps({'attributes': [{'name': 'Number', 'value': '30'}, {'name': 'CycleTime', 'value': c},
+                                                      {'name': 'Name', 'value': 'X'}]})
+        self.assertIsNone(simaticml.info_changed(info('100000'), info('100000')))
+        self.assertIn('CycleTime 1000, before the write 100000', simaticml.info_changed(info('100000'), info('1000')))
+
+
 class TestXmlUpload(unittest.TestCase):
     """Upload through the fake Writer (SimaticML of the fixtures) — the Demo_Line project with the Station blocks added."""
 
@@ -333,7 +341,7 @@ class TestXmlUpload(unittest.TestCase):
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertTrue(r['ok'], r)
         self.assertEqual([k['step'] for k in r['write']['steps']][2:],
-                         ['ExportXmlBlock', 'Edit the SimaticML', 'ImportXmlBlock', 'CompileBlock', 'GetBlockInfo'])
+                         ['ExportXmlBlock', 'Edit the SimaticML', 'GetBlockInfo before', 'ImportXmlBlock', 'CompileBlock', 'GetBlockInfo'])
         self.assertIn('OB: documents would lose its event class and number', r['message'])
         self.assertEqual(self.written('OB_Cyclic'), read('expected', 'OB_Cyclic.xml'))
 
