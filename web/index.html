@@ -590,7 +590,7 @@ function rungList(net) {
 // ---------- page ----------
 // project page: Blocks | Changelog | Versions
 function projectTabs(project, view) {
-  return `<div class="tools" role="tablist">` + [['blocks', 'Blocks'], ['hmi', 'HMI'], ['changelog', 'Changelog'], ['versions', 'Versions']].map(([v, t]) =>
+  return `<div class="tools" role="tablist">` + [['blocks', 'Blocks'], ['hmi', 'HMI'], ['changelog', 'Changelog'], ['versions', 'Versions'], ['compare', 'Compare']].map(([v, t]) =>
     `<button role="tab" class="${view === v ? 'active' : ''}" aria-selected="${view === v}" onclick="location.href='${link({view: v === 'blocks' ? null : v})}'">${t}</button>`).join('') + `</div>`;
 }
 async function showExports(project) {
@@ -1112,6 +1112,49 @@ async function showVersions(project) {
     const v = y || x;
     canvas($('v-canvas'), v, v.drawing ? Object.fromEntries(v.elements.map(p => [p.id, y ? 'added' : 'deleted'])) : {});
   }
+}
+
+// ---------- Compare: two exports of one block network by network (code, titles, comments) ----------
+async function showCompare(project) {
+  $('info').textContent = project;
+  document.title = `BetterTIA Editor — ${project} compare`;
+  const snaps = (await api(`/api/projects/${enc(project)}/snapshots`)).snapshots;
+  const a = q.get('a') || (snaps[1] || snaps[0])?.ts || '', b = q.get('b') || snaps[0]?.ts || '', block = q.get('cblock') || '';
+  const dl = `<datalist id="c-ts">${snaps.map(x => `<option value="${esc(x.ts)}">`).join('')}</datalist>`;
+  let h = projectTabs(project, 'compare') + `<h1>Compare <span class="c">${esc(project)}</span></h1>` +
+    `<p class="comment">Two exports of one block, network by network; text ids are masked. A and B are snapshot timestamps ` +
+    `(with a block) or full paths of <code>.s7dcl</code> files.</p>` + dl +
+    `<div class="tools"><label>A <input id="c-a" list="c-ts" value="${esc(a)}" style="width:15em"></label><span>→</span>` +
+    `<label>B <input id="c-b" list="c-ts" value="${esc(b)}" style="width:15em"></label>` +
+    `<label>Block <input id="c-block" value="${esc(block)}" style="width:12em"></label><button id="c-go">Compare</button></div><div id="c-out"></div>`;
+  $('content').innerHTML = h;
+  const run = async () => {
+    const [A, B, K] = ['c-a', 'c-b', 'c-block'].map(i => $(i).value.trim());
+    history.replaceState(null, '', link({a: A, b: B, cblock: K}));
+    const base = `/api/compare-exports?project=${enc(project)}&a=${enc(A)}&b=${enc(B)}&block=${enc(K)}`;
+    let r;
+    try { r = await api(base); } catch (e) { $('c-out').innerHTML = `<div class="notice"><b>Cannot compare</b><span>${esc(e.message)}</span></div>`; return; }
+    const s = r.summary, sel = q.get('sel');
+    $('c-out').innerHTML = `<p class="comment">A: ${s.networks_a} networks, B: ${s.networks_b} · same ${s.same}, changed ${s.changed}, added ${s.added}, removed ${s.removed}` +
+      `${r.notes.length ? ' · ' + esc(r.notes.join(' · ')) : ''}${r.truncated ? ' · list truncated' : ''}</p>` +
+      (r.networks.length ? `<table class="log"><tbody>` + r.networks.map((n, i) => `<tr data-i="${i}" style="cursor:pointer"><td class="c">NW ${n.nw_a ?? '—'} → ${n.nw_b ?? '—'}</td>` +
+        `<td><b>${esc(n.title || '(no title)')}</b></td><td><span class="k ${esc(n.status)}">${esc(n.status)}</span></td>` +
+        `<td>${esc([n.status === 'changed' ? (n.code_changed ? 'code' : 'text only') : '', n.title_change ? `title "${n.title_change[0]}" → "${n.title_change[1]}"` : '',
+                    n.comment_change ? 'comment' : ''].filter(Boolean).join(' · '))}</td></tr><tr class="c-d" hidden><td colspan="4"><pre></pre></td></tr>`).join('') + `</tbody></table>`
+        : `<div class="notice"><b>No differences</b><span>All networks are the same.</span></div>`);
+    $('c-out').querySelectorAll('tr[data-i]').forEach(tr => tr.onclick = async () => {
+      const n = r.networks[tr.dataset.i], row = tr.nextElementSibling;
+      row.hidden = !row.hidden;
+      if (row.hidden || row.dataset.done) return;
+      row.dataset.done = '1';
+      const pre = row.querySelector('pre');
+      if (n.nw_a == null || n.nw_b == null || !n.code_changed) { pre.textContent = n.nw_a == null || n.nw_b == null ? `${n.lines} lines` : 'The code is the same.'; return; }
+      try { pre.textContent = (await api(base + `&detail=${n.nw_a}:${n.nw_b}`)).networks.find(x => x.nw_a === n.nw_a).diff; }
+      catch (e) { pre.textContent = e.message; }
+    });
+  };
+  $('c-go').onclick = run;
+  if (a && b) await run();
 }
 
 // ---------- H1: HMI screens (WinCC Unified) — view ----------
@@ -2062,7 +2105,7 @@ async function start() {
   else if (project) {
     $('nw').innerHTML = await loadTree(null);
     const view = q.get('view');
-    await (view === 'changelog' ? showChangelog(project) : view === 'versions' ? showVersions(project)
+    await (view === 'changelog' ? showChangelog(project) : view === 'versions' ? showVersions(project) : view === 'compare' ? showCompare(project)
            : view === 'hmi' ? showHmi(project) : showExports(project));
   }
   else {                                     // home: shown at once, the TIA check (autoconnect) re-renders it

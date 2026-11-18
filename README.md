@@ -83,6 +83,9 @@ block, number and network title on every row. **Versions** compares two snapshot
 blocks, in each the networks added, removed, changed or moved, and the difference drawn as for an edit. A network that
 is the "after" of an edit links to it (*matches edit U001*).
 
+**Compare** takes two exports of one block (snapshot timestamps or `.s7dcl` paths) and lists its networks as same /
+changed / added / removed; text ids are masked, titles and comments are compared separately, a click shows the code diff.
+
 ![Versions: two snapshots compared, a network that matches an edit](tests/screenshots/project_versions.png)
 
 ## HMI screens
@@ -153,7 +156,7 @@ client does not start in this folder. The home page shows the same blocks to cop
 
 Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
 `delete_edit`, `cleanup_edits`, `create_group`, `update_group`, `list_groups`, `get_group`, `run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
-`compare_snapshots`, `list_screens`, `get_screen`, `list_presets`, `propose_screen`, `screenshot` — see
+`compare_snapshots`, `compare_exports`, `list_screens`, `get_screen`, `list_presets`, `propose_screen`, `screenshot` — see
 [docs/reference.md](docs/reference.md#mcp-server).
 
 **Why the agent cannot approve or upload:** a change of a PLC program ends up on a real machine. The agent proposes

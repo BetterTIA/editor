@@ -237,6 +237,11 @@ def compare_snapshots(e, a):
     return e.get('/api/projects/%s/compare' % q(a['project']), block=a.get('block'), **{'from': a['from'], 'to': a['to']})
 
 
+def compare_exports(e, a):
+    return e.get('/api/compare-exports', project=a.get('project'), block=a.get('block'), detail=a.get('detail'),
+                 a=a['a'], b=a['b'])
+
+
 def list_screens(e, a):
     return e.get('/api/hmi/screens', project=a['project'], export_ts=a.get('export_ts'))
 
@@ -362,6 +367,11 @@ TOOLS = [
               'until': {'type': 'string', 'description': 'up to this time, inclusive (same formats)'}}, ['project']), get_changelog),
     ('list_snapshots', 'Snapshots (Reader exports) of a project, newest first: timestamp, full or partial, block count.',
      _schema({'project': S}, ['project']), list_snapshots),
+    ('compare_exports', 'Compare two exports of one block network by network (no TIA): same / changed / added / removed '
+                        'networks with MLC ids masked, titles and comments compared separately. a, b = .s7dcl file paths, or '
+                        'snapshot timestamps together with project and block. detail "1:1,3:4" (A number:B number) adds a '
+                        'unified diff of those pairs; without it the answer stays compact.',
+     _schema({'a': S, 'b': S, 'project': S, 'block': S, 'detail': S}, ['a', 'b']), compare_exports),
     ('compare_snapshots', 'Compare two snapshots without TIA Portal: changed blocks and, per block, the networks added / '
                           'removed / changed / moved, with the differences and the edits they match.',
      _schema({'project': S, 'from': {'type': 'string', 'description': 'older snapshot timestamp YYYYMMDD-HHMMSS'},
