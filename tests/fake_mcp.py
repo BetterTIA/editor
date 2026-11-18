@@ -121,8 +121,8 @@ def xml_writer(a, nm, arg):
             raise ValueError('state_changed: the block %s changed since its export' % block)
         sample = glob.glob(os.path.join(a.xml_sample, '**', block + '.xml'), recursive=True)
         if a.fail_xml_import and not (sample and xml_hash(sample[0]) == xml_hash(arg['importPath'])):
-            raise ValueError(json.dumps({'error': "Failed importing '%s'" % block,
-                                         'errorDetail': ['Network 2: the wire 37 has no target (fake)']}))
+            raise ValueError("Failed importing '%s' (fake) errorDetail: %s"      # the Writer's (round 5) format
+                             % (block, json.dumps(['Import failed', 'Network 2: the wire 37 has no target (fake)'])))
         target = os.path.join(a.state, *[x for x in arg['groupPath'].split('/') if x])
         os.makedirs(target, exist_ok=True)
         shutil.copyfile(arg['importPath'], os.path.join(target, block + '.xml'))

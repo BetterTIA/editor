@@ -1344,6 +1344,13 @@ def api_upload(root, data, uid, mcp, timeout=300, portal=None, in_group=False):
 def _reason(e):
     """Text of a failed step + the Writer's errorDetail (inner Openness messages) when its answer carries one."""
     t = str(e)
+    m = re.search(r'errorDetail:\s*(?=\[)', t)               # Writer: '<message> errorDetail: ["outer", "inner", ...]'
+    if m:
+        try:
+            d = json.JSONDecoder().raw_decode(t, m.end())[0]
+            return t[:m.start()].rstrip() + ' · detail: ' + '; '.join(map(str, d))
+        except ValueError:
+            pass
     i = t.find('{')
     if i >= 0:
         try:
@@ -1453,10 +1460,14 @@ def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
                     ok, message = False, 'Upload stopped: %s' % _reason(e)
                     for block, bpath, grp, file in reversed(done):     # E8: back to the export from before the write
                         try:
+                            # the Writer returns no hash after an import: the restore cannot pass expectedContentHash
                             step('Restore: ImportXmlBlock', lambda: k.call('ImportXmlBlock', {
                                 'softwarePath': sp, 'groupPath': grp, 'importPath': file}))
+                            steps[-1]['message'] = ('UNPROTECTED (no expectedContentHash): ' + steps[-1]['message'])[:1000]
                             step('Restore: CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
-                            restore.append('%s restored from the export before the write' % block)
+                            restore.append('%s restored from the export before the write — WITHOUT a content-hash check '
+                                           '(no hash of the block after the import), so a change made in TIA meanwhile '
+                                           'was overwritten' % block)
                         except Exception as e2:
                             restore.append('%s NOT RESTORED (%s) — check it in TIA, its export from before the write is '
                                            'kept below' % (block, _reason(e2)[:300]))
@@ -2416,7 +2427,7 @@ def api_group_upload(root_of, data, gid, upload, upload_xml=None):
     stops at the first failure. upload(uid) = api_upload for one edit. When one member needs SimaticML (xml_reason), the
     whole group goes that way: upload_xml(members, tia, why) = api_upload_xml, one import per block."""
     project, s, members = _group_members(data, gid)
-    if any(u.get('f') for u in members):
+    if any(_is_f_edit(root_of(u['id']), u) for u in members):     # no 'f' key = unknown: from the export, else F
         raise state.StateError('F-block in the group: no Upload — make the changes by hand following the TIA steps, '
                                'then compile the safety program once')
     not_ready = ['%s (%s)' % (u['id'], u['state']) for u in members if u['state'] != 'Approved']

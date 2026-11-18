@@ -335,6 +335,18 @@ class TestXmlUpload(unittest.TestCase):
         self.assertEqual(self.written(), read('expected', 'FB_Station.xml'))
         self.assertEqual(self.req('POST', '/api/groups/G001/upload', {})[0], 409)       # Signed now
 
+    def test_group_member_without_the_f_flag(self):
+        """An older member without 'f': taken from the export; a block the export lacks counts as F — 409 before any call."""
+        ids = self.station_group()
+        project, s, u = server.state.find(self.data, ids[0])
+        u.pop('f')
+        u['block'] = 'FB_Unknown'
+        server.state.save(self.data, project, s)
+        s, r = self.req('POST', '/api/groups/G001/upload', {})
+        self.assertEqual(s, 409, r)
+        self.assertIn('F-block', r['error'])
+        self.assertEqual(self.calls(), [])
+
     def test_ob30_checked_after_the_import(self):
         uid = self.edit(block='OB_Cyclic', nw=1, comment_after=OB_EDIT['comment_after'], after=COUNTER_AFTER)
         self.approve(uid)
@@ -381,7 +393,12 @@ class TestXmlUpload(unittest.TestCase):
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertEqual((r['ok'], r['edit']['state']), (False, 'Approved'))
         self.assertIn("Failed importing 'OB_Cyclic'", r['message'])
-        self.assertIn('detail: Network 2: the wire 37 has no target (fake)', r['message'])
+        self.assertIn("Failed importing 'OB_Cyclic' (fake) · detail: Import failed; Network 2: the wire 37 has no target (fake)",
+                      r['message'])
+        self.assertIn('WITHOUT a content-hash check', r['message'])
+        self.assertTrue(r['write']['steps'][-2]['message'].startswith('UNPROTECTED (no expectedContentHash)'))
+        self.assertEqual(server._reason(ValueError('x {"error": "y", "errorDetail": ["z"]}')),
+                         'x {"error": "y", "errorDetail": ["z"]} · detail: z')            # the older JSON-object form
         self.assertIn('OB_Cyclic restored', r['message'])
 
     def test_block_changed_since_the_export_is_not_restored(self):
