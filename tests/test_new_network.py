@@ -13,6 +13,7 @@ import mcp_server
 import s7dcl
 import s7dcl_write
 import server
+import simaticml
 
 FAKE = os.path.join(ROOT, 'tests', 'fake_mcp.py')
 AFTER = {'elements': [{'id': 'n1', 'type': 'contact', 'operand': '#Start'}, {'id': 'n2', 'type': 'coil', 'operand': '"Horn"'}],
@@ -110,34 +111,29 @@ class TestNewNetworkApi(unittest.TestCase):
         self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
         self.assertEqual(self.req('POST', '/api/edits/%s/upload' % u['id'], {})[0], 409)
 
-    def test_upload_title_and_check(self):
+    def test_upload_through_simaticml(self):
+        """E7: a new network fails as documents — it goes through SimaticML, title and comment in the same import."""
         self.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'})
-        _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=4' % PROJECT)
-        _, old = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'E3', 'block': 'FB_Conveyor', 'nw': 4,
-                                                 'after': {'elements': net['elements'], 'rungs': net['rungs']}})
         _, u = self.propose()
         self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
+        _, d = self.req('GET', '/api/edits/' + u['id'])
+        self.assertEqual((d['upload_via'], d.get('upload_note')), ('SimaticML (new network: importing documents fails for it)', None))
         s, r = self.req('POST', '/api/edits/%s/upload' % u['id'], {})
         self.assertTrue(r['ok'], r)
-        self.assertEqual([x['step'] for x in r['write']['steps']][-6:],
-                         ['Insert the network in .s7dcl', 'PreviewImport', 'ImportFromDocuments', 'CompileBlock', 'SetNetworkText',
+        self.assertEqual([x['step'] for x in r['write']['steps']],
+                         ['GetPortals', 'Connect', 'ResolveObjectPath', 'ExportXmlBlock', 'Edit the SimaticML', 'ImportXmlBlock',
                           'CompileBlock'])
+        self.assertEqual((r['edit']['state'], r['write']['via']), ('Signed', 'SimaticML'))
         with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:
-            call = [json.loads(x) for x in f if '"SetNetworkText"' in x][0]['arguments']
-        self.assertEqual(call, {'softwarePath': 'PLC_1', 'blockPath': 'Conveyor/FB_Conveyor', 'network': 3, 'dryRun': False,
-                                'title': 'Horn while starting', 'comment': 'sounds while Start is pressed'})
-        b = s7dcl.load_block(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.s7dcl'))
-        self.assertEqual([n['title'] for n in b['networks']][1:4], ['Motor latch', 'Horn while starting', 'Startup'])
-        self.assertEqual(b['networks'][2]['comment'], 'sounds while Start is pressed')
-        s, r = self.req('POST', '/api/edits/%s/check' % u['id'], {})
-        self.assertTrue(r['match'], r)
-        self.assertIn('the new network is NW 3 in the export', r['edit']['checks'][-1]['note'])
-        _, k = self.req('POST', '/api/edits/%s/check-export' % old['id'], {})      # the networks after it moved
-        self.assertTrue(k['match'], k)
-        self.assertIn('the network moved: NW 4 → NW 5', k['note'])
-        _, c = self.req('GET', '/api/projects/%s/compare?from=%s&to=%s' % (PROJECT, TS0, k['export_ts']))
-        nets = c['blocks'][0]['networks']
-        self.assertIn((None, 3, 'added', [u['id']]), [(n['nw_from'], n['nw_to'], n['status'], n['matches']) for n in nets])
+            calls = [json.loads(x) for x in f]
+        self.assertNotIn('SetNetworkText', [c['tool'] for c in calls])
+        imp = [c['arguments'] for c in calls if c['tool'] == 'ImportXmlBlock'][0]
+        self.assertTrue(imp['expectedContentHash'].startswith('xml:sha256:'))
+        with open(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.xml'), encoding='utf-8-sig') as f:
+            nets = simaticml.networks(f.read())
+        self.assertEqual([n['title'] for n in nets][1:4], ['Motor latch', 'Horn while starting', 'Startup'])
+        self.assertEqual((nets[2]['comment'], nets[2]['language'], len(nets)), ('sounds while Start is pressed', 'LAD', 9))
+        self.assertEqual(simaticml.graph(nets[2]['flgnet']), simaticml.graph(simaticml.flgnet(AFTER)))
 
     def test_mcp(self):
         e = mcp_server.Editor(self.url)

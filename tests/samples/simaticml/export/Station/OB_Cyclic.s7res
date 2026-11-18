@@ -1,0 +1,5 @@
+MultiLingualTexts:
+  - id: MLC_1
+    en-US: Cycle counter
+  - id: MLC_2
+    en-US: Counter range

@@ -10,6 +10,11 @@ ImportFromDocuments (copies the documents to --state and appends a line to <stat
 (title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res), SetHmiItemAttribute and
 SetHmiDynamizationTag (a screen of the HMI sample copied to <state>\\HMI_1\\Screens and changed there), GetHmiTags,
 RenameHmiScreen / SetHmiTagPlcTags (only answer), CompileHmi.
+Writer, SimaticML (E4/E5/E7): ExportXmlBlock copies <block>.xml (from --state after an import, else from --xml-sample) and
+answers {contentHash}; ImportXmlBlock checks expectedContentHash against the current file ('state_changed'), copies the file
+to --state and appends to imports.jsonl; GetBlockInfo answers the OB attributes (Number, SecondaryType, CyclicTime) of the
+current file. --fail-xml-import / --fail-compile fail ImportXmlBlock / CompileBlock for a file that differs from the
+sample (a restore of the original passes); --ob-renumbered reports another OB number after an edited import.
 Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
 --multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
 CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
@@ -21,6 +26,7 @@ from --state (or from the sample), answers JSON {exportFolder, complete, manifes
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -33,6 +39,7 @@ from datetime import datetime, timedelta
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SAMPLE = os.path.join(ROOT, 'samples', 'Demo_Line', '20261012-120000', 'PLC_1', 'Blocks')
 SAMPLE_HMI = os.path.join(ROOT, 'samples', 'Demo_Line', '20261012-120000', 'HMI_1')
+SAMPLE_XML = os.path.join(ROOT, 'samples', 'simaticml', 'tia')
 
 
 def find(a, block):
@@ -73,6 +80,66 @@ Demo_Line
 └── UngroupedDevicesGroup: Ungrouped devices [System Group]
     └── IO device_1 [System:Device.ET200SP]
 ```'''
+
+
+def xml_file(a, block):
+    """Current SimaticML of a block: --state (after an import) else --xml-sample."""
+    for source in (a.state, a.xml_sample):
+        x = glob.glob(os.path.join(source, '**', block + '.xml'), recursive=True)
+        if x:
+            return x[0]
+    raise ValueError('block %s is not in the project (no SimaticML)' % block)
+
+
+def xml_hash(fpath):
+    with open(fpath, 'rb') as f:
+        return 'xml:sha256:' + hashlib.sha256(f.read()).hexdigest()
+
+
+def xml_edited(a, block):
+    """Does the block's current file differ from the sample (= an edited import)?"""
+    cur = xml_file(a, block)
+    x = glob.glob(os.path.join(a.xml_sample, '**', block + '.xml'), recursive=True)
+    return bool(x) and xml_hash(cur) != xml_hash(x[0])
+
+
+def xml_writer(a, nm, arg):
+    if nm == 'ExportXmlBlock':
+        block = arg['blockPath'].strip('/').split('/')[-1]
+        src = xml_file(a, block)
+        os.makedirs(arg['exportPath'], exist_ok=True)
+        shutil.copyfile(src, os.path.join(arg['exportPath'], block + '.xml'))
+        return json.dumps({'contentHash': xml_hash(src), 'message': "Block exported from '%s' (fake)" % arg['blockPath']})
+    if nm == 'ImportXmlBlock':
+        with open(arg['importPath'], encoding='utf-8-sig') as f:
+            block = re.search(r'<Name>([^<]+)</Name>', f.read()).group(1)
+        try:
+            cur = xml_file(a, block)
+        except ValueError:
+            cur = None
+        if arg.get('expectedContentHash') and cur and xml_hash(cur) != arg['expectedContentHash']:
+            raise ValueError('state_changed: the block %s changed since its export' % block)
+        sample = glob.glob(os.path.join(a.xml_sample, '**', block + '.xml'), recursive=True)
+        if a.fail_xml_import and not (sample and xml_hash(sample[0]) == xml_hash(arg['importPath'])):
+            raise ValueError("Failed importing '%s' (fake) errorDetail: %s"      # the Writer's (round 5) format
+                             % (block, json.dumps(['Import failed', 'Network 2: the wire 37 has no target (fake)'])))
+        target = os.path.join(a.state, *[x for x in arg['groupPath'].split('/') if x])
+        os.makedirs(target, exist_ok=True)
+        shutil.copyfile(arg['importPath'], os.path.join(target, block + '.xml'))
+        with open(os.path.join(a.state, 'imports.jsonl'), 'a', encoding='utf-8') as f:
+            f.write(json.dumps(dict(arg, file=os.path.join(target, block + '.xml')), ensure_ascii=False) + '\n')
+        return json.dumps({'message': "Block imported from '%s' (fake)" % arg['importPath']})
+    if nm == 'GetBlockInfo':
+        block = arg['blockPath'].strip('/').split('/')[-1]
+        with open(xml_file(a, block), encoding='utf-8-sig') as f:
+            t = f.read()
+        head = t[:t.find('<ObjectList>')]
+        attrs = [{'name': k, 'value': v, 'accessMode': 'ReadWrite'}
+                 for k, v in re.findall(r'<(Number|SecondaryType|CyclicTime|PhaseOffset)>([^<]*)<', re.sub(r'<Interface>.*</Interface>', '', head, flags=re.S))]
+        if a.ob_renumbered and xml_edited(a, block):
+            attrs = [dict(x, value=str(int(x['value']) + 100)) if x['name'] == 'Number' else x for x in attrs]
+        return json.dumps({'name': block, 'typeName': 'OB' if 'SW.Blocks.OB' in t else 'FB', 'attributes': attrs})
+    return None
 
 
 def portals(a):
@@ -148,7 +215,12 @@ def writer(a, nm, arg):
         return '%s%s (fake): %s' % ('dry run: ' if arg.get('dryRun', True) else '', nm, json.dumps(arg))
     if nm == 'CompileHmi':
         return json.dumps({'compiled': arg['softwarePath'], 'state': 'Success', 'errors': 0, 'warnings': 0})
+    if nm in ('ExportXmlBlock', 'ImportXmlBlock', 'GetBlockInfo'):
+        return xml_writer(a, nm, arg)
     if nm == 'CompileBlock':                          # the real answer: {state, errorCount, warningCount, messages: [...]}
+        block = arg['path'].split('/')[-1]
+        if a.fail_compile and glob.glob(os.path.join(a.state, '**', block + '.xml'), recursive=True) and xml_edited(a, block):
+            raise ValueError("Compiling '%s' failed with 1 error(s). %s: Invalid operand (fake)" % (arg['path'], block))
         open(os.path.join(a.state, 'compiled.txt'), 'a').write(arg['path'] + '\n')
         return json.dumps({'state': 'Success', 'errorCount': 0, 'warningCount': 0, 'messages': [
             {'path': '%s (FC)' % arg['path'].split('/')[-1], 'state': 'Success', 'description': 'Block was successfully compiled.'}]})
@@ -345,6 +417,10 @@ def main():
     ap.add_argument('--inconsistent', action='store_true', help='Writer: blocks export only after CompileBlock')
     ap.add_argument('--slow', type=float, default=0)
     ap.add_argument('--fail-import', action='store_true', help='Writer: ImportFromDocuments fails')
+    ap.add_argument('--xml-sample', default=SAMPLE_XML)
+    ap.add_argument('--fail-xml-import', action='store_true', help='Writer: ImportXmlBlock of an edited file fails')
+    ap.add_argument('--fail-compile', action='store_true', help='Writer: CompileBlock of an edited SimaticML block fails')
+    ap.add_argument('--ob-renumbered', action='store_true', help='Writer: GetBlockInfo reports another OB number after an edit')
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)
     fn = writer if a.role == 'writer' else reader

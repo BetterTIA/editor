@@ -1,0 +1,46 @@
+{
+    S7_Optimized := "TRUE";
+    S7_PreferredLanguage := "LAD";
+    S7_BlockNumber := "30";
+    S7_Version := "0.1"
+}
+ORGANIZATION_BLOCK "OB_Cyclic"
+    VAR_INPUT
+        Initial_Call : Bool;
+        Event_Count : Int;
+    END_VAR
+    VAR_TEMP
+        Tmp : Int;
+    END_VAR
+
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_1"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            Contact( "Count_Enable" )
+            { S7_Templates := "SrcType := Int" }
+            Add(
+                in1 := "Cycle_Count",
+                in2 := 1,
+                out => "Cycle_Count"
+            )
+        END_RUNG
+    END_NETWORK
+    {
+        S7_Language := "LAD";
+        S7_NetworkTitle := "MLC_2"
+    }
+    NETWORK
+        RUNG wire#powerrail
+            { S7_Templates := "SrcType := Int" }
+            InRange(
+                min := 0,
+                val := "Cycle_Count",
+                max := 100
+            )
+            Coil( "Count_Low" )
+        END_RUNG
+    END_NETWORK
+END_ORGANIZATION_BLOCK

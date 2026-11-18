@@ -12,6 +12,7 @@ from tests.common import ROOT, SAMPLES, PROJECT, TS0
 import mcp_server
 import s7dcl
 import server
+import simaticml
 
 FAKE = os.path.join(ROOT, 'tests', 'fake_mcp.py')
 
@@ -228,17 +229,36 @@ class TestGroups(unittest.TestCase):
         s, r = self.req('POST', '/api/groups/G001/upload', {})
         self.assertEqual(s, 200, r)
         self.assertTrue(r['ok'], r)
-        self.assertEqual([x['edit'] for x in r['results']], [iface, new, change])
+        self.assertEqual(([x['edit'] for x in r['results']], r['via']), ([iface, new, change], 'SimaticML'))
         self.assertEqual(r['view']['state'], 'Signed')
+        with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:     # a new network: one XML import
+            tools = [json.loads(x)['tool'] for x in f]
+        self.assertEqual((tools.count('ExportXmlBlock'), tools.count('ImportXmlBlock'), tools.count('ImportFromDocuments')), (1, 1, 0))
+        with open(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.xml'), encoding='utf-8-sig') as f:
+            t = f.read()
+        self.assertIn('<Member Name="Jam_Detected" Datatype="Bool" />', t)
+        nets = simaticml.networks(t)
+        self.assertEqual([n['title'] for n in nets][2:4], ['Jam detection', 'Startup'])
+        self.assertEqual(nets[7]['title'], 'Faults, acknowledge and jam')
+        u = self.req('GET', '/api/edits/' + change)[1]['edit']
+        self.assertEqual((u['writes'][-1]['edits'], u['writes'][-1]['ok']), ([iface, new, change], True))
+
+    def test_upload_through_documents_in_order(self):
+        """Without a new network, an OB or GRAPH, a group goes through documents, member by member."""
+        change = self.edit(nw=7, title_after='Faults, acknowledge and jam')
+        iface = self.edit(kind='interface', section='Static', members=[{'name': 'Jam_Detected', 'type': 'Bool'}])
+        self.req('POST', '/api/groups', {'edit_ids': [change, iface]})
+        self.req('POST', '/api/groups/G001/state', {'state': 'Approved'})
+        s, r = self.req('POST', '/api/groups/G001/upload', {})
+        self.assertTrue(r['ok'], r)
+        self.assertEqual([x['edit'] for x in r['results']], [iface, change])
         b = s7dcl.load_block(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.s7dcl'))
         self.assertIn('Jam_Detected', b['variables'])
-        self.assertEqual([n['title'] for n in b['networks']][2:4], ['Jam detection', 'Startup'])
-        self.assertEqual(b['networks'][7]['title'], 'Faults, acknowledge and jam')
+        self.assertEqual(b['networks'][6]['title'], 'Faults, acknowledge and jam')
         s, k = self.req('POST', '/api/edits/%s/check' % iface, {})                      # one Reader export of the block
         self.assertTrue(k['match'], k)
         s, r = self.req('POST', '/api/groups/G001/check-export', {})
         self.assertTrue(r['match'], r)
-        self.assertIn('the network moved: NW 7 → NW 8', [x for x in r['results'] if x['edit'] == change][0]['note'])
 
     def test_f_block_and_mcp(self):
         a = self.edit(block='FB_Safety', kind='interface', section='Static', members=[{'name': 'Extra', 'type': 'Bool'}])

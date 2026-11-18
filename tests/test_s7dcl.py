@@ -19,7 +19,7 @@ class TestParser(unittest.TestCase):
         self.assertGreaterEqual(len(files), 4)
         for f in files:
             b = s7dcl.load_block(f)
-            self.assertIn(b['kind'], ('FB', 'FC', 'DB'))
+            self.assertIn(b['kind'], ('FB', 'FC', 'DB', 'OB'))
 
     def test_header_and_titles(self):
         _, b = server._load(SAMPLES, PROJECT, 'FB_Conveyor', TS0)

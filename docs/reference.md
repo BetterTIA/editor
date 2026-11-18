@@ -241,7 +241,7 @@ has in the exported block).
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
 | POST | `/api/groups/<id>/state` | `{state, by}` — every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
-| POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}` |
+| POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}`; through SimaticML (an OB, GRAPH, a new network, `upload: xml`): one import per block, `via: "SimaticML"`, all members succeed or fail together |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
 | DELETE | `/api/groups/<id>[?edits=1][&force=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — an edit already written (Signed and later) only with `force=1`, else 409 → `{project, group, deleted}` |
 | DELETE | `/api/edits/<id>` | deletes an edit (editor state only, TIA is not touched): Proposal, Approved, Disapproved; an edit already written (Signed and later) only with `?force=1`, else 409; a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
@@ -434,11 +434,10 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 
 ## Upload and Check
 **Upload** — `POST /api/edits/<id>/upload` (only **Approved** and a non-F change; F-block, another state, missing
-`tia`, another Upload/Check running → **409**). Also refused (409, and `upload_note` in `GET /api/edits/<id>`, before
-anything is written; a group checks every member first) where the documents import is known to break the block: an
-**OB** (the import loses the event class, number and parameters) and a block with **GRAPH** — itself or a static
-multi-instance whose type is exported as SimaticML with `<ProgrammingLanguage>GRAPH` (the import fails). Those are made
-by hand or through SimaticML (`ExportXmlBlock` → edit → `ImportXmlBlock` → `CompileBlock`). A **group member** is
+`tia`, another Upload/Check running → **409**). Where the documents import is known to break the block, Upload goes
+**through SimaticML** instead (see [Upload through SimaticML](#upload-through-simaticml)): an **OB** (documents lose the
+event class, number and parameters), a block with **GRAPH** — itself or a static multi-instance whose type is exported
+as SimaticML with `<ProgrammingLanguage>GRAPH` — and a **new network** (the documents import splits it). A **group member** is
 uploaded only with its group (409 otherwise — one member alone leaves the block half changed). When an Upload fails,
 the documents of the attempt are kept in `<--data>\<project>\upload-failed\<id>-<time>\` (the message names the folder).
 When the export check cannot find a change (e.g. TIA took a new network only as two networks), a person records the
@@ -461,8 +460,9 @@ TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 7. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
    exports no inconsistent block (`SetNetworkText`, the Check and the next Upload would find nothing; seen on a real project).
 
-Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network);
-a new network and a network edit with `title_after` / `comment_after` get a step `SetNetworkText` after the compile, followed by a second `CompileBlock` (it imports the block again; see
+Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network,
+only through `insert_network` when called directly — Upload sends a new network through SimaticML);
+a network edit with `title_after` / `comment_after` get a step `SetNetworkText` after the compile, followed by a second `CompileBlock` (it imports the block again; see
 [Edit kinds and groups](#edit-kinds-and-groups)).
 
 Result → `edit.writes` = `[{time, tool: "TIAC_Writer", steps: [{step, ok, message}], ok, message, preview?}]`; on
@@ -484,8 +484,44 @@ python check.py --check U003      # CHECKED|MISMATCH|ERROR <id> · state … · 
 ```
 **Lock:** one Upload / Check at a time (the second one gets 409). Timeout of one tool call: `--mcp-timeout` (300 s).
 
+### Upload through SimaticML
+Used for an OB, a GRAPH block or a block with a GRAPH multi-instance, a new network, and for every Upload when the TIA
+settings have `"upload": "xml"` (UI: *every Upload through SimaticML (XML)*; default: only where documents fail). A group
+goes this way as a whole when any member needs it. `GET /api/edits/<id>` shows `upload_via: "SimaticML (<reason>)"`.
+Steps, one import per block (a group: interface → new networks → changes, applied to one export):
+1. `GetPortals` → `Connect` → `ResolveObjectPath` (unless `tia.groupPath`), as above,
+2. `ExportXmlBlock {softwarePath, blockPath, exportPath, preservePath: false}` (no file: `CompileBlock` and export
+   again); the returned `contentHash` is kept,
+3. *Edit the SimaticML* (`simaticml.py`): interface members go into the `Interface/v5` sections (comment and start
+   value; a duplicate name or a missing section stops), a new network becomes a new `SW.Blocks.CompileUnit` after
+   network *n* (its `after_title` must still match), a changed network gets a new `FlgNet` v5 only when its logic
+   changed — the network in the export must still equal the proposal's "before" (compared as a graph of parts, operands
+   and wires, UIds ignored). Titles and comments are written into `MultilingualText` with the culture of the export.
+   Everything else stays byte for byte (BOM, CRLF, IDs; new IDs continue after the highest one). An F-block is refused,
+4. `ImportXmlBlock {softwarePath, groupPath, importPath, expectedContentHash}` — the Writer refuses (`state_changed`)
+   when the block changed since the export; then nothing is restored,
+5. `CompileBlock`; for an OB also `GetBlockInfo` — Number, SecondaryType (event class) and, for a cyclic interrupt,
+   CyclicTime must equal the export.
+
+**E8 — restore:** when the import, the compile or the OB check fails, every block already imported gets its original
+export back (`Restore: ImportXmlBlock` → `Restore: CompileBlock`) — **without `expectedContentHash`** (the Writer returns no hash after an import; the step says "UNPROTECTED" and the message "WITHOUT a content-hash check": a change made in TIA meanwhile is overwritten). The edits stay **Approved**; the
+message has the reason, the Writer's `errorDetail` (when present) and "restored from the export before the write" — or
+"NOT RESTORED …" with the path of the original export. Files: `work/export/<block>/<block>.xml` and
+`work/import/<block>.xml`, kept in `upload-failed\` after a failure. The record has `via: "SimaticML"` and, for a group,
+`edits`.
+
+**What the XML way writes:** LAD and FBD — NO/NC contacts, P/N contacts, coils incl. S/R, P_TRIG/N_TRIG, series and
+parallel branches (a join = `O` with `Card`), FBD &, >=1, X with negated inputs; comparisons (==, <>, <, <=, >, >=),
+MOVE, ADD/SUB/MUL/DIV, IN_RANGE/OUT_RANGE, TON/TOF/TP (multi- and single-instance), FB and FC calls with parameters
+(their `CallInfo` is taken from the export, otherwise from the callee's interface). Operands: `#local`, `"global"`,
+members, array indexes, literal and typed constants. **Refused before any write** (409, `upload_note` in the detail,
+"make the change by hand"): RET, NOT, negated coils, P/N coils, negated boxes or outputs, other instructions (counters,
+SR/RS, CONV, …), absolute addresses (`%I0.0`) and slices. Not yet verified against a live TIA V21: the shapes of
+OutRange, TOF, NBox, FBD & / X, a literal array index, `Version` on IEC member types (`TON_TIME`).
+
 **TIA settings per project** (in `state.json` next to `edits`): `"tia": {"softwarePath": "PLC_1", "plcName": "PLC_1",
-"groupPath": "Conveyor"}` (`groupPath` is optional — otherwise the Writer resolves it). Set through
+"groupPath": "Conveyor", "upload": "xml"}` (`groupPath` and `upload` are optional — otherwise the Writer resolves the
+group, and Upload goes through documents except where they fail). Set through
 `PUT /api/state/tia?project=` or in the UI in the collapsible TIA settings on a change. Without it the buttons are greyed
 out and the API returns 409 with a hint.
 
