@@ -16,7 +16,7 @@ import screenshot
 import server
 
 MCP_SERVER = os.path.join(ROOT, 'mcp_server.py')
-TOOLS = {'list_projects', 'list_blocks', 'get_network', 'list_edits', 'get_edit', 'propose_edit', 'update_edit', 'delete_edit',
+TOOLS = {'list_projects', 'list_blocks', 'get_network', 'list_edits', 'get_edit', 'propose_edit', 'update_edit', 'delete_edit', 'cleanup_edits', 'list_groups', 'update_group',
          'create_group', 'get_group', 'run_check', 'get_procedure', 'tia_status', 'take_snapshot', 'get_job', 'screenshot', 'get_changelog',
          'list_snapshots', 'compare_snapshots', 'list_screens', 'get_screen', 'list_presets', 'propose_screen'}
 OPS = [{'type': 'insert', 'place': {'r': 0, 'k': 3}, 'element': 'NO'},

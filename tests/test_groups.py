@@ -143,6 +143,83 @@ class TestGroups(unittest.TestCase):
         self.assertEqual(r['deleted'], [a])
         self.assertEqual(self.req('GET', '/api/edits/' + a)[0], 404)
 
+    def test_force_delete_written_edits(self):
+        a = self.edit(nw=7, title_after='x')
+        b = self.edit(nw=6, title_after='y')
+        c = self.edit(nw=5, title_after='z')
+        self.req('POST', '/api/groups', {'edit_ids': [a, b, c]})
+        self.req('POST', '/api/groups/G001/state', {'state': 'Approved'})
+        self.req('POST', '/api/edits/%s/state' % a, {'state': 'Signed'})
+        self.assertEqual(self.req('DELETE', '/api/edits/' + a)[0], 409)
+        self.assertIn('force=1', self.req('DELETE', '/api/edits/' + a)[1]['error'])
+        self.assertEqual(self.req('DELETE', '/api/edits/%s?force=1' % a)[0], 200)
+        s, r = self.req('DELETE', '/api/groups/G001?edits=1')            # b, c are Approved: no force needed
+        self.assertEqual((s, sorted(r['deleted'])), (200, sorted([b, c])))
+        d = self.edit(nw=7, title_after='x')
+        e = self.edit(nw=6, title_after='y')
+        self.req('POST', '/api/groups', {'edit_ids': [d, e]})
+        self.req('POST', '/api/groups/G002/state', {'state': 'Approved'})
+        self.req('POST', '/api/groups/G002/state', {'state': 'Signed'})
+        self.assertEqual(self.req('DELETE', '/api/groups/G002?edits=1')[0], 409)
+        self.assertEqual(self.req('DELETE', '/api/groups/G002?edits=1&force=1')[0], 200)
+        self.assertEqual(self.req('GET', '/api/edits/' + d)[0], 404)
+        _, log = self.req('GET', '/api/projects/%s/changelog' % PROJECT)
+        self.assertTrue(any(x['kind'] == 'deleted' and a in x['summary'] for x in log['items']))
+        self.assertEqual(self.edit(nw=7, title_after='q'), 'U006')      # ids are not reused
+        e = mcp_server.Editor(self.url)
+        t = self.edit(nw=4, title_after='w')
+        self.req('POST', '/api/edits/%s/state' % t, {'state': 'Approved'})
+        self.req('POST', '/api/edits/%s/state' % t, {'state': 'Signed'})
+        self.assertTrue(mcp_server.call_tool(e, 'delete_edit', {'id': t}).get('isError'))
+        self.assertFalse(mcp_server.call_tool(e, 'delete_edit', {'id': t, 'force': True}).get('isError'))
+
+    def test_cleanup(self):
+        ids = [self.edit(nw=n, title_after='t%d' % n) for n in (7, 6, 5, 4)]
+        self.req('POST', '/api/groups', {'edit_ids': ids[:3], 'card': '#12'})
+        self.req('POST', '/api/edits/%s/state' % ids[3], {'state': 'Approved'})
+        self.req('POST', '/api/edits/%s/state' % ids[3], {'state': 'Signed'})
+        self.assertEqual(self.req('POST', '/api/cleanup', {})[0], 400)                   # a filter is required
+        s, r = self.req('POST', '/api/cleanup', {'project': PROJECT, 'all': True})       # dry run by default
+        self.assertEqual((s, r['dry_run'], r['count'], r['needs_force']), (200, True, 4, [ids[3]]))
+        self.assertEqual(len(self.req('GET', '/api/state?project=' + PROJECT)[1]['edits']), 4)
+        self.assertEqual(self.req('POST', '/api/cleanup', {'all': True, 'dry_run': False})[0], 409)
+        s, r = self.req('POST', '/api/cleanup', {'card': '#12', 'dry_run': False})
+        self.assertEqual((s, r['count']), (200, 3), r)
+        self.assertEqual(len(r['backups']), 1)
+        with open(r['backups'][0], encoding='utf-8') as f:
+            self.assertEqual(len(json.load(f)['edits']), 4)                                # the backup is the state before
+        self.assertEqual([u['id'] for u in self.req('GET', '/api/state?project=' + PROJECT)[1]['edits']], [ids[3]])
+        s, r = self.req('POST', '/api/cleanup', {'states': ['Signed'], 'dry_run': False, 'force': True})
+        self.assertEqual((s, r['count']), (200, 1))
+        self.assertEqual(self.req('GET', '/api/state?project=' + PROJECT)[1]['edits'], [])
+        e = mcp_server.Editor(self.url)
+        r = json.loads(mcp_server.call_tool(e, 'cleanup_edits', {'all': True})['content'][0]['text'])
+        self.assertEqual((r['dry_run'], r['count']), (True, 0))
+
+    def test_group_card(self):
+        a, b, c, d = (self.edit(nw=n, title_after='t%d' % n) for n in (7, 6, 5, 4))
+        s, g = self.req('POST', '/api/groups', {'edit_ids': [a, b], 'name': 'jam', 'card': '#7', 'card_title': 'Jam'})
+        self.assertEqual((g['card'], g['card_title']), ('#7', 'Jam'))
+        self.req('POST', '/api/groups', {'edit_ids': [c, d], 'name': 'other'})
+        s, r = self.req('GET', '/api/groups?card=%23' + '7')
+        self.assertEqual([x['id'] for x in r['groups']], ['G001'])
+        self.assertEqual(len(self.req('GET', '/api/groups?project=' + PROJECT)[1]['groups']), 2)
+        s, g = self.req('POST', '/api/groups/G002', {'card': 'https://deck.example/c/9'})
+        self.assertEqual((g['card'], g['name']), ('https://deck.example/c/9', 'other'))
+        e = mcp_server.Editor(self.url)
+        r = json.loads(mcp_server.call_tool(e, 'update_group', {'id': 'G001', 'card': ''})['content'][0]['text'])
+        self.assertEqual(r['card'], '')
+        r = json.loads(mcp_server.call_tool(e, 'list_groups', {'card': 'https://deck.example/c/9'})['content'][0]['text'])
+        self.assertEqual([x['id'] for x in r['groups']], ['G002'])
+
+    def test_card_from_legacy_group_name(self):
+        a, b = self.edit(nw=7, title_after='x'), self.edit(nw=6, title_after='y')
+        self.req('POST', '/api/groups', {'edit_ids': [a, b], 'name': '#123 Jam detection – timer'})
+        g = self.req('GET', '/api/groups/G001')[1]
+        self.assertEqual((g['card'], g['card_title']), ('#123', 'Jam detection'))
+        self.req('POST', '/api/groups/G001', {'card': ''})            # cleared explicitly: not derived from the name again
+        self.assertEqual(self.req('GET', '/api/groups/G001')[1]['card'], '')
+
     def test_upload_in_order_and_check(self):
         iface, new, change = self.three()
         self.req('POST', '/api/groups', {'edit_ids': [change, new, iface]})            # any order: Upload sorts by kind

@@ -61,6 +61,11 @@ def migrate(obj):
             if u.get('kind') is not None:
                 u['block_kind'] = u['kind']
             u['kind'] = 'network'
+        g = u.get('group') if isinstance(u, dict) else None
+        if isinstance(g, dict) and 'card' not in g:                   # name "#123 Title – what" -> card #123 (only when missing)
+            m = re.match(r'(#\S+)\s+(.*)$', g.get('name') or '')
+            if m:
+                g['card'], g['card_title'] = m.group(1), m.group(2).split(' – ')[0].strip()
     return obj
 
 

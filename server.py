@@ -13,6 +13,7 @@ import tempfile
 import textwrap
 import threading
 import time
+from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -2057,6 +2058,7 @@ def _group_view(project, gid, members):
     low = min(state.rank(u['state']) for u in members)
     no = any(u['state'] == state.DISAPPROVED for u in members)
     g = {'id': gid, 'project': project, 'name': members[0]['group'].get('name') or '', 'task': members[0]['group'].get('task'),
+         'card': members[0]['group'].get('card') or '', 'card_title': members[0]['group'].get('card_title') or '',
          'state': state.DISAPPROVED if no else state.STATES[low],
          'f': any(u.get('f') for u in members), 'blocks': sorted({u['block'] for u in members}),
          'members': [{'id': u['id'], 'order': u['group']['order'], 'kind': u.get('kind', 'network'), 'block': u['block'],
@@ -2094,8 +2096,45 @@ def api_group_create(data, body):
         by_id = {u['id']: u for u in s['edits']}
         name = str(body.get('name') or '')[:120]
         task = _task_of(body)
+        extra = dict(_card_of(body), **({'task': task} if task else {}), **({'name': name} if name else {}))
         for i, x in enumerate(ids, 1):
-            by_id[x]['group'] = dict({'id': gid, 'order': i}, **({'name': name} if name else {}), **({'task': task} if task else {}))
+            by_id[x]['group'] = dict({'id': gid, 'order': i}, **extra)
+        state.save(data, project, s)
+    return api_group(data, gid)
+
+
+def _card_of(body):
+    """{card?, card_title?} -> the non-empty fields only. A card is a Deck card id or link (`#123`, URL); data only."""
+    return {k: str(body[k]).strip()[:200] for k in ('card', 'card_title') if str(body.get(k) or '').strip()}
+
+
+def api_groups(data, project=None, card=None, edit_state=None):
+    """GET /api/groups?project=&card=&state=: groups with their members (filter by project, card id, group state)."""
+    res = []
+    for p in ([project] if project else state.projects(data)):
+        s = state.load(data, state.check_name(p))
+        for gid in sorted({u['group']['id'] for u in s['edits'] if u.get('group')}):
+            m = sorted((u for u in s['edits'] if (u.get('group') or {}).get('id') == gid), key=lambda u: u['group']['order'])
+            g = _group_view(p, gid, m)
+            if (not card or g['card'] == card) and (not edit_state or g['state'] == edit_state):
+                res.append(g)
+    return {'groups': res}
+
+
+def api_group_update(data, gid, body):
+    """POST /api/groups/<gid> {name?, card?, card_title?}: only the given fields change; an empty value clears the field."""
+    if not isinstance(body, dict):
+        raise state.StateError('the body must be a JSON object', 400)
+    with state.LOCK:
+        project, s, members = _group_members(data, gid)
+        for k in ('name', 'card', 'card_title'):
+            if k in body:
+                v = str(body[k] or '').strip()[:120 if k == 'name' else 200]
+                for u in members:
+                    if v or k != 'name':             # an emptied card stays '' (a missing one would be derived from the name)
+                        u['group'][k] = v
+                    else:
+                        u['group'].pop(k, None)
         state.save(data, project, s)
     return api_group(data, gid)
 
@@ -2127,47 +2166,60 @@ def api_group(data, gid):
     return _group_view(project, gid, members)
 
 
-DELETABLE = ('Proposal', 'Approved', state.DISAPPROVED)      # Signed and later = already in the TIA project
+DELETABLE = ('Proposal', 'Approved', state.DISAPPROVED)      # Signed and later = already in the TIA project (force needed)
 
 
 def _drop_edits(s, ids, by):
-    """Remove edits from the project state, keeping a tombstone (ids are never reused; the changelog lists them)."""
+    """Remove edits from the project state, keeping a tombstone (ids are never reused; the changelog lists them).
+    Only the editor's state changes, never TIA."""
     for u in [u for u in s['edits'] if u['id'] in ids]:
         s['edits'].remove(u)
-        s.setdefault('deleted', []).append({'id': u['id'], 'kind': 'edit', 'time': state.now(), 'by': by or 'user',
-                                            'block': u['block'], 'nw': u.get('nw'), 'where': procedure.header(u),
-                                            'state': u['state'], 'note': u.get('note') or ''})
+        s.setdefault('deleted', []).append(dict({'id': u['id'], 'kind': 'edit', 'time': state.now(), 'by': by or 'user',
+                                                 'block': u['block'], 'nw': u.get('nw'), 'where': procedure.header(u),
+                                                 'state': u['state'], 'note': u.get('note') or ''},
+                                                **({'forced': True} if u['state'] not in DELETABLE else {})))
 
 
-def api_edit_delete(data, uid, by=None):
-    """DELETE /api/edits/<id>: only an edit not yet written (Proposal, Approved, Disapproved). A group member leaves its
-    group (the rest is renumbered; a single remaining edit is no longer a group)."""
-    with state.LOCK:
-        project, s, u = state.find(data, uid)
-        if u['state'] not in DELETABLE:
-            raise state.StateError('only an edit not yet written can be deleted (%s; now %s)' % (', '.join(DELETABLE), u['state']))
-        _drop_edits(s, {uid}, by)
-        gid = (u.get('group') or {}).get('id')
-        rest = sorted((x for x in s['edits'] if gid and (x.get('group') or {}).get('id') == gid), key=lambda x: x['group']['order'])
+def _regroup(s, gids, by):
+    """After edits left their groups: renumber the rest; a group left with at most one edit is dissolved (tombstone)."""
+    for gid in gids:
+        rest = sorted((x for x in s['edits'] if (x.get('group') or {}).get('id') == gid), key=lambda x: x['group']['order'])
         for i, x in enumerate(rest, 1):
             x['group']['order'] = i
-        if len(rest) == 1:
-            del rest[0]['group']
-            s['deleted'].append({'id': gid, 'kind': 'group', 'time': state.now(), 'by': by or 'user', 'edits': [rest[0]['id']]})
+        if len(rest) <= 1:
+            for x in rest:
+                del x['group']
+            s.setdefault('deleted', []).append({'id': gid, 'kind': 'group', 'time': state.now(), 'by': by or 'user',
+                                                'edits': [x['id'] for x in rest]})
+
+
+def _need_force(items, force):
+    bad = ['%s (%s)' % (u['id'], u['state']) for u in items if u['state'] not in DELETABLE]
+    if bad and not force:
+        raise state.StateError('%s already written to TIA (only the editor state would be deleted, TIA is not touched) — '
+                               'needs an explicit confirmation (force=1)' % ', '.join(bad))
+
+
+def api_edit_delete(data, uid, by=None, force=False):
+    """DELETE /api/edits/<id>[?force=1]: an edit not yet written (Proposal, Approved, Disapproved); a written one only with
+    force. A group member leaves its group (the rest is renumbered; a single remaining edit is no longer a group)."""
+    with state.LOCK:
+        project, s, u = state.find(data, uid)
+        _need_force([u], force)
+        _drop_edits(s, {uid}, by)
+        _regroup(s, [u['group']['id']] if u.get('group') else [], by)
         state.save(data, project, s)
     return {'project': project, 'deleted': [uid]}
 
 
-def api_group_delete(data, gid, with_edits=False, by=None):
-    """DELETE /api/groups/<id>: ungroup (the edits stay); with_edits deletes the edits too (each one not yet written)."""
+def api_group_delete(data, gid, with_edits=False, by=None, force=False):
+    """DELETE /api/groups/<id>[?edits=1][&force=1]: ungroup (the edits stay); edits=1 deletes the edits too (written ones
+    only with force)."""
     with state.LOCK:
         project, s, members = _group_members(data, gid)
         ids = [u['id'] for u in members]
         if with_edits:
-            bad = ['%s (%s)' % (u['id'], u['state']) for u in members if u['state'] not in DELETABLE]
-            if bad:
-                raise state.StateError('only edits not yet written can be deleted (%s): %s — ungroup instead'
-                                       % (', '.join(DELETABLE), ', '.join(bad)))
+            _need_force(members, force)
             _drop_edits(s, set(ids), by)
         name = members[0]['group'].get('name') or ''
         for u in members:
@@ -2176,6 +2228,49 @@ def api_group_delete(data, gid, with_edits=False, by=None):
                                             'edits': ids, 'name': name})
         state.save(data, project, s)
     return {'project': project, 'group': gid, 'deleted': ids if with_edits else []}
+
+
+def api_cleanup(data, body):
+    """POST /api/cleanup {project?, states?, group?, card?, all?, dry_run (default true), force?, by?}: delete many edits.
+    A filter is required (all=true = every edit). dry_run lists what would go; a real run needs force for written states
+    and first copies state.json to <data>/backups/state-<project>-<time>.json. TIA is not touched."""
+    if not isinstance(body, dict):
+        raise state.StateError('the body must be a JSON object', 400)
+    states = body.get('states')
+    if states is not None and (not isinstance(states, list) or not set(states) <= set(state.ALL_STATES)):
+        raise state.StateError('states: a list from %s' % state.ALL_STATES, 400)
+    if not any(body.get(k) for k in ('project', 'states', 'group', 'card')) and body.get('all') is not True:
+        raise state.StateError('give a filter (project, states, group, card) or all=true', 400)
+    dry, force, by = body.get('dry_run', True) is not False, body.get('force') is True, body.get('by') or 'user'
+    with state.LOCK:
+        found = {}
+        for p in ([state.check_name(body['project'])] if body.get('project') else state.projects(data)):
+            s = state.load(data, p)
+            hit = [u for u in s['edits'] if (not states or u['state'] in states)
+                   and (not body.get('group') or (u.get('group') or {}).get('id') == body['group'])
+                   and (not body.get('card') or (u.get('group') or {}).get('card') == body['card'])]
+            if hit:
+                found[p] = (s, hit)
+        written = [u['id'] for _, h in found.values() for u in h if u['state'] not in DELETABLE]
+        out = {'dry_run': dry, 'count': sum(len(h) for _, h in found.values()), 'needs_force': written,
+               'edits': [{'id': u['id'], 'project': p, 'state': u['state'], 'where': procedure.header(u),
+                          'group': (u.get('group') or {}).get('id')} for p, (_, h) in found.items() for u in h]}
+        if dry:
+            return out
+        if written and not force:
+            raise state.StateError('%d edit(s) already written to TIA (%s) — only the editor state would be deleted; '
+                                   'needs force=true' % (len(written), ', '.join(written[:10])))
+        backups = []
+        for p, (s, hit) in found.items():
+            dst = os.path.join(data, 'backups', 'state-%s-%s.json' % (p, datetime.now().strftime('%Y%m%d-%H%M%S-%f')))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(state._file(data, p), dst)
+            backups.append(dst)
+            gids = sorted({u['group']['id'] for u in hit if u.get('group')})
+            _drop_edits(s, {u['id'] for u in hit}, by)
+            _regroup(s, gids, by)                      # also writes the tombstone of a group that lost all its edits
+            state.save(data, p, s)
+        return dict(out, backups=backups)
 
 
 def api_group_state(data, gid, body):
@@ -2339,7 +2434,7 @@ ROUTES = [
     ('PUT', r'/api/state/tia', lambda h: api_state_tia(_project(h)[0], h.data, _project(h)[1], h._body())),
     ('POST', r'/api/edits', lambda h: (api_edit_create(h.root_for(h.body_project()), h.data, h._body()), 201)),
     ('GET', E, lambda h, uid: api_edit_detail(h.data, uid, int(h.q.get('width', '0')), h.root_of(uid))),
-    ('DELETE', E, lambda h, uid: api_edit_delete(h.data, uid, h.q.get('by'))),
+    ('DELETE', E, lambda h, uid: api_edit_delete(h.data, uid, h.q.get('by'), h.q.get('force') in ('1', 'true'))),
     ('POST', E + '/state', lambda h, uid: api_edit_state(h.data, uid, h._body())),
     ('GET', E + '/procedure', lambda h, uid: api_procedure(h.data, uid, h.root_of(uid))),
     ('POST PUT', E + '/after', lambda h, uid: api_edit_after(h.data, uid, h._body(), h.root_of(uid))),
@@ -2349,8 +2444,12 @@ ROUTES = [
     ('POST', E + '/check', lambda h, uid: _demo_guard(h, uid) or api_check(h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout)),
     ('POST', r'/api/check', lambda h: api_add_check(h.data, h._body())),
     ('POST', r'/api/groups', lambda h: (api_group_create(h.data, h._body()), 201)),
+    ('GET', r'/api/groups', lambda h: api_groups(h.data, h.q.get('project'), h.q.get('card'), h.q.get('state'))),
+    ('POST', r'/api/cleanup', lambda h: api_cleanup(h.data, h._body())),
     ('GET', G, lambda h, gid: api_group(h.data, gid)),
-    ('DELETE', G, lambda h, gid: api_group_delete(h.data, gid, h.q.get('edits') in ('1', 'true'), h.q.get('by'))),
+    ('POST', G, lambda h, gid: api_group_update(h.data, gid, h._body())),
+    ('DELETE', G, lambda h, gid: api_group_delete(h.data, gid, h.q.get('edits') in ('1', 'true'), h.q.get('by'),
+                                                  h.q.get('force') in ('1', 'true'))),
     ('POST', G + '/state', lambda h, gid: api_group_state(h.data, gid, h._body())),
     ('POST', G + '/task', lambda h, gid: api_group_task(h.data, gid, h._body())),
     ('GET', G + '/procedure', lambda h, gid: api_group_procedure(h.data, gid, h.root_for(_group_members(h.data, gid)[0]))),

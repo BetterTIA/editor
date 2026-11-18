@@ -93,7 +93,13 @@ def attributes(t):
 # ---------- .s7res ----------
 
 def load_s7res(fpath):
-    """MultiLingualTexts -> {id: {language: text}}. Mini-YAML: plain, '...' / "..." values and blocks |, |-, |+."""
+    """MultiLingualTexts -> {id: {language: text}} (entries with a repeated id are merged, the last wins).
+    Mini-YAML: plain, '...' / "..." values and blocks |, |-, |+."""
+    return {k: v[-1] if len(v) == 1 else {l: t for e in v for l, t in e.items()} for k, v in load_s7res_entries(fpath).items()}
+
+
+def load_s7res_entries(fpath):
+    """Like load_s7res, but {id: [entry, ...]}: every `- id:` row is its own entry (an id can repeat)."""
     if not os.path.exists(fpath):
         return {}
     rows = read(fpath).splitlines()
@@ -102,7 +108,8 @@ def load_s7res(fpath):
         r = rows[i]
         m = re.match(r'^\s*-\s+id:\s*(\S+)\s*$', r)
         if m:
-            active = texts.setdefault(m.group(1), {})
+            active = {}
+            texts.setdefault(m.group(1), []).append(active)
             i += 1
             continue
         m = re.match(r'^(\s+)([a-z]{2}-[A-Z]{2}):\s?(.*)$', r)
@@ -142,11 +149,21 @@ def text_mlc(texts, ident, languages=('cs-CZ', 'en-US')):
 def load_block(path_s7dcl):
     text = read(path_s7dcl)
     block = parse_block(text)
-    texts = load_s7res(path_s7dcl[:-len('.s7dcl')] + '.s7res')
+    entries = load_s7res_entries(path_s7dcl[:-len('.s7dcl')] + '.s7res')
+    used = {}
+
+    def mlc(ident):
+        """The k-th use of an id in the block (header, then networks in order) reads the k-th entry of that id in the
+        .s7res; titles of different networks can share an id. shortcut: with one entry per id it is the plain lookup."""
+        e = entries.get(ident)
+        if not e:
+            return text_mlc({}, ident)
+        k = used[ident] = used.get(ident, -1) + 1
+        return text_mlc({ident: e[min(k, len(e) - 1)]}, ident)
+    block['title'] = mlc(block['attributes'].get('S7_BlockTitle'))
     for nw in block['networks']:
-        nw['title'] = text_mlc(texts, nw['attributes'].get('S7_NetworkTitle'))
-        nw['comment'] = text_mlc(texts, nw['attributes'].get('S7_NetworkComment'))
-    block['title'] = text_mlc(texts, block['attributes'].get('S7_BlockTitle'))
+        nw['title'] = mlc(nw['attributes'].get('S7_NetworkTitle'))
+        nw['comment'] = mlc(nw['attributes'].get('S7_NetworkComment'))
     return block
 
 

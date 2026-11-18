@@ -141,11 +141,25 @@ def update_edit(e, a):
 
 
 def delete_edit(e, a):
-    return e.req('DELETE', '/api/edits/' + q(a['id']))
+    return e.req('DELETE', '/api/edits/%s%s' % (q(a['id']), '?force=1' if a.get('force') else ''))
+
+
+def cleanup_edits(e, a):
+    return e.req('POST', '/api/cleanup', {k: a[k] for k in ('project', 'states', 'group', 'card', 'all', 'dry_run', 'force') if k in a})
+
+
+def list_groups(e, a):
+    return e.get('/api/groups' + ''.join('%s%s=%s' % ('&' if i else '?', k, q(a[k]))
+                                          for i, k in enumerate([k for k in ('project', 'card', 'state') if a.get(k)])))
+
+
+def update_group(e, a):
+    return e.req('POST', '/api/groups/' + q(a['id']), {k: a[k] for k in ('name', 'card', 'card_title') if k in a})
 
 
 def create_group(e, a):
-    g = e.req('POST', '/api/groups', {'edit_ids': a['edit_ids'], 'name': a.get('name') or ''})
+    g = e.req('POST', '/api/groups', {'edit_ids': a['edit_ids'], 'name': a.get('name') or '', 'card': a.get('card') or '',
+                                         'card_title': a.get('card_title') or ''})
     return dict(g, url='%s/?group=%s' % (e.url, q(g['id'])))
 
 
@@ -309,14 +323,27 @@ TOOLS = [
               'title': {'type': 'string', 'description': 'new_network: title'},
               'comment': {'type': 'string', 'description': 'new_network: comment'},
               'title_after': TITLE_AFTER, 'comment_after': COMMENT_AFTER}, ['id']), update_edit),
-    ('delete_edit', 'Delete an edit that is not yet written to TIA (Proposal, Approved or Disapproved). The deletion is '
-                    'recorded in the changelog. Only on a person\'s explicit instruction.',
-     _schema({'id': S}, ['id']), delete_edit),
+    ('delete_edit', 'Delete an edit from the editor (the changelog records it; TIA is not touched). Proposal, Approved and '
+                    'Disapproved only by default; force=true also deletes a Signed/Checked/Uploaded/Tested edit. '
+                    'Only on a person\'s explicit instruction.',
+     _schema({'id': S, 'force': {'type': 'boolean', 'description': 'also an edit already written to TIA'}}, ['id']), delete_edit),
+    ('cleanup_edits', 'Delete many edits by filter (project, states, group, card, or all=true). dry_run (default true) only '
+                      'lists what would be deleted; dry_run=false deletes after a backup of state.json; force=true is needed '
+                      'for edits already written to TIA (only the editor state goes, TIA is not touched). Only on a '
+                      'person\'s explicit instruction.',
+     _schema({'project': S, 'states': {'type': 'array', 'items': S}, 'group': S, 'card': S, 'all': B,
+              'dry_run': B, 'force': B}), cleanup_edits),
+    ('list_groups', 'Groups of edits, optionally of one project, one Deck card (e.g. #123) or one group state.',
+     _schema({'project': S, 'card': S, 'state': S}), list_groups),
+    ('update_group', 'Change the name, Deck card (`card`: #123 or a link) or `card_title` of a group; an empty value removes it.',
+     _schema({'id': S, 'name': S, 'card': S, 'card_title': S}, ['id']), update_group),
     ('create_group', 'Group edits that make one change together (e.g. interface members + new networks + changes of one '
                      'block), in the order they are made. The group has one state (the lowest of its members); a person '
                      'moves, uploads and checks it as a whole in the editor.',
      _schema({'edit_ids': {'type': 'array', 'items': S, 'minItems': 2, 'description': 'edit ids in order'},
-              'name': {'type': 'string', 'description': 'short name of the change'}}, ['edit_ids']), create_group),
+              'name': {'type': 'string', 'description': 'short name of the change'},
+              'card': {'type': 'string', 'description': 'Deck card of the group (#123 or a link)'},
+              'card_title': {'type': 'string', 'description': 'title of the card'}}, ['edit_ids']), create_group),
     ('get_group', 'One group: members in order with their states, the common state, F-block note and the TIA steps of '
                   'all members (markdown).', _schema({'id': S}, ['id']), get_group),
     ('run_check', 'Compare an export (newest or given) with the edit\'s "after" model and record the check.',
