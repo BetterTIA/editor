@@ -501,7 +501,7 @@ Steps, one import per block (a group: interface → new networks → changes, ap
    CyclicTime must equal the export.
 
 **E8 — restore:** when the import, the compile or the OB check fails, every block already imported gets its original
-export back (`Restore: ImportXmlBlock` without a hash → `Restore: CompileBlock`). The edits stay **Approved**; the
+export back (`Restore: ImportXmlBlock` → `Restore: CompileBlock`) — **without `expectedContentHash`** (the Writer returns no hash after an import; the step says "UNPROTECTED" and the message "WITHOUT a content-hash check": a change made in TIA meanwhile is overwritten). The edits stay **Approved**; the
 message has the reason, the Writer's `errorDetail` (when present) and "restored from the export before the write" — or
 "NOT RESTORED …" with the path of the original export. Files: `work/export/<block>/<block>.xml` and
 `work/import/<block>.xml`, kept in `upload-failed\` after a failure. The record has `via: "SimaticML"` and, for a group,
