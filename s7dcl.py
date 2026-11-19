@@ -93,9 +93,11 @@ def attributes(t):
 # ---------- .s7res ----------
 
 def load_s7res(fpath):
-    """MultiLingualTexts -> {id: {language: text}} (entries with a repeated id are merged, the last wins).
+    """MultiLingualTexts -> {id: {language: text}}. An id can repeat with different texts (one record per use): this plain
+    dictionary keeps the FIRST record only (right for the block title, which is the first use); network titles and comments
+    must come from load_block, which maps the records by position.
     Mini-YAML: plain, '...' / "..." values and blocks |, |-, |+."""
-    return {k: v[-1] if len(v) == 1 else {l: t for e in v for l, t in e.items()} for k, v in load_s7res_entries(fpath).items()}
+    return {k: v[0] for k, v in load_s7res_entries(fpath).items()}
 
 
 def load_s7res_entries(fpath):

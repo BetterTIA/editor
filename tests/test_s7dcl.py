@@ -123,6 +123,24 @@ class TestDuplicateMlc(unittest.TestCase):
         n = self.load([('MLC_2', 'T1'), ('MLC_1', 'C1'), ('MLC_1', 'T2'), ('MLC_2', 'C2')])
         self.assertEqual([(x['title'], x['comment']) for x in n], [('T1', 'C1'), ('T2', 'C2')])
 
+    def test_plain_dictionary_keeps_first_record_not_last(self):
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, 'x.s7res'), 'w', encoding='utf-8') as f:
+            f.write('MultiLingualTexts:\n  - id: MLC_1\n    en-US: first\n    cs-CZ: prvni\n  - id: MLC_1\n    en-US: second\n')
+        self.assertEqual(s7dcl.load_s7res(os.path.join(d, 'x.s7res'))['MLC_1'], {'en-US': 'first', 'cs-CZ': 'prvni'})
+
+    def test_same_title_id_on_four_networks_each_gets_its_own_text(self):
+        d = tempfile.mkdtemp()
+        dcl = 'FUNCTION_BLOCK "FB_X"\n{ S7_BlockNumber := "1" }\nBEGIN\n' + ''.join(
+            '{ S7_Language := "LAD"; S7_NetworkTitle := "%s" }\nNETWORK\nEND_NETWORK\n' % i
+            for i in ('MLC_ku', 'MLC_4Aj', 'MLC_ku', 'MLC_ku'))
+        with open(os.path.join(d, 'FB_X.s7dcl'), 'w', encoding='utf-8') as f:
+            f.write(dcl)
+        with open(os.path.join(d, 'FB_X.s7res'), 'w', encoding='utf-8') as f:
+            f.write('MultiLingualTexts:\n' + ''.join('  - id: %s\n    en-US: %s\n' % r for r in (
+                ('MLC_ku', 'A'), ('MLC_4Aj', 'B'), ('MLC_ku', 'C'), ('MLC_ku', 'D'))))
+        self.assertEqual([x['title'] for x in s7dcl.load_block(os.path.join(d, 'FB_X.s7dcl'))['networks']], ['A', 'B', 'C', 'D'])
+
     def test_unverified_order_is_ambiguous_not_guessed(self):
         n = self.load([('MLC_1', 'A'), ('MLC_1', 'B'), ('MLC_2', 'C'), ('MLC_2', 'D')])
         self.assertEqual((n[0]['title'], n[0]['title_ambiguous'], n[0]['title_candidates']), ('', True, ['C', 'D']))
