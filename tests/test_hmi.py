@@ -241,3 +241,21 @@ class TestHmiEdits(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestCenteredItems(unittest.TestCase):
+    """HmiCircle / HmiEllipse carry centerX / centerY / radius(X|Y) instead of left / top / width / height (synthetic data)."""
+    def test_circle_and_ellipse_geometry(self):
+        c = hmi.item({'$type': 'HmiCircle', 'name': 'c', 'centerX': 100, 'centerY': 50, 'radius': 12})
+        self.assertEqual({k: c[k] for k in ('type', 'left', 'top', 'width', 'height')}, {'type': 'Circle', 'left': 88, 'top': 38, 'width': 24, 'height': 24})
+        e = hmi.item({'$type': 'HmiEllipse', 'name': 'e', 'centerX': 100, 'centerY': 50, 'radiusX': 30, 'radiusY': 10})
+        self.assertEqual((e['left'], e['top'], e['width'], e['height']), (70, 40, 60, 20))
+        r = hmi.item({'$type': 'HmiRectangle', 'name': 'r', 'left': 5, 'top': 6, 'width': 7, 'height': 8})   # untouched
+        self.assertEqual((r['left'], r['top'], r['width'], r['height']), (5, 6, 7, 8))
+
+    def test_check_accepts_a_saved_zero_circle(self):
+        exp = {'name': 's', 'width': 100, 'height': 100, 'items': [hmi.item({'$type': 'HmiCircle', 'name': 'c', 'centerX': 50, 'centerY': 50, 'radius': 10})]}
+        old = {'name': 's', 'width': 100, 'height': 100, 'items': [dict(exp['items'][0], left=0, top=0, width=0, height=0)]}
+        self.assertEqual(hmi.check(old, exp), (True, []))
+        moved = {'name': 's', 'width': 100, 'height': 100, 'items': [dict(exp['items'][0], left=0)]}
+        self.assertFalse(hmi.check(moved, exp)[0])

@@ -86,6 +86,9 @@ def item(x):
     t = t[3:] if t.startswith('Hmi') and len(t) > 3 else t
     it = {'name': str(x.get('name') or ''), 'type': ALIASES.get(t, t)}
     it.update({k: _num(x.get(k)) for k in ('left', 'top', 'width', 'height')})
+    if 'width' not in x and 'centerX' in x:        # HmiCircle / HmiEllipse are placed by centre and radius, no left/top/width/height
+        rx = _num(x.get('radiusX'), _num(x.get('radius'))); ry = _num(x.get('radiusY'), _num(x.get('radius')))
+        it.update(left=round(_num(x['centerX']) - rx), top=round(_num(x.get('centerY')) - ry), width=round(2 * rx), height=round(2 * ry))
     tx = text(x.get('text'))
     if tx is not None:
         it['text'] = tx
@@ -294,6 +297,10 @@ def check(after, exported):
     """Export = proposal: every item by name with its type, geometry (±1 px), text and tag bindings; no item more or less."""
     if exported is None:
         return False, ['screen %s is not in the export' % after['name']]
+    E = {i['name']: i for i in exported['items']}     # saved edits from before the circle fix hold a circle as 0 × 0: take the export's geometry
+    after = dict(after, items=[dict(i, **{k: E[i['name']][k] for k in ('left', 'top', 'width', 'height')})
+                               if i['type'] in ('Circle', 'Ellipse') and not i['width'] and not i['height'] and i['name'] in E else i
+                               for i in after['items']])
     c = compare(exported, after, CHECKED, 1)
     diffs = ['missing in export: %s' % n for n in c['added']] + ['extra in export: %s' % n for n in c['deleted']] + \
         ['%s %s: export %s, proposal %s' % (n, x['attr'], json.dumps(x['before']), json.dumps(x['after']))

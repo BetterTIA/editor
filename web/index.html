@@ -1176,7 +1176,7 @@ function hmiItem(x) {
   const t = esc(x.text || '');
   const vertical = x.height > x.width;
   d.innerHTML = {
-    Text: t, Button: t, Rectangle: '',
+    Text: t, Button: t, Rectangle: '', Circle: '', Ellipse: '',
     IOField: (pv ? `<i>${esc(pv.tag)}</i>` : '') + '0.0',
     Switch: `<span style="background:${esc(c.foreColor || '#2f6fa3')}"></span>`,
     Bar: `<b style="background:${esc(c.foreColor || '#2f6fa3')};${vertical ? 'width:100%;height:60%' : 'height:100%;width:60%'}"></b>`,
@@ -1187,6 +1187,7 @@ function hmiItem(x) {
     ScreenWindow: 'Screen window ' + esc(x.name),
   }[x.type] ?? `${esc(x.type)} ${esc(x.name)}`;
   if (x.type === 'Line') d.style.overflow = 'visible';
+  if (['Circle', 'Ellipse'].includes(x.type)) d.style.borderRadius = '50%';
   return d;
 }
 // the screen in a frame of the given width; marks: {item name: 'added' | 'changed' | 'deleted'}; ghosts: deleted items drawn faded
@@ -1197,6 +1198,7 @@ function hmiFrame(s, width, marks = {}, ghosts = []) {
   scr.className = 'hmi-screen';
   Object.assign(scr.style, {width: s.width + 'px', height: s.height + 'px', transform: `scale(${k})`, background: s.background || '#ffffff'});
   for (const x of ghosts.concat(s.items)) {        // deleted items go first: drawn on top they would cover the items that replace them
+    if (!x.width && !x.height) continue;             // 0 × 0 = geometry the old parser could not read (circle): nothing to draw
     const d = hmiItem(x);
     if (marks[x.name]) d.classList.add('d-' + marks[x.name]);
     scr.appendChild(d);
