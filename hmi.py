@@ -173,7 +173,9 @@ def _str(v, what, n=300, required=False):
         if required:
             raise ValueError('%s is required' % what)
         return None
-    if not isinstance(v, str) or len(v) > n or '\r' in v:
+    if isinstance(v, str) and '\r' in v:
+        raise ValueError('%s must not contain a CR character (line ends are LF only; get_screen already returns LF)' % what)
+    if not isinstance(v, str) or len(v) > n:
         raise ValueError('%s must be text (at most %d characters)' % (what, n))
     return v
 
