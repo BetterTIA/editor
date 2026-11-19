@@ -1196,7 +1196,7 @@ function hmiFrame(s, width, marks = {}, ghosts = []) {
   Object.assign(wrap.style, {width: s.width * k + 'px', height: s.height * k + 'px'});
   scr.className = 'hmi-screen';
   Object.assign(scr.style, {width: s.width + 'px', height: s.height + 'px', transform: `scale(${k})`, background: s.background || '#ffffff'});
-  for (const x of s.items.concat(ghosts)) {
+  for (const x of ghosts.concat(s.items)) {        // deleted items go first: drawn on top they would cover the items that replace them
     const d = hmiItem(x);
     if (marks[x.name]) d.classList.add('d-' + marks[x.name]);
     scr.appendChild(d);
