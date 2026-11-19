@@ -20,7 +20,7 @@ import hashlib
 import re
 
 import s7dcl
-from diff import _j
+from diff import _j, canonical_names, comparable
 from layout import CHAR_W, _tw
 
 LOGIC = {'A': 'and', 'O': 'or', 'X': 'xor'}
@@ -178,6 +178,7 @@ def verify_model(after):
             if p.get(f) is not None and not isinstance(p[f], str):
                 raise ValueError('FBD element %s: %s must be text' % (p['id'], f))
         ids.add(p['id'])
+    canonical_names(after['elements'])
     for p in after['elements']:
         for i, v in enumerate(p['inputs']):
             v['n'] = i + 1
@@ -551,6 +552,7 @@ def description(p):
 
 def content_match(proposal, export):
     """-> (match, [readable differences]) — boxes by content (for &, >=1, x regardless of input order), then wiring."""
+    proposal, export = comparable(proposal, export)
     def multiset(elements):
         d = {}
         for p in elements:

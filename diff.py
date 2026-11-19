@@ -140,6 +140,42 @@ def _j(x):
     return json.dumps(x, sort_keys=True, ensure_ascii=False)
 
 
+ALIASES = {'CONVERT': 'CONV'}          # TIA names the instruction CONV in LAD and FBD; a proposal may say CONVERT
+
+
+def canonical_name(name):
+    return ALIASES.get(name.strip().upper(), name) if isinstance(name, str) else name
+
+
+def canonical_names(elements):
+    """The "after" elements of a proposal with instruction aliases written the TIA way (in place)."""
+    for p in elements:
+        if p.get('type') in ('box', 'instruction'):
+            p['name'] = canonical_name(p.get('name'))
+    return elements
+
+
+def comparable(a, b):
+    """Two network models (proposal, export) for the content comparison: CONVERT = CONV, and a data type template that one
+    side does not carry at all (every box of that name without it) is no difference."""
+    ea = [dict(p, name=canonical_name(p['name'])) if p.get('type') in ('box', 'instruction') and p.get('name') else p
+          for p in a['elements']]
+    eb = [dict(p, name=canonical_name(p['name'])) if p.get('type') in ('box', 'instruction') and p.get('name') else p
+          for p in b['elements']]
+
+    def has(els):
+        d = {}
+        for p in els:
+            if p.get('name'):
+                d[p['name']] = d.get(p['name'], False) or bool((p.get('template') or '').strip())
+        return d
+    ha, hb = has(ea), has(eb)
+
+    def drop(els, other):
+        return [dict(p, template=None) if (p.get('template') or '').strip() and other.get(p.get('name')) is False else p for p in els]
+    return dict(a, elements=drop(ea, hb)), dict(b, elements=drop(eb, ha))
+
+
 def canon(model):
     """Network topology as a tree of series (S) / closed branches (P) / output branches (PO) with element content;
     branch order does not matter, nor do ids or node names. None = cannot be laid out."""
@@ -177,6 +213,7 @@ def _description(p):
 
 def content_match(proposal, export):
     """-> (match, [readable differences]) — elements by content (type + operand/pins) and the series/branch topology."""
+    proposal, export = comparable(proposal, export)
     a = {}
     for p in proposal['elements']:
         a.setdefault(_j(_norm(p)), []).append(p)

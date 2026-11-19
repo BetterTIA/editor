@@ -315,7 +315,7 @@ def _after_model(after, language):
             raise state.StateError('after must be an FBD model {language: "FBD", elements: [...]}', 400)
         return _fbd_after(dict(after, language='FBD'))
     verify_model(after)
-    m = {'elements': after['elements'], 'rungs': after['rungs']}
+    m = {'elements': diff.canonical_names(after['elements']), 'rungs': after['rungs']}
     m['wires'] = s7dcl.wires(m)
     m['layout'] = _layout(m)[0]                     # the client's layout is not trusted
     return m
