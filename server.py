@@ -651,7 +651,7 @@ def _check_hmi(root, data, uid, u, body):
     note = 'export = proposal (%d items)' % len(u['after']['items']) if match else 'MISMATCH: %s' % '; '.join(diffs[:20])
     if t == u['before'].get('export_ts'):
         note += ' · note: the export is the same as before the change'
-    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note}, advance=True)
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note, 'by': body.get('by')}, advance=True)
     return {'match': match, 'export_ts': t, 'nw_export': None, 'note': note, 'diffs': diffs, 'edit': u}
 
 
@@ -676,7 +676,7 @@ def api_add_check(data, body, advance=False):
             'time': state.now(), 'match': body['match'], 'export_ts': str(body.get('export_ts') or ''),
             'note': str(body.get('note') or '')})
         if advance and body['match'] and u['state'] == 'Signed':
-            state.change_state(u, 'Checked', 'export check')
+            state.change_state(u, 'Checked', body.get('by') or 'export check')
         state.save(data, project, s)
     return u
 
@@ -886,7 +886,7 @@ def _check_interface(root, data, uid, u, body):
             if match else 'MISMATCH: %s' % '; '.join(diffs))
     if t == u['before'].get('export_ts'):
         note += ' · note: the export is the same as before the change'
-    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note}, advance=True)
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note, 'by': body.get('by')}, advance=True)
     return {'match': match, 'export_ts': t, 'nw_export': None, 'note': note, 'diffs': diffs, 'edit': u}
 
 
@@ -928,7 +928,7 @@ def api_check_export(root, data, uid, body):
     if t == u['before'].get('export_ts'):
         notes.append('note: the export is the same as before the change')
     note = ('export = proposal' if match else 'MISMATCH: %s' % '; '.join(diffs)) + ''.join(' · ' + x for x in notes)
-    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note}, advance=True)
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note, 'by': body.get('by')}, advance=True)
     return {'match': match, 'export_ts': t, 'nw_export': n['nw'] if n else None, 'note': note,
             'diffs': diffs, 'edit': u}
 
@@ -1539,7 +1539,7 @@ def api_check(root, data, uid, mcp, timeout=300):
             if not ts:
                 raise s7dcl_write.WriteError("no Reader export found in the editor's export root (%s\\%s) — response: %s"
                                               % (root, project, texts[-1][:300] if texts else ''))
-            k_res = api_check_export(root, data, uid, {'export_ts': ts[-1]})
+            k_res = api_check_export(root, data, uid, {'export_ts': ts[-1], 'by': 'TIAC_Reader'})
             steps.append({'step': 'Export check %s' % ts[-1], 'ok': k_res['match'], 'message': k_res['note']})
             ok, message = k_res['match'], ('export = proposal' if k_res['match'] else k_res['note'])
         except mcp_client.MCPError as e:

@@ -294,8 +294,8 @@ TS = {'type': 'string', 'description': 'export timestamp YYYYMMDD-HHMMSS (defaul
 HMI_TS = {'type': 'string', 'description': 'HMI export timestamp YYYYMMDD-HHMMSS (default: the newest HMI export)'}
 KIND = {'type': 'string', 'enum': ['network', 'interface', 'new_network'],
         'description': 'what the edit changes (default network)'}
-TITLE_AFTER = {'type': 'string', 'description': 'network edit: the new network title ("" = keep the current one)'}
-COMMENT_AFTER = {'type': 'string', 'description': 'network edit: the new network comment ("" = keep the current one)'}
+TITLE_AFTER = {'type': 'string', 'description': 'network edit: the new network title ("" = keep the current one); name the function, no Deck card numbers'}
+COMMENT_AFTER = {'type': 'string', 'description': 'network edit: the new network comment ("" = keep the current one); describe the function or give warnings, not our solution (that goes to the edit note)'}
 SECTION = {'type': 'string', 'enum': ['Input', 'Output', 'InOut', 'Static', 'Temp', 'Constant'],
            'description': 'interface section the members are added to'}
 MEMBERS = {'type': 'array', 'description': 'interface members to add (adding only; changing or removing is not offered)',
