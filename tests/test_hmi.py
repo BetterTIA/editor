@@ -225,6 +225,52 @@ class TestHmiEdits(unittest.TestCase):
         self.assertTrue(any('outside the screen' in e['error'] for e in r['errors']), r['errors'])
         self.assertEqual(self.req('POST', '/api/edits/%s/after' % u['id'], {'after': {'items': 'x'}})[0], 400)
 
+    def _add_crlf_script(self):
+        """A button with an event script that has CRLF (as the TIA export gives it) in the exported Overview screen."""
+        f = os.path.join(self.root, PROJECT, TS0, 'HMI_1', 'Screens', 'Overview.json')
+        with open(f, encoding='utf-8-sig') as h:
+            d = json.load(h)
+        b = next(i for i in d['screenItems'] if i['name'] == 'Btn_Alarms')
+        b['eventHandlers'] = [{'eventType': 'Down', 'script': {'scriptCode': 'let a = 1;\r\nlet b = 2;\r\n'}}]
+        with open(f, 'w', encoding='utf-8') as h:
+            json.dump(d, h)
+
+    def test_crlf_script_round_trip(self):
+        """get_screen -> propose_screen with a script from the export (CRLF there) is accepted; scripts are held with LF."""
+        import mcp_server
+        self._add_crlf_script()
+        e = mcp_server.Editor('http://127.0.0.1:%d' % self.srv.server_address[1])
+        scr = json.loads(mcp_server.call_tool(e, 'get_screen', {'project': PROJECT, 'screen': 'Overview'})['content'][0]['text'])
+        ev = next(i for i in scr['items'] if i['name'] == 'Btn_Alarms')['events']
+        self.assertEqual(ev, [{'event': 'Down', 'script': 'let a = 1;\nlet b = 2;\n'}])
+        r = mcp_server.call_tool(e, 'propose_screen', {'project': PROJECT, 'round': 'AI', 'screen': 'Overview', 'after': scr})
+        self.assertFalse(r.get('isError'), r)
+        v = json.loads(r['content'][0]['text'])
+        self.assertEqual(v['changes']['changed'], {})                  # same script = no difference (CRLF x LF is none)
+        self.assertEqual(self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'HMI', 'kind': 'hmi_screen', 'screen': 'Overview',
+                                                         'after': dict(scr, items=[dict(i, events=[{'event': 'Down', 'script': 'a\rb'}]) if i['name'] == 'Btn_Alarms' else i
+                                                                                   for i in scr['items']])})[0], 400)   # a lone CR from a client stays refused
+
+    def test_unknown_tag_without_tag_tables(self):
+        """Tag tables in the export: an unknown tag is a (hard) warning; the export without them: only "cannot be verified"."""
+        m = {'name': 'S', 'width': 100, 'height': 100, 'items': [
+            {'name': 'A', 'type': 'IOField', 'left': 0, 'top': 0, 'width': 10, 'height': 10, 'bindings': [{'property': 'ProcessValue', 'tag': 'Nope'}]}]}
+        w = hmi.validate(m, {'Other'}, True)
+        self.assertEqual([(x['warning'], x.get('unverified'), 'neither' in x['error']) for x in w], [(True, None, True)])
+        w = hmi.validate(m, {'Other'}, False)
+        self.assertEqual([(x['warning'], x['unverified'], 'cannot be verified' in x['error']) for x in w], [(True, True, True)])
+        self.assertEqual(len(hmi.validate(m, None, False)), 1)         # nothing known at all (PLC tables missing too): still said
+        self.assertEqual(hmi.validate(m, {'Nope'}, False), [])
+        # through the API: the sample export with and without HMI tag tables
+        body = {'project': PROJECT, 'round': 'HMI', 'kind': 'hmi_screen', 'screen': 'Belt', 'new': True, 'preset': 'machine_overview',
+                'params': {'machine': 'Belt 2', 'tags': ['Nope']}}
+        u = self.ok('POST', '/api/edits', body, 201)
+        self.assertEqual([(x.get('unverified'), 'neither' in x['error']) for x in self.ok('GET', '/api/edits/' + u['id'])['errors'] if 'Nope' in x['error']],
+                         [(None, True)])
+        shutil.rmtree(os.path.join(self.root, PROJECT, TS0, 'HMI_1', 'Tags'))
+        errs = [x for x in self.ok('GET', '/api/edits/' + u['id'])['errors'] if 'Nope' in x['error']]
+        self.assertEqual([(x.get('unverified'), 'no HMI tag tables' in x['error']) for x in errs], [(True, True)])
+
     def test_mcp_propose_screen(self):
         import mcp_server
         e = mcp_server.Editor('http://127.0.0.1:%d' % self.srv.server_address[1])

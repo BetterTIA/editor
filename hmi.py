@@ -58,6 +58,12 @@ def _num(v, default=0):
     return v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
 
 
+def _lf(v):
+    """Script text with LF line ends: the TIA export gives CRLF, the proposal (verify) refuses a CR. This is the one place
+    where it is normalized, so get_screen, the diff and the check all see the same text."""
+    return v.replace('\r\n', '\n').replace('\r', '\n') if isinstance(v, str) else v
+
+
 def text(v):
     """Multilingual text -> the en-US translation (else the first one) without rich-text markup.
     shortcut: one language only — keep all translations when the editor edits more than en-US."""
@@ -101,7 +107,7 @@ def item(x):
                            **({'indirect': True} if d.get('useIndirectAddressing') else {}))
                       for d in x.get('dynamizations') or [] if isinstance(d, dict) and d.get('tag')]
     ev = [{'event': str(e.get('eventType') or '?'),
-           'script': e['script'].get('scriptCode') if isinstance(e.get('script'), dict) else None}
+           'script': _lf(e['script'].get('scriptCode')) if isinstance(e.get('script'), dict) else None}
           for e in x.get('eventHandlers') or [] if isinstance(e, dict)]
     if ev:
         it['events'] = ev
@@ -237,15 +243,21 @@ def _color(v, what):
     return v.lower()
 
 
-def validate(m, known_tags=None):
-    """Rule errors of a screen model: items outside the screen (error), bindings to unknown tags (warning)."""
+def validate(m, known_tags=None, hmi_tables=True):
+    """Rule errors of a screen model: items outside the screen (error), bindings to unknown tags (warning). An export without
+    HMI tag tables (a partial export) cannot say that a tag is unknown: that is only `unverified` (not counted as a rule error)."""
     res = []
     for x in m['items']:
         if x['left'] < 0 or x['top'] < 0 or x['left'] + x['width'] > m['width'] or x['top'] + x['height'] > m['height']:
             res.append({'id': x['name'], 'error': '%s is outside the screen (%d, %d, %d × %d on %d × %d)' % (
                 x['name'], x['left'], x['top'], x['width'], x['height'], m['width'], m['height'])})
         for b in x.get('bindings') or []:
-            if known_tags and b['tag'].strip('"') not in known_tags:
+            if b['tag'].strip('"') in (known_tags or ()):
+                continue
+            if not hmi_tables:
+                res.append({'id': x['name'], 'warning': True, 'unverified': True,
+                            'error': '%s: %s → tag %s cannot be verified: the export has no HMI tag tables' % (x['name'], b['property'], b['tag'])})
+            elif known_tags:
                 res.append({'id': x['name'], 'warning': True,
                             'error': '%s: %s → tag %s is neither an HMI tag nor a PLC tag of the export' % (x['name'], b['property'], b['tag'])})
     return res

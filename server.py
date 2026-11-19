@@ -529,6 +529,14 @@ def _known_tags(root, project, hmi_name=None):
     return res
 
 
+def _hmi_tables(root, project):
+    """Does the newest HMI export hold any HMI tag table? (A partial export has none: unknown tags cannot be judged then.)"""
+    try:
+        return bool(hmi.tags(hmi.find(root, project, None, None)[2]))
+    except KeyError:
+        return False
+
+
 def _hmi_after(m, name):
     """The screen model from the API (trust boundary), named after the edit's screen; wrong shape = 400."""
     try:
@@ -736,7 +744,7 @@ def _non_f(root, project):
 
 def _validate(after, f=False, root=None, project=None, before=None):
     if 'items' in after:                              # an HMI screen
-        return hmi.validate(after, set(_known_tags(root, project)) if root else None)
+        return hmi.validate(after, set(_known_tags(root, project)) if root else None, _hmi_tables(root, project) if root else True)
     if fbd.is_fbd(after):
         return fbd.validate(after, f, _non_f(root, project) if f and root else (), before)
     return model.validate(after)

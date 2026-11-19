@@ -790,7 +790,7 @@ async function showEdit(uid, error) {
   m.innerHTML =
     `<div class="edit-head">` +
     editTitleHtml(u) +
-    `<div class="header"><span class="state s-${esc(u.state)}">${esc(u.state)}</span>${d.errors.length ? `<span class="mark-errors">⚠ ${errorCount(d.errors.length, language)}</span> · ` : ''} round <b>${esc(u.round)}</b> · author <b>${esc(u.author)}</b> · ${esc(u.time.replace('T', ' '))}</div>` +
+    `<div class="header"><span class="state s-${esc(u.state)}">${esc(u.state)}</span>${d.errors.filter(c => !c.unverified).length ? `<span class="mark-errors">⚠ ${errorCount(d.errors.filter(c => !c.unverified).length, language)}</span> · ` : ''} round <b>${esc(u.round)}</b> · author <b>${esc(u.author)}</b> · ${esc(u.time.replace('T', ' '))}</div>` +
     (u.note ? `<p class="comment">${esc(u.note)}</p>` : '') +
     (u.group ? `<div class="group-of">Member ${u.group.order} of group <a href="?group=${enc(u.group.id)}">${esc(u.group.id)}${u.group.name ? ' · ' + esc(u.group.name) : ''}</a> — states, Upload and Check of the whole change are on the group page</div>` : '') +
     `<div class="buttons">` +
@@ -811,7 +811,8 @@ async function showEdit(uid, error) {
     (u.state === 'Signed' ? `<details class="disapprove"><summary>Record a check by hand…</summary>` +
       `<textarea id="hand-note" rows="2" placeholder="what you checked, e.g. written as two networks NW 5 + NW 6 with the same logic"></textarea>` +
       `<button id="hand-match">✓ Match</button> <button id="hand-mismatch">✗ Mismatch</button></details>` : '') + `</div>` +
-    (d.errors.length ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.length})</b> — open it in the editor and fix:<br>${d.errors.map(c => esc(c.error)).join('<br>')}</div>` : '') +
+    (d.errors.some(c => !c.unverified) ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.filter(c => !c.unverified).length})</b> — open it in the editor and fix:<br>${d.errors.filter(c => !c.unverified).map(c => esc(c.error)).join('<br>')}</div>` : '') +
+    (d.errors.some(c => c.unverified) ? `<div class="hint">${d.errors.filter(c => c.unverified).map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
     d.warnings.map(v => `<div class="warning">⚠ ${esc(v)}</div>`).join('') +
     (d.texts ? `<details class="panel" open><summary>Network text <span class="sum">title / comment, set after the import</span></summary><div class="body texts">` +
@@ -1329,7 +1330,7 @@ function hmiDiffHtml(u, d) {
 const hmiMarks = c => Object.fromEntries([...c.added.map(n => [n, 'added']), ...Object.keys(c.changed).map(n => [n, 'changed']), ...c.deleted.map(n => [n, 'deleted'])]);
 
 // ---------- H2: screen designer ----------
-const he = {u: null, after: null, before: null, hist: [], redo: [], sel: null, insert: null, changed: false, tags: [], frame: null};
+const he = {u: null, after: null, before: null, hist: [], redo: [], sel: null, insert: null, changed: false, tags: [], tables: true, frame: null};
 const HMI_DEFAULTS = {
   Text: {width: 200, height: 40, text: 'Text', colors: {foreColor: '#1b2430'}, font: {size: 18}},
   Rectangle: {width: 160, height: 96, colors: {backColor: '#dde3ea', borderColor: '#8a9199'}},
@@ -1352,6 +1353,7 @@ async function hmiEditor(d) {
   const [scr, cat] = await Promise.all([api(`/api/hmi/screens?project=${enc(u.project)}`).catch(() => ({tags: [], screens: [], hmi: u.hmi})),
                                         api(`/api/catalog?project=${enc(u.project)}`).catch(() => ({tags: []}))]);
   he.tags = [...new Set(scr.tags.map(t => t.name).concat(cat.tags.map(t => t.name)))];
+  he.tables = scr.tags.length > 0;
   $('operands').innerHTML = he.tags.map(t => `<option value="${esc(t)}">`).join('');
   $('info').textContent = `${u.project} · editing ${u.id} · ${u.new ? 'new screen' : 'HMI export ' + u.before.export_ts}`;
   document.title = `BetterTIA Editor — edit ${u.id}`;
@@ -1418,7 +1420,8 @@ function hmiErrors() {
     if (x.left < 0 || x.top < 0 || x.left + x.width > s.width || x.top + x.height > s.height)
       res.push({id: x.name, error: `${x.name} is outside the screen (${x.left}, ${x.top}, ${x.width} × ${x.height} on ${s.width} × ${s.height})`});
     for (const b of x.bindings || [])
-      if (known.size && !known.has(b.tag.replace(/^"|"$/g, ''))) res.push({id: x.name, warning: true, error: `${x.name}: ${b.property} → tag ${b.tag} is neither an HMI tag nor a PLC tag of the export`});
+      if (!he.tables && !known.has(b.tag.replace(/^"|"$/g, ''))) res.push({id: x.name, warning: true, unverified: true, error: `${x.name}: ${b.property} → tag ${b.tag} cannot be verified: the export has no HMI tag tables`});
+      else if (known.size && !known.has(b.tag.replace(/^"|"$/g, ''))) res.push({id: x.name, warning: true, error: `${x.name}: ${b.property} → tag ${b.tag} is neither an HMI tag nor a PLC tag of the export`});
   }
   return res;
 }
@@ -1662,7 +1665,7 @@ async function save() {
                                               : {title_after: $('ed-title').value, comment_after: $('ed-comment').value};
     const r = await api(`/api/edits/${enc(ed.u.id)}/after`, 'POST', Object.assign({after: ed.after}, texts));
     ed.changed = false;
-    mode(`Saved ${new Date().toLocaleTimeString()}` + (r.errors.length ? ` — ${errorCount(r.errors.length, LANG())} (flagged in the edit header)` : ' — no errors'), true);
+    mode(`Saved ${new Date().toLocaleTimeString()}` + (r.errors.some(c => !c.unverified) ? ` — ${errorCount(r.errors.filter(c => !c.unverified).length, LANG())} (flagged in the edit header)` : ' — no errors'), true);
   } catch (e) { mode('⚠ Save failed: ' + e.message); }
 }
 function mode(text, message) {
