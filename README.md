@@ -158,12 +158,13 @@ client does not start in this folder. The home page shows the same blocks to cop
 
 Tools: `list_projects`, `list_blocks`, `get_network`, `list_edits`, `get_edit`, `propose_edit`, `update_edit`,
 `delete_edit`, `cleanup_edits`, `create_group`, `update_group`, `list_groups`, `get_group`, `run_check`, `get_procedure`, `tia_status`, `take_snapshot`, `get_job`, `get_changelog`, `list_snapshots`,
-`compare_snapshots`, `compare_exports`, `list_screens`, `get_screen`, `list_presets`, `propose_screen`, `screenshot` — see
+`compare_snapshots`, `compare_exports`, `list_screens`, `get_screen`, `list_presets`, `propose_screen`, `set_state`, `screenshot` — see
 [docs/reference.md](docs/reference.md#mcp-server).
 
 **Why the agent cannot approve or upload:** a change of a PLC program ends up on a real machine. The agent proposes
-and checks; moving a change through `Approved → Signed → …`, Upload and Check stay buttons a person clicks after
-reviewing the diff.
+and checks; Upload stays a button a person clicks after reviewing the diff. `set_state` moves an edit or a group one step
+along the chain, but only on a person's instruction (the editor keeps its transition rules); `run_check` with a match moves
+a Signed edit to Checked by itself.
 
 ## Tests
 

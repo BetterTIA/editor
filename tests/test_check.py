@@ -135,9 +135,10 @@ class TestExportCheck(unittest.TestCase):
         code, txt = self.cli('--edit', uid, '--export-ts', TS1)
         self.assertEqual(code, 0, txt)
         self.assertTrue(txt.startswith('MATCH'))
-        # after a match Signed -> Checked passes
-        s, u = self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})
-        self.assertEqual((s, u['state']), (200, 'Checked'))
+        # the first match (3) moved Signed -> Checked by itself; a later mismatch locks the way forward, not the state
+        s, u = self.req('GET', '/api/edits/%s' % uid)
+        u = u['edit']
+        self.assertEqual((s, u['state'], u['history'][-1]['by']), (200, 'Checked', 'export check'))
         self.assertEqual([k['match'] for k in u['checks']], [False, False, True, True])
         # errors: nonexistent export / edit -> exit 2
         self.assertEqual(self.cli('--edit', uid, '--export-ts', '20991231-000000')[0], 2)

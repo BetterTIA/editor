@@ -651,7 +651,7 @@ def _check_hmi(root, data, uid, u, body):
     note = 'export = proposal (%d items)' % len(u['after']['items']) if match else 'MISMATCH: %s' % '; '.join(diffs[:20])
     if t == u['before'].get('export_ts'):
         note += ' · note: the export is the same as before the change'
-    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note})
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note}, advance=True)
     return {'match': match, 'export_ts': t, 'nw_export': None, 'note': note, 'diffs': diffs, 'edit': u}
 
 
@@ -665,7 +665,9 @@ def api_edit_state(data, uid, body):
     return u
 
 
-def api_add_check(data, body):
+def api_add_check(data, body, advance=False):
+    """Record a check. advance=True (the export checks of the editor itself): a match moves a Signed edit to Checked, which the
+    state machine allows only after a matching check; any other state stays."""
     if not isinstance(body, dict) or not isinstance(body.get('match'), bool):
         raise state.StateError('check: {edit_id, match: true|false, export_ts, note}', 400)
     with state.LOCK:
@@ -673,6 +675,8 @@ def api_add_check(data, body):
         u.setdefault('checks', []).append({
             'time': state.now(), 'match': body['match'], 'export_ts': str(body.get('export_ts') or ''),
             'note': str(body.get('note') or '')})
+        if advance and body['match'] and u['state'] == 'Signed':
+            state.change_state(u, 'Checked', 'export check')
         state.save(data, project, s)
     return u
 
@@ -882,7 +886,7 @@ def _check_interface(root, data, uid, u, body):
             if match else 'MISMATCH: %s' % '; '.join(diffs))
     if t == u['before'].get('export_ts'):
         note += ' · note: the export is the same as before the change'
-    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note})
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note}, advance=True)
     return {'match': match, 'export_ts': t, 'nw_export': None, 'note': note, 'diffs': diffs, 'edit': u}
 
 
@@ -924,7 +928,7 @@ def api_check_export(root, data, uid, body):
     if t == u['before'].get('export_ts'):
         notes.append('note: the export is the same as before the change')
     note = ('export = proposal' if match else 'MISMATCH: %s' % '; '.join(diffs)) + ''.join(' · ' + x for x in notes)
-    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note})
+    u = api_add_check(data, {'edit_id': uid, 'match': match, 'export_ts': t, 'note': note}, advance=True)
     return {'match': match, 'export_ts': t, 'nw_export': n['nw'] if n else None, 'note': note,
             'diffs': diffs, 'edit': u}
 
@@ -1161,7 +1165,7 @@ def _write(data, uid, write, new_state, by):
     with state.LOCK:
         project, s, u = state.find(data, uid)
         u.setdefault('writes', []).append(write)
-        if new_state:
+        if new_state and u['state'] != new_state:         # a match of the check already moved it to Checked
             try:
                 state.change_state(u, new_state, by)
             except state.StateError as e:

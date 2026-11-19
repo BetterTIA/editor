@@ -18,7 +18,7 @@ import server
 MCP_SERVER = os.path.join(ROOT, 'mcp_server.py')
 TOOLS = {'list_projects', 'list_blocks', 'get_network', 'list_edits', 'get_edit', 'propose_edit', 'update_edit', 'delete_edit', 'cleanup_edits', 'list_groups', 'update_group',
          'create_group', 'get_group', 'run_check', 'get_procedure', 'tia_status', 'take_snapshot', 'get_job', 'screenshot', 'get_changelog',
-         'list_snapshots', 'compare_snapshots', 'compare_exports', 'list_screens', 'get_screen', 'list_presets', 'propose_screen'}
+         'list_snapshots', 'compare_snapshots', 'compare_exports', 'list_screens', 'get_screen', 'list_presets', 'propose_screen', 'set_state'}
 OPS = [{'type': 'insert', 'place': {'r': 0, 'k': 3}, 'element': 'NO'},
        {'type': 'change', 'id': 'n1', 'values': {'operand': '"Fuse_OK"'}}]
 
@@ -93,6 +93,15 @@ class TestMcpServer(unittest.TestCase):
         c = self.call(k, 'run_check', id=uid)
         self.assertEqual((c['match'], c['export_ts'], c['state']), (True, TS1, 'Proposal'))
         self.assertEqual(len(self.call(k, 'list_blocks', project=PROJECT, export_ts=TS1)['blocks']), 1)
+        # set_state keeps the editor's rules; a matching run_check moves Signed to Checked by itself
+        self.assertTrue(k.call_raw('set_state', {'id': uid, 'state': 'Signed'}).get('isError'))             # one step only
+        self.assertTrue(k.call_raw('set_state', {'id': uid, 'group': 'G001', 'state': 'Approved'}).get('isError'))
+        self.assertEqual(self.call(k, 'set_state', id=uid, state='Approved')['state'], 'Approved')
+        self.assertEqual(self.call(k, 'set_state', id=uid, state='Signed', by='Honza')['state'], 'Signed')
+        c = self.call(k, 'run_check', id=uid)
+        self.assertEqual((c['match'], c['state']), (True, 'Checked'))
+        self.assertEqual(self.call(k, 'set_state', id=uid, state='Uploaded')['state'], 'Uploaded')
+        self.assertEqual(self.call(k, 'run_check', id=uid)['state'], 'Uploaded')                           # only Signed moves
 
         job = self.call(k, 'take_snapshot', project=PROJECT)                # no Writer configured -> the job fails
         for _ in range(50):

@@ -138,7 +138,8 @@ are filled in by the server from the current export — never entered by hand (w
 States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 - **Signed** = written to the TIA project (by hand, or by **Upload**); free transition.
 - **Checked** = the export after writing matches the proposal; allowed only when the **last** check is a match
-  (a later mismatch locks it again), otherwise **409**. `checked_allowed` in `GET /api/edits/<id>`.
+  (a later mismatch locks it again), otherwise **409**. `checked_allowed` in `GET /api/edits/<id>`. An export check of the
+  editor itself (`check-export`, group check, Reader check) that matches moves a **Signed** edit to Checked (`by: "export check"`).
 - **Uploaded** / **Tested** are set by the user.
 - Only one step forward or back at a time.
 - **Disapproved** is a side state: from Proposal or Approved with `{state: "Disapproved", reason}` (the reason is
@@ -779,6 +780,7 @@ error of the editor = `isError: true` with its message):
 | `list_groups` | `project?`, `card?`, `state?` | `GET /api/groups` |
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
+| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
 | `get_procedure` | `id` | the TIA steps as markdown text |
 | `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` = `POST /api/tia/status`, checks TIA Portal again) |
 | `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |
@@ -796,10 +798,10 @@ A typical flow: `list_projects` → `list_blocks` → `get_network` → change `
 elements, new ids for new ones) → `propose_edit` → fix `errors` with `update_edit` → a person approves it in the
 editor → after writing to TIA Portal and a new export, `run_check`.
 
-**Not offered on purpose:** changing the state of an edit (Approved, Signed, Checked, Uploaded, Tested), Upload and
-Check. Approving a change of a PLC program and writing it into the project are human decisions with consequences on
-a real machine; the agent prepares and checks, a person reviews the diff and clicks. The HTTP API keeps those
-endpoints for the UI.
+**Not offered on purpose:** Upload. Writing a change of a PLC program into the project is a human decision with
+consequences on a real machine; a person reviews the diff and clicks. `set_state` changes the state only on a person's
+instruction (Uploaded and Tested only on an explicit one: they say the change reached the PLC and was tested on it);
+Checked comes by itself from a matching `run_check` (also the editor's own export checks) when the edit is Signed.
 
 ## Reading state and taking a screenshot (scripts, AI assistants)
 ```

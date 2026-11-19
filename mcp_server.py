@@ -9,8 +9,9 @@ On `initialize` it registers the client on the editor (POST /api/ai/clients, the
 "AI: connected: <client name>"), refreshes that every --heartbeat seconds and on every tool call, and unregisters
 when stdin closes. No state of its own: everything goes through the editor's HTTP API.
 
-State changes (Approved, Signed, …) and Upload / Check are deliberately not offered as tools: approving a change and
-writing it into the PLC project are human steps, done in the editor's UI.
+Approving a change and writing it into the PLC project (Upload) are human steps in the editor's UI and are not tools.
+`set_state` moves an edit or a group one step along the chain on a person's instruction; a match of `run_check` moves a
+Signed edit to Checked by itself.
 """
 import argparse
 import base64
@@ -171,6 +172,15 @@ def get_group(e, a):
 def run_check(e, a):
     r = e.req('POST', '/api/edits/%s/check-export' % q(a['id']), {'export_ts': a['export_ts']} if a.get('export_ts') else {})
     return {k: r.get(k) for k in ('match', 'export_ts', 'nw_export', 'note', 'diffs')} | {'state': r['edit']['state']}
+
+
+def set_state(e, a, client=None):
+    if bool(a.get('id')) == bool(a.get('group')):
+        raise ToolError('give exactly one of id (an edit) or group')
+    body = {k: a[k] for k in ('state', 'by', 'reason') if a.get(k)}
+    body.setdefault('by', (client or {}).get('name') or 'AI')
+    r = e.req('POST', '/api/%s/%s/state' % (('edits', q(a['id'])) if a.get('id') else ('groups', q(a['group']))), body)
+    return {'id': a.get('id') or a['group'], 'state': r.get('state')}
 
 
 def get_procedure(e, a):
@@ -353,6 +363,13 @@ TOOLS = [
                   'all members (markdown).', _schema({'id': S}, ['id']), get_group),
     ('run_check', 'Compare an export (newest or given) with the edit\'s "after" model and record the check.',
      _schema({'id': S, 'export_ts': TS}, ['id']), run_check),
+    ('set_state', 'Move an edit (id) or a whole group (group) one step along Proposal → Approved → Signed → Checked → Uploaded → '
+                  'Tested, one step back, or to Disapproved (needs a reason). The editor keeps its transition rules (Checked '
+                  'only after a matching run_check, which also sets Checked by itself). Use it only on a person\'s instruction; '
+                  'Uploaded and Tested only on an explicit instruction — they say the change reached the PLC / was tested on it.',
+     _schema({'id': S, 'group': S, 'state': {'type': 'string', 'enum': ALL_STATES}, 'by': {'type': 'string',
+              'description': 'who decided (default: the client name)'}, 'reason': {'type': 'string',
+              'description': 'required for Disapproved'}}, ['state']), set_state),
     ('get_procedure', 'Step-by-step instructions for making the edit by hand in TIA Portal (markdown).',
      _schema({'id': S}, ['id']), get_procedure),
     ('tia_status', 'TIA Portal, Writer, Reader and AI client status; refresh=true checks TIA Portal again.',
@@ -415,7 +432,7 @@ def call_tool(e, name, a, client=None):
         missing = [k for k in t[2]['required'] if a.get(k) in (None, '')]
         if missing:
             raise ToolError('missing argument(s): %s' % ', '.join(missing))
-        v = t[3](e, a, client) if t[3] in (propose_edit, propose_screen) else t[3](e, a)
+        v = t[3](e, a, client) if t[3] in (propose_edit, propose_screen, set_state) else t[3](e, a)
     except ToolError as err:
         return {'content': [{'type': 'text', 'text': str(err)}], 'isError': True}
     if isinstance(v, list):
