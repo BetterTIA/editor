@@ -126,6 +126,7 @@ class TestProjects(unittest.TestCase):
         self.start()
         s, st = self.req('POST', '/api/tia/status', {})
         self.assertEqual((st['tia'], st['project'], st['portalId']), ('attached', PROJECT, 4711))
+        self.assertEqual(self.calls('get_project_status')[0]['arguments']['projectPath'], st['project_path'])
         self.assertEqual(self.calls('Connect')[0]['arguments'], {'portalId': 4711})
         self.assertEqual(st['reader_export_root'], self.root)
         self.assertEqual(self.req('GET', '/api/tia/status')[1]['tia'], 'attached')      # cached
@@ -184,6 +185,7 @@ class TestProjects(unittest.TestCase):
         self.assertGreater(ex[1]['arguments']['offset'], 0)                  # nextOffset of chunk 1
         self.assertEqual(ex[1]['arguments']['runId'], ts)
         self.assertNotIn('pathPrefixes', ex[0]['arguments'])
+        self.assertTrue(all(c['arguments']['projectPath'] == 'C:\TIA\Demo_Line\Demo_Line.ap21' for c in ex))  # source tia: GetProject path
         p = self.req('GET', '/api/projects')[1]['projects'][0]
         self.assertEqual((p['last_snapshot'], p['tia']), (ts, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}))
         self.assertEqual(self.req('GET', '/api/block?project=%s&block=FB_Conveyor' % PROJECT)[1]['ts'], ts)

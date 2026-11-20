@@ -1520,6 +1520,7 @@ def api_check(root, data, uid, mcp, timeout=300):
     project, s, u = state.find(data, uid)
     if u['state'] != 'Signed':
         raise state.StateError('Check only in state Signed (now %s)' % u['state'])
+    ppath = next((p.get('project_path') for p in state.registry(data) if p['name'] == project), None)
     if u.get('kind') == 'hmi_screen':                 # the screens of the HMI into a new folder of the export root
         tool, arg, index = 'export_hmi_to_folder', {'hmiName': u['hmi'], 'include': ['screens'], 'pathPrefixes': ['Screens']}, \
             lambda: set(hmi.exports(root, project))
@@ -1534,6 +1535,8 @@ def api_check(root, data, uid, mcp, timeout=300):
             parts = parts[:2] + [x for x in tia['groupPath'].split('/') if x] + [u['block']]
         tool, arg, index = 'export_to_folder', {'pathPrefixes': ['/'.join(parts)], 'include': ['blocks'], 'formats': ['documents'],
                                                 'plcName': tia.get('plcName') or parts[0]}, lambda: set(project_index(root, project))
+    if ppath:
+        arg['projectPath'] = ppath
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
     steps, k_res = [], None
@@ -1696,7 +1699,7 @@ def api_tia_status(mcp, portal_id=None, timeout=STATUS_TIMEOUT):
     if res['reader'] == 'configured' and res['tia'] == 'attached':
         try:
             with _client(mcp, 'reader', timeout) as r:
-                r.call('get_project_status', {})
+                r.call('get_project_status', {'projectPath': res['project_path']} if res['project_path'] else {})
         except mcp_client.MCPError as e:
             res['reader'] = 'error: %s' % str(e)[:300]
     return res
@@ -1917,6 +1920,7 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
         pid = {'portalId': portal} if portal else {}
         pr = project_info(step('GetProject', lambda: w.call('GetProject', pid)))
         job['tia_project'] = pr['name']
+        ppath = path or pr['path']
         if not plcs:
             t = step('GetProjectTree', lambda: w.call('GetProjectTree', pid))
             tree, plcs = tree + t, plc_list(t)            # each answer parsed alone: concatenated JSON is not JSON
@@ -1938,8 +1942,8 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
         with _client(mcp, 'reader', timeout) as r:
             arg = {'include': ['blocks', 'types', 'tagTables'], 'formats': ['documents'], 'plcName': plc['plcName'],
                    'timeBudgetSeconds': 120}
-            if source == 'ap21' and path:
-                arg['projectPath'] = path
+            if ppath:                                 # several TIA instances: the Reader must know which project
+                arg['projectPath'] = ppath
             folders = []
 
             def chunk(j):                             # progress of the job while it runs
@@ -1961,7 +1965,7 @@ def snapshot(job, root, data, mcp, timeout, name=None, source='tia', path=None, 
             if re.search(r'hmi|unified', tree, re.I):
                 try:
                     _reader_export(r, dict({'runId': folder[2], 'offset': 0, 'timeBudgetSeconds': 120},
-                                           **({'projectPath': path} if source == 'ap21' and path else {})), steps,
+                                           **({'projectPath': ppath} if ppath else {})), steps,
                                    lambda j: job.update(hmi_chunks=job.get('hmi_chunks', 0) + 1), 'export_hmi_to_folder')
                 except (mcp_client.MCPError, SnapshotError) as e:   # the PLC snapshot stands; the HMI is a warning
                     job.setdefault('warnings', []).append('HMI export failed (the PLC snapshot is complete): %s' % str(e)[:500])
