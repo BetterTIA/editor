@@ -21,7 +21,8 @@ import s7dcl
 import server
 
 FAKE = os.path.join(ROOT, 'tests', 'fake_mcp.py')
-TIA = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
+# these tests follow the documents way (the default prefers SimaticML where it writes the change, round 11)
+TIA = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1', 'upload': 'documents'}
 
 
 class TestUploadCheck(unittest.TestCase):

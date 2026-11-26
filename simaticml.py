@@ -848,8 +848,10 @@ def edit_block(text, edits, find_network, call_params=None):
         flg = flgnet_node(u['after'], call_params)
         cus.insert(u['after_nw'], _new_cu(ids, ind, nl, u['language'], flg, u['title'], u.get('comment') or '', cult))
         notes.append('%s: new %s network inserted as NW %d' % (u['id'], u['language'], u['after_nw'] + 1))
+    inserted = [x['after_nw'] for x in edits if x.get('kind') == 'new_network']
     for u in [u for u in edits if u.get('kind', 'network') == 'network']:
-        n = find_network(nets(), u)
+        # D11: u['nw'] counts the export before the insertions; an untitled network is found by its number after them
+        n = find_network(nets(), dict(u, nw=u['nw'] + sum(1 for a in inserted if a < u['nw'])))
         if n is None:
             raise XmlError('network %d ("%s") is not in the exported block' % (u['nw'], u.get('title') or ''))
         language = 'FBD' if u['after'].get('language') == 'FBD' else 'LAD'
