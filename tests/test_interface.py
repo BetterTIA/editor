@@ -147,7 +147,7 @@ class TestInterfaceApi(unittest.TestCase):
                       d['warnings'])
 
     def test_upload_writes_the_members(self):
-        self.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'})
+        self.req('PUT', '/api/state/tia?project=' + PROJECT, {'softwarePath': 'PLC_1', 'plcName': 'PLC_1', 'upload': 'documents'})
         _, u = self.propose()
         self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
         s, r = self.req('POST', '/api/edits/%s/upload' % u['id'], {})
@@ -157,7 +157,10 @@ class TestInterfaceApi(unittest.TestCase):
         self.assertIn('Add interface members in .s7dcl', [x['step'] for x in r['write']['steps']])
         with open(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.s7dcl'), encoding='utf-8-sig') as f:
             t = f.read()
-        self.assertIn('        Jam_Detected : Bool;\n        Jam_Count : Int := 0;\n    END_VAR', t.replace('\r\n', '\n'))
+        self.assertIn('        Jam_Detected : Bool;\n        { S7_MLC := "MLC_btia1" }\n        Jam_Count : Int := 0;\n    END_VAR',
+                      t.replace('\r\n', '\n'))                                 # D1: the comment as TIA exports it
+        self.assertEqual(s7dcl.load_s7res(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.s7res'))['MLC_btia1'],
+                         {'en-US': 'jam counter'})
         s, r = self.req('POST', '/api/edits/%s/check' % u['id'], {})      # the fake Reader exports what was imported
         self.assertTrue(r['match'], r)
         self.assertEqual(r['edit']['state'], 'Checked')

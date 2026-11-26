@@ -15,7 +15,8 @@ from tests.common import ROOT, SAMPLES, PROJECT, TS0
 import server
 
 FAKE = os.path.join(ROOT, 'tests', 'fake_mcp.py')
-TIA = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1'}
+# these tests follow the documents way (the default prefers SimaticML where it writes the change, round 11)
+TIA = {'softwarePath': 'PLC_1', 'plcName': 'PLC_1', 'upload': 'documents'}
 OPS = [{'type': 'insert', 'place': {'r': 0, 'k': 3}, 'element': 'NO'},
        {'type': 'change', 'id': 'n1', 'values': {'operand': '"Fuse_OK"'}}]
 

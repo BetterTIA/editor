@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Upload route and the documents way (round 11)
+- Upload goes through SimaticML by default whenever it writes every member: a documents import re-reads every network of
+  the block and fails on what TIA does not parse back (D16: an absolute DB address in another network; D1: a repeated MLC
+  id). A block whose SimaticML preparation fails falls back to documents before anything of it is written. TIA setting
+  `upload`: `auto` (default) | `xml` | `documents` (the old default); UI *Upload through* select.
+- A nested OR (a branch that opens inside a parallel branch and closes where it closes) goes through SimaticML, or is
+  refused before any write when SimaticML cannot write the edit (D15).
+- Documents: rungs in the order of TIA's own export — branches right after their main rung (D17a); `title_after` /
+  `comment_after` written into the `.s7dcl` / `.s7res` (D17b); interface member comments as `{ S7_MLC }` + `.s7res`
+  record (D1); a `.s7res` with a repeated MLC id is not imported, SimaticML is offered (D1).
+- Several new networks of one block in a group are inserted from the highest `after_nw` down, so a valid group is not
+  refused as "the networks moved" (D11).
+
 - LAD rule "box inside a parallel branch of contacts" no longer fires for a box that TIA already holds there unchanged (same element in the "before" model); new or changed boxes are still reported (D9).
 - HMI export: a rich-text line break (`<br/>`, `<br />`, `<br>`) is read as `\n` instead of being dropped; the export check also reads `<br/>` in a proposal as `\n`, so a proposal text with line breaks checks equal (D7b).
 - Signed → Checked by hand with a reason, also when the last automatic check is a MISMATCH: `POST /api/edits/<id>/state {state: "Checked", reason}`, MCP `set_state(..., reason)`, UI "Record a check by hand… → ✓ Match → Checked"; recorded as a matching check `by hand: <reason>` and in the history (D20c).

@@ -130,11 +130,47 @@ def _node(u):
     return u[3:] if u.startswith('op:') else 'wire#' + u
 
 
+def rung_order(rungs):
+    """D17a: rungs in the order of TIA's own export — the import refuses a branch rung far from its main rung ("does not
+    comply with the rules for LAD"). Depth first from each main rung (power rail, no closing wire; in model order): after a
+    rung, the rungs closing into its wires (left to right), then the rungs opening from its wires (right to left), each
+    followed by its own branches. Reproduces the rung order of all 112 distinct multi-rung LAD networks of a real V21
+    export set. -> the rungs reordered."""
+    wired = [[x[5:] for x in r['path'] if x.startswith('wire#')] for r in rungs]
+    out, done = [], set()
+
+    def visit(i):
+        done.add(i)
+        out.append(rungs[i])
+        nxt = [j for w in wired[i] for j, r in enumerate(rungs) if r.get('to') == w]
+        nxt += [j for w in reversed(wired[i]) for j, r in enumerate(rungs) if r.get('from') == w]
+        for j in nxt:
+            if j not in done:
+                visit(j)
+    roots = [i for i, r in enumerate(rungs) if r.get('from') == 'powerrail' and not r.get('to')]
+    for i in roots + list(range(len(rungs))):
+        if i not in done:
+            visit(i)
+    return out
+
+
+def nested_or(m):
+    """D15: a branch that opens on one rung and closes on a wire that rung does not pass (e.g. A ∧ (B ∨ C∧D) ∨ E: the
+    branch from inside B's rung closes where B's rung closes) -> text, else None. The documents import refuses it ("Creation
+    of OR gate failed with END_RUNG"); SimaticML writes it as nested O."""
+    path = {x[5:]: r for r in m.get('rungs') or [] for x in r['path'] if x.startswith('wire#')}
+    for r in m.get('rungs') or []:
+        a, b = r.get('from'), r.get('to')
+        if a in path and b and 'wire#' + b not in path[a]['path']:
+            return 'nested OR (a branch from wire#%s closes at wire#%s, outside the rung it opens on)' % (a, b)
+    return None
+
+
 def lad_text(m, known=None):
     """LAD model {elements, rungs} -> network body text (lines between NETWORK and END_NETWORK); known = templates()."""
     P = {p['id']: p for p in m['elements']}
     rows = []
-    for r in m.get('rungs') or [{'from': 'powerrail', 'path': [], 'to': None}]:
+    for r in rung_order(m.get('rungs') or [{'from': 'powerrail', 'path': [], 'to': None}]):
         rows.append(IND + 'RUNG ' + _node(r['from']))
         for it in r['path']:
             if it.startswith('wire#'):
@@ -298,13 +334,21 @@ SECTION_KEYWORD = {'Input': 'VAR_INPUT', 'Output': 'VAR_OUTPUT', 'InOut': 'VAR_I
 
 
 def member_line(m):
-    """{name, type, initial?} -> `name : Type := initial;` (comments are not written: their document form is unverified)."""
+    """{name, type, initial?} -> `name : Type := initial;` (a comment is the `{ S7_MLC := … }` line above, see add_members)."""
     return '%s : %s%s;' % (m['name'], m['type'], ' := %s' % m['initial'] if m.get('initial') else '')
 
 
-def add_members(text_s7dcl, section, members):
+def _member_rows(members, ind, mlc):
+    """Member lines; a member with an id in mlc ({name: MLC id}) gets `{ S7_MLC := "id" }` above it, as TIA exports it."""
+    return ''.join(('%s{ S7_MLC := "%s" }\n' % (ind, mlc[x['name']]) if x['name'] in mlc else '') + ind + member_line(x) + '\n'
+                   for x in members)
+
+
+def add_members(text_s7dcl, section, members, mlc=None):
     """Appends member lines at the end of the interface section (before its END_VAR); a missing section is created after
-    the last END_VAR of the interface (or right after the block header line). Networks are not touched. CRLF is kept."""
+    the last END_VAR of the interface (or right after the block header line). Networks are not touched. CRLF is kept.
+    mlc = {member name: MLC id} of the comments (their texts go into the .s7res, update_records)."""
+    mlc = mlc or {}
     if section not in SECTION_KEYWORD:
         raise WriteError('unknown interface section %r' % (section,))
     crlf = '\r\n' in text_s7dcl
@@ -318,7 +362,7 @@ def add_members(text_s7dcl, section, members):
         if not end:
             raise WriteError('%s without END_VAR' % SECTION_KEYWORD[section])
         ind = opening.group(1) + '    '
-        t = t[:end.start()] + ''.join(ind + member_line(x) + '\n' for x in members) + t[end.start():]
+        t = t[:end.start()] + _member_rows(members, ind, mlc) + t[end.start():]
     else:
         ends = list(re.compile(r'^([ \t]*)END_VAR[ \t]*\n', re.M).finditer(t, 0, head_end))
         if ends:
@@ -328,6 +372,75 @@ def add_members(text_s7dcl, section, members):
             if not hl:
                 raise WriteError('block header not found')
             at, ind = hl.end(), '    '
-        t = t[:at] + ind + SECTION_KEYWORD[section] + '\n' + ''.join(ind + '    ' + member_line(x) + '\n' for x in members) \
+        t = t[:at] + ind + SECTION_KEYWORD[section] + '\n' + _member_rows(members, ind + '    ', mlc) \
             + ind + 'END_VAR\n' + t[at:]
+    return t.replace('\n', '\r\n') if crlf else t
+
+
+# ---------- texts in the .s7res (D17b network title / comment, D1 member comment) ----------
+
+def res_ids(text_s7res):
+    return re.findall(r'^[ \t]*-[ \t]+id:[ \t]*(\S+)[ \t]*\r?$', text_s7res, re.M)
+
+
+def repeated_ids(text_s7res):
+    """D1: MLC ids the .s7res lists more than once — TIA does not import such documents back ("corrupted data")."""
+    ids = res_ids(text_s7res)
+    return sorted({i for i in ids if ids.count(i) > 1})
+
+
+def new_ids(text_s7dcl, text_s7res, n):
+    """n MLC ids neither file uses."""
+    taken = set(res_ids(text_s7res)) | set(re.findall(r'"(MLC_[^"]*)"', text_s7dcl))
+    return [x for x in ('MLC_btia%d' % i for i in range(1, n + len(taken) + 2)) if x not in taken][:n]
+
+
+def set_network_texts(text_s7dcl, nw, texts, ids):
+    """Title / comment of network nw (1 = first): texts = {'S7_NetworkTitle' | 'S7_NetworkComment': text}, each under a new
+    id of `ids` in the network's attribute block (keys sorted, as TIA exports them). -> (new .s7dcl, {id: text} for
+    update_records, replaced ids)."""
+    crlf = '\r\n' in text_s7dcl
+    t = text_s7dcl.replace('\r\n', '\n')
+    nets = list(re.finditer(r'(?:^([ \t]*)\{([^{}]*)\}[ \t]*\n)?^([ \t]*)NETWORK[ \t]*\n', t, re.M))
+    if not 1 <= nw <= len(nets):
+        raise WriteError('network %d is not in the block (networks in block: %d)' % (nw, len(nets)))
+    m = nets[nw - 1]
+    a, ids, new, old = s7dcl.attributes(m.group(2) or ''), iter(ids), {}, []
+    for k, v in sorted(texts.items()):
+        if a.get(k, '').startswith('MLC_'):
+            old.append(a[k])
+        a[k] = next(ids)
+        new[a[k]] = v
+    ind = m.group(1) if m.group(1) is not None else m.group(3)
+    items = ['%s := "%s"' % (k, a[k]) for k in sorted(a)]
+    brace = ind + '{\n' + ';\n'.join(ind + '    ' + x for x in items) + '\n' + ind + '}\n'
+    t = t[:m.start()] + brace + t[m.start(3):]
+    return (t.replace('\n', '\r\n') if crlf else t), new, old
+
+
+def _record(ident, text, lang, ind):
+    lines = text.replace('\r\n', '\n').split('\n')
+    if len(lines) == 1:
+        return "%s- id: %s\n%s  %s: '%s'\n" % (ind, ident, ind, lang, text.replace("'", "''"))
+    return '%s- id: %s\n%s  %s: |-\n' % (ind, ident, ind, lang) + ''.join(('%s    %s' % (ind, x)).rstrip() + '\n' for x in lines)
+
+
+def update_records(text_s7res, text_s7dcl, new, drop=()):
+    """The .s7res for an edited .s7dcl: the records of `drop` ids the .s7dcl no longer uses removed; a record for each id of
+    new ({id: text}) in the language of the file (else en-US), placed where the order of the uses (s7dcl._mlc_uses) puts it
+    — the .s7res lists one record per use in that order. CRLF is kept."""
+    crlf = '\r\n' in text_s7res
+    t = text_s7res.replace('\r\n', '\n') if text_s7res.strip() else 'MultiLingualTexts:\n'
+    head, *recs = re.split(r'(?m)^(?=[ \t]*-[ \t]+id:)', t)
+    recs = [r if r.endswith('\n') else r + '\n' for r in recs]
+    rid = lambda r: res_ids(r)[0]
+    used = [i for _, i in s7dcl._mlc_uses(text_s7dcl)]
+    recs = [r for r in recs if rid(r) not in drop or rid(r) in used]
+    lang = re.search(r'^[ \t]+([a-z]{2}-[A-Z]{2}):', t, re.M)
+    ind = re.match(r'[ \t]*', recs[0]).group(0) if recs else '  '
+    for ident in sorted(new, key=used.index):
+        later = set(used[used.index(ident) + 1:])
+        at = next((j for j, r in enumerate(recs) if rid(r) in later), len(recs))
+        recs.insert(at, _record(ident, new[ident], lang.group(1) if lang else 'en-US', ind))
+    t = (head if head.endswith('\n') else head + '\n') + ''.join(recs)
     return t.replace('\n', '\r\n') if crlf else t

@@ -254,7 +254,7 @@ has in the exported block).
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
 | POST | `/api/groups/<id>/state` | `{state, by, reason?, version?}` — one version for every member moved to Uploaded; every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
-| POST | `/api/groups/<id>/upload` | `{compile?: false}`. Every member Approved and none F (else 409). **Before any write** the group is refused (409, nothing written) when Upload cannot make one of its members — an HMI change the Writer has no tool for, or what the SimaticML way does not write when the group goes that way. Then the PLC members in one Upload (see [Upload and Check](#upload-and-check): one export, one import and one compile per block, members applied interface → new networks → changes; all through SimaticML when one member needs it — an OB, GRAPH, a new network, `upload: xml`, `compile: false` — `via: "SimaticML"`); all PLC members succeed or fail together (a failure restores every block already imported). The HMI members come last, one by one, only when the PLC part succeeded → `{ok, results: [{edit, ok, message}], view}`. Every member that was written is recorded (Signed) — nothing raises after the first write |
+| POST | `/api/groups/<id>/upload` | `{compile?: false}`. Every member Approved and none F (else 409). **Before any write** the group is refused (409, nothing written) when Upload cannot make one of its members — an HMI change the Writer has no tool for, or what the SimaticML way does not write when the group goes that way. Then the PLC members in one Upload (see [Upload and Check](#upload-and-check): one export, one import and one compile per block, members applied interface → new networks → changes; through SimaticML by default when it writes every member, always when one member needs it — an OB, GRAPH, a new network, a nested OR, `upload: xml`, `compile: false` — `via: "SimaticML"`); all PLC members succeed or fail together (a failure restores every block already imported). The HMI members come last, one by one, only when the PLC part succeeded → `{ok, results: [{edit, ok, message}], view}`. Every member that was written is recorded (Signed) — nothing raises after the first write |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
 | DELETE | `/api/groups/<id>[?edits=1][&force=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — an edit already written (Signed and later) only with `force=1`, else 409 → `{project, group, deleted}` |
 | DELETE | `/api/edits/<id>` | deletes an edit (editor state only, TIA is not touched): Proposal, Approved, Disapproved; an edit already written (Signed and later) only with `?force=1`, else 409; a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
@@ -447,10 +447,18 @@ a "Show as LAD" button (`&lad=1`). & = series, >=1 = parallel branches, negated 
 
 ## Upload and Check
 **Upload** — `POST /api/edits/<id>/upload` (only **Approved** and a non-F change; F-block, another state, missing
-`tia`, another Upload/Check running → **409**). Where the documents import is known to break the block, Upload goes
-**through SimaticML** instead (see [Upload through SimaticML](#upload-through-simaticml)): an **OB** (documents lose the
-event class, number and parameters), a block with **GRAPH** — itself or a static multi-instance whose type is exported
-as SimaticML with `<ProgrammingLanguage>GRAPH` — and a **new network** (the documents import splits it). A **group member** is
+`tia`, another Upload/Check running → **409**). **Route (round 11):** Upload goes **through SimaticML** (see [Upload
+through SimaticML](#upload-through-simaticml)) whenever SimaticML writes every member — a documents import re-reads every
+network of the block and fails on what TIA does not parse back from its own export (D16: an absolute DB address `DBx.DBW`
+in another network; D1: a repeated MLC id in the `.s7res`), while SimaticML keeps the other networks byte for byte. A block
+whose SimaticML preparation (export, *Edit the SimaticML*) fails goes through documents instead, before anything of it is
+written (the message says "through documents: <block> (SimaticML: <why>)"). Documents are used when SimaticML cannot write
+a member (what it refuses, see below) or with the TIA setting `upload: "documents"`. SimaticML is the only way — refused
+before any write when it cannot write a member — for an **OB** (documents lose the event class, number and parameters), a
+block with **GRAPH** — itself or a static multi-instance whose type is exported as SimaticML with
+`<ProgrammingLanguage>GRAPH` —, a **new network** (the documents import splits it) and a **nested OR** (D15: a branch that
+opens inside a parallel branch and closes where that branch closes, e.g. A ∧ (B ∨ C∧D) ∨ E — "Creation of OR gate failed
+with END_RUNG"). `GET /api/edits/<id>` shows `upload_via`. A **group member** is
 uploaded only with its group (409 otherwise — one member alone leaves the block half changed). When an Upload fails,
 the documents of the attempt are kept in `<--data>\<project>\upload-failed\<id>-<time>\` (the message names the folder).
 When the export check cannot find a change (e.g. TIA took a new network only as two networks), a person records the
@@ -468,7 +476,12 @@ TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
    fresh snapshot), the text after replacement is parsed again and must match the proposal by content (otherwise stop
    before import); `S7_Templates` texts are copied from the exported block, a template the block has no example of is
    written only for a comparison or TON (other instructions: stop, make it by hand); a title / comment-only edit leaves
-   the network text as it is; `.s7res` is not changed, BOM and CRLF are kept,
+   the network text as it is; BOM and CRLF are kept. Rungs are written in the order of TIA's own export (D17a: after a
+   main rung the branches closing into it left to right, then those opening from it right to left, each with its own
+   branches — TIA refuses a branch far from its rung, "does not comply with the rules for LAD"). `title_after` /
+   `comment_after` go into the documents (D17b: a new MLC id in the network's attribute block and its record in the
+   `.s7res`, in the order of the uses; the old record goes when nothing uses it). Documents whose `.s7res` repeats an MLC
+   id are not imported (D1: TIA refuses its own export as corrupted data) — the message offers SimaticML,
 5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (the text is stored in the record as `preview`),
 6. `SaveProject {}` — once per Upload, right before the first import (D4: a TIA crash during the import or the compile
    then loses nothing of before the Upload; turned off by the TIA setting `save: "no"`, UI *save the project before
@@ -483,7 +496,9 @@ TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 
 Several edits of one block (a group) are applied to **one** export of the block and imported and compiled **once** (P2:
 interface → new networks → changes; the blocks in the order of their first member, so a block with an interface edit
-comes before the blocks that call it; HMI members after all blocks). Only the network texts need a compile each
+comes before the blocks that call it; HMI members after all blocks). New networks of one block are inserted from the
+highest `after_nw` down (D11: every `after_nw` counts the networks of the same export, so an insertion never moves the
+place of one still to come); two after the same network keep the group order. Only the network texts need a compile each
 (`SetNetworkText` imports the block again).
 
 **After a failure past the first import** (E8 / D10b): first `GetPortals` — when the Writer died or the TIA Portal
@@ -504,7 +519,8 @@ documents way needs a compiled block for the network texts); no `CompileBlock`, 
 **Signed** with the history note "not compiled — waiting for Rebuild all"; the message says NOT COMPILED. The Check can
 export the block only after Rebuild all in TIA.
 
-Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network,
+Other kinds: step 4 is *Add interface members in .s7dcl* (interface; a member comment as `{ S7_MLC := "…" }` above the
+member and its record in the `.s7res`, as TIA exports it) or *Insert the network in .s7dcl* (new network,
 only through `insert_network` when called directly — Upload sends a new network through SimaticML);
 a network edit with `title_after` / `comment_after` get a step `SetNetworkText` after the compile, followed by a second `CompileBlock` (it imports the block again; see
 [Edit kinds and groups](#edit-kinds-and-groups)).
@@ -530,8 +546,9 @@ python check.py --check U003      # CHECKED|MISMATCH|ERROR <id> · state … · 
 **Lock:** one Upload / Check at a time (the second one gets 409). Timeout of one tool call: `--mcp-timeout` (300 s).
 
 ### Upload through SimaticML
-Used for an OB, a GRAPH block or a block with a GRAPH multi-instance, a new network, and for every Upload when the TIA
-settings have `"upload": "xml"` (UI: *every Upload through SimaticML (XML)*; default: only where documents fail). A group
+Used by default whenever it writes every member (`upload_via: "SimaticML (preferred: …)"`, a block it cannot prepare
+falls back to documents); always for an OB, a GRAPH block or a block with a GRAPH multi-instance, a new network, a nested
+OR, and for every Upload when the TIA settings have `"upload": "xml"` (UI *Upload through: always SimaticML*). A group
 goes this way as a whole when any member needs it. `GET /api/edits/<id>` shows `upload_via: "SimaticML (<reason>)"`.
 Steps, one import per block (a group: interface → new networks → changes, applied to one export):
 1. `GetPortals` → `Connect` → `ResolveObjectPath` (unless `tia.groupPath`), as above,
@@ -572,7 +589,8 @@ OutRange, TOF, NBox, FBD & / X, a literal array index, `Version` on IEC member t
 **TIA settings per project** (in `state.json` next to `edits`): `"tia": {"softwarePath": "PLC_1", "plcName": "PLC_1",
 "groupPath": "Conveyor", "upload": "xml", "save": "no"}` (`groupPath`, `upload` and `save` — no SaveProject before the
 first import — are optional — otherwise the Writer resolves the
-group, and Upload goes through documents except where they fail). Set through
+group, and Upload goes through SimaticML where it can, documents otherwise; `upload`: `auto` (default), `xml` = always
+SimaticML, `documents` = documents except where they fail — OB, GRAPH, new network, nested OR). Set through
 `PUT /api/state/tia?project=` or in the UI in the collapsible TIA settings on a change. Without it the buttons are greyed
 out and the API returns 409 with a hint.
 
