@@ -9,7 +9,8 @@ Writer: Connect, ResolveObjectPath, ExportBlocksAsDocuments (copies .s7dcl/.s7re
 ImportFromDocuments (copies the documents to --state and appends a line to <state>\\imports.jsonl), SetNetworkText
 (title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res), SetHmiItemAttribute,
 SetHmiDynamizationTag, SetHmiItemDynamization, CreateHmiScreenItems, DeleteHmiScreenItems (a screen of the HMI sample
-copied to <state>\\HMI_1\\Screens and changed there; dry runs answer like the Writer, --fail-hmi NAME refuses item NAME), GetHmiTags,
+copied to <state>\\HMI_1\\Screens and changed there; answers in the Writer's JSON shape, a tag must be an HMI tag of the
+sample; --fail-hmi NAME refuses item NAME, --fail-hmi-write NAME skips it only when written), GetHmiTags,
 RenameHmiScreen / SetHmiTagPlcTags (only answer), CompileHmi.
 Writer, SimaticML (E4/E5/E7): ExportXmlBlock copies <block>.xml (from --state after an import, else from --xml-sample) and
 answers {contentHash}; ImportXmlBlock checks expectedContentHash against the current file ('state_changed'), copies the file
@@ -238,8 +239,7 @@ def writer(a, nm, arg):
     if nm in ('CreateHmiScreenItems', 'DeleteHmiScreenItems'):
         return hmi_batch(a, nm, arg)
     if nm == 'GetHmiTags':
-        with open(os.path.join(SAMPLE_HMI, 'Tags', 'Default tag table.json'), encoding='utf-8') as f:
-            return json.dumps({'tags': [dict(t, table='Default tag table') for t in json.load(f)['tags']]})
+        return json.dumps({'tags': [dict(t, table='Default tag table') for t in _hmi_tags()]})
     if nm in ('RenameHmiScreen', 'SetHmiTagPlcTags'):
         return '%s%s (fake): %s' % ('dry run: ' if arg.get('dryRun', True) else '', nm, json.dumps(arg))
     if nm == 'CompileHmi':
@@ -322,6 +322,17 @@ def _screen(a, arg):
         return p, json.load(f)
 
 
+def _hmi_tags():
+    with open(os.path.join(SAMPLE_HMI, 'Tags', 'Default tag table.json'), encoding='utf-8') as f:
+        return json.load(f)['tags']
+
+
+def _no_tag(tag):
+    """The Writer's check of a dynamization tag: None, or why it cannot be used."""
+    root = tag.split('.')[0]
+    return None if root.lower() in {t['name'].lower() for t in _hmi_tags()} else "no HMI tag named '%s' exists" % root
+
+
 def _save(p, s):
     with open(p, 'w', encoding='utf-8') as f:
         json.dump(s, f, ensure_ascii=False, indent=2)
@@ -344,14 +355,18 @@ def set_hmi(a, nm, arg):
         raise ValueError('screen %s has no item %s' % (arg['screenName'], arg['itemName']))
     if a.fail_hmi and arg.get('itemName') == a.fail_hmi:
         raise ValueError("'%s': Hmi%s has no property '%s' (fake)" % (a.fail_hmi, x.get('$type', ''), arg.get('attribute') or arg.get('property')))
+    warnings = []
     if nm == 'SetHmiDynamizationTag':
         d = next((d for d in x.get('dynamizations') or [] if d.get('propertyName') == arg['property']), None)
         if d is None:
             raise ValueError('%s has no tag dynamization of %s' % (arg['itemName'], arg['property']))
         k, old, new, target = 'tag', d['tag'], arg['tag'], d
+        warnings = ['No HMI tag named %s exists.' % arg['tag'].split('.')[0]] if _no_tag(arg['tag']) else []   # the Writer only warns
     elif nm == 'SetHmiItemDynamization':
         dyn = arg['dynamization']
         dyn = json.loads(dyn) if dyn.startswith('{') else {'tag': dyn}
+        if _no_tag(dyn['tag']):                                         # the Writer refuses it, dry run included
+            raise ValueError("'%s': %s." % (arg['itemName'], _no_tag(dyn['tag'])))
         ds = x.setdefault('dynamizations', [])
         old = next((d for d in ds if d.get('propertyName') == arg['property']), None)
         k, new, target = 'dynamization ' + arg['property'], {'$type': 'TagDynamization', 'propertyName': arg['property'],
@@ -366,13 +381,14 @@ def set_hmi(a, nm, arg):
         k, v = path[-1][:1].lower() + path[-1][1:], arg['value']
         old = target.get(k)
         new = _mtext(v, arg.get('culture')) if k == 'text' else _value(v)
-    if arg.get('dryRun', True):
-        return json.dumps({'dryRun': True, 'applied': False, 'changeCount': 1, 'message': 'dry run: %s.%s %s -> %s' % (
-            arg.get('itemName') or arg['screenName'], k, json.dumps(old), json.dumps(new))})
-    if target is not None:
-        target[k] = new
-    _save(p, s)
-    return '%s.%s set (fake)' % (arg.get('itemName') or arg['screenName'], k)
+    dry = arg.get('dryRun', True)
+    if not dry:
+        if target is not None:
+            target[k] = new
+        _save(p, s)
+    return json.dumps({'dryRun': dry, 'applied': not dry, 'changeCount': 1, 'changes': [{'object': arg['screenName'], 'where': '%s.%s' % (
+        arg.get('itemName') or 'screen', k), 'old': json.dumps(old), 'new': json.dumps(new)}], 'usages': [], 'warnings': warnings,
+        'message': '%s1 change(s) (fake)' % ('Dry run: ' if dry else '')})     # ResponseHmiEdit, as the Writer answers
 
 
 def hmi_batch(a, nm, arg):
@@ -387,8 +403,15 @@ def hmi_batch(a, nm, arg):
         keep = [i for i in s['screenItems'] if i['name'] not in [r['name'] for r in res if r['ok']]]
     else:
         items = json.loads(arg['items'])
-        res = [{'name': i['name'], 'ok': i['name'].lower() not in names and i['name'] != a.fail_hmi,
-                'message': '' if i['name'].lower() not in names else 'the name is taken'} for i in items]
+        dry = arg.get('dryRun', True)
+
+        def why(i):
+            tags = [_no_tag(v if isinstance(v, str) else v['tag']) for v in (i.get('dynamizations') or {}).values()]
+            return ('the name is taken' if i['name'].lower() in names else
+                    'refused by the check (fake)' if i['name'] == a.fail_hmi else
+                    next((t for t in tags if t), '') or
+                    ('TIA Portal refused it (fake) - the item was removed again' if not dry and i['name'] == a.fail_hmi_write else ''))
+        res = [{'name': i['name'], 'ok': not why(i), 'message': why(i)} for i in items]
         made = []
         for i, r in zip(items, res):
             if r['ok']:
@@ -540,6 +563,7 @@ def main():
     ap.add_argument('--ob-renumbered', action='store_true', help='Writer: GetBlockInfo reports another OB number after an edit')
     ap.add_argument('--fail-save', action='store_true', help='Writer: SaveProject fails')
     ap.add_argument('--fail-hmi', help='Writer: every HMI call on this screen item is refused (dry run included)')
+    ap.add_argument('--fail-hmi-write', help='Writer: CreateHmiScreenItems skips this item only when it writes (dry run passes)')
     ap.add_argument('--crash-compile', action='store_true', help='Writer: CompileBlock of an edited block takes TIA down')
     ap.add_argument('--fail-compile-always', action='store_true',
                     help='Writer: CompileBlock of any imported block fails (also the original) until CompileSoftware')

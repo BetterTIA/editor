@@ -797,11 +797,11 @@ dynamizations: {<property>: tag | {tag, indirect: true}}, events: {<event>: scri
 `SetHmiItemAttribute {itemName ('' = the screen), attribute (Left, Top, Width, Height, Visible, Text with culture en-US,
 BackColor/ForeColor/… as "#AARRGGBB", Font.Size/Font.Name/Font.Weight), value}`, `SetHmiItemDynamization {property,
 dynamization}` (a new binding) or `SetHmiDynamizationTag {property, tag}` (another tag of a binding). A text keeps its
-`
-` — the Writer (≥ `6bdf962`) turns it into Unified markup. **Every call runs first as a dry run** (`dryRun: true`);
-the first one the Writer refuses (an error, or a batch item that failed its check) stops the Upload with nothing
+`\n` — the Writer (≥ `6bdf962`) turns it into Unified markup. **Every call runs first as a dry run** (`dryRun: true`);
+the first one the Writer refuses (an error, a batch item that failed its check, or a warning that a tag is no HMI
+tag — `SetHmiDynamizationTag` only warns) stops the Upload with nothing
 written (recorded, state stays Approved). Then the same calls with `dryRun: false` → Signed; a failure after the first
-real call says how many were written (the screen is half changed in TIA, not saved). In a group the dry runs of every
+real call says how many were written (a batch call that skipped an item counts as written) (the screen is half changed in TIA, not saved). In a group the dry runs of every
 HMI member run **before the PLC part writes anything** (refused → 409 "refused before any write"); the HMI members
 are written after the PLC members as before. **What it cannot do — 409 with the reason:** a new screen, a changed
 type, a removed binding, color or font (Openness has no "unset"), a deleted item with `;` in its name; those edits are

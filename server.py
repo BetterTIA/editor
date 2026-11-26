@@ -685,8 +685,9 @@ def _hmi_label(u, nm, arg):
                          ', '.join(i['name'] for i in json.loads(arg.get('items') or '[]')))
 
 
-def _hmi_result(r):
-    """A Writer answer of an HMI tool -> r; raises when a batch reports failed items (a dry run or a write that skipped some)."""
+def _hmi_result(r, dry=False):
+    """A Writer answer of an HMI tool -> r; raises when a batch reports failed items (a dry run or a write that skipped some)
+    and, in a dry run, when the Writer warns that a tag does not exist (SetHmiDynamizationTag only warns, then writes it)."""
     try:
         j = {k.lower(): v for k, v in json.loads(r).items()}
     except (TypeError, ValueError, AttributeError):
@@ -695,6 +696,9 @@ def _hmi_result(r):
         bad = ['%s: %s' % (i.get('name') or i.get('Name'), i.get('message') or i.get('Message'))
                for i in j.get('items') or [] if isinstance(i, dict) and not (i.get('ok', i.get('Ok', True)))]
         raise s7dcl_write.WriteError('the Writer refused %s' % ('; '.join(bad) or r[:600]))
+    missing = [w for w in j.get('warnings') or [] if dry and re.search(r'no hmi tag named', str(w), re.I)]
+    if missing:
+        raise s7dcl_write.WriteError('the Writer refused: %s' % '; '.join(missing))
     return r
 
 
@@ -702,7 +706,7 @@ def _hmi_dry_run(k, steps, u, calls):
     """D5: every Writer call of the edit as a dry run (checked against the Openness types and the project) — raises at the
     first one the Writer refuses, before anything is written."""
     for nm, arg in calls:
-        _step(steps, 'dry run ' + _hmi_label(u, nm, arg), lambda: _hmi_result(k.call(nm, dict(arg, dryRun=True))))
+        _step(steps, 'dry run ' + _hmi_label(u, nm, arg), lambda: _hmi_result(k.call(nm, dict(arg, dryRun=True)), dry=True))
 
 
 def _hmi_dry_runs(mcp, timeout, portal, hmis):
@@ -736,8 +740,11 @@ def _upload_hmi(data, uid, u, mcp, timeout, portal):
                 _connect(k, steps, portal)
                 _hmi_dry_run(k, steps, u, calls)
                 for nm, arg in calls:
-                    _step(steps, _hmi_label(u, nm, arg), lambda: _hmi_result(k.call(nm, arg)))
-                    done.append(nm)
+                    def write():
+                        r = k.call(nm, arg)
+                        done.append(nm)               # the call went through: a batch with failed items wrote the others
+                        return _hmi_result(r)
+                    _step(steps, _hmi_label(u, nm, arg), write)
             ok, message = True, ('%d Writer call(s) written to screen %s of %s — compile the HMI and save the project in TIA '
                                  '(the Writer does not call SaveProject)' % (len(calls), u['screen'], u['hmi']))
         except Exception as e:                        # whatever stops it must be recorded

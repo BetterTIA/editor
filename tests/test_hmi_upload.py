@@ -99,6 +99,40 @@ class TestHmiUpload(unittest.TestCase):
         self.assertIn('the Writer refused Btn_Reset', r['message'])
         self.assertNotIn(False, [c['arguments'].get('dryRun', True) for c in self.calls(True)])
 
+    def test_batch_that_skips_an_item_when_written_counts_as_written(self):
+        """The dry run passes, the real CreateHmiScreenItems skips one item (TIA refused it) and writes the other: the
+        message must not say "nothing was written" — the Delete and the Create did write."""
+        self.start('--fail-hmi-write', 'Btn_Other')
+
+        def two_new(x, after):
+            self.big_change(x, after)
+            after['items'].append(dict(after['items'][-1], name='Btn_Other', left=680, bindings=[]))
+        uid = self.screen_edit(two_new)
+        self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid, {})
+        self.assertFalse(r['ok'], r)
+        self.assertIn('the Writer refused Btn_Other', r['message'])
+        self.assertIn('2 of 7 Writer call(s) were written', r['message'])
+        self.assertNotIn('nothing was written', r['message'])
+        self.assertEqual(self.req('GET', '/api/edits/' + uid)[1]['edit']['state'], 'Approved')
+
+    def unknown_tag(self, change):
+        self.start()
+        uid = self.screen_edit(change)
+        self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Approved'})
+        s, r = self.req('POST', '/api/edits/%s/upload' % uid, {})
+        self.assertFalse(r['ok'], r)
+        self.assertIn('no hmi tag named', r['message'].lower())
+        self.assertIn('nothing was written', r['message'])
+        self.assertNotIn(False, [c['arguments'].get('dryRun', True) for c in self.calls(True)])
+
+    def test_unknown_tag_of_a_changed_binding_refused_at_dry_run(self):
+        """SetHmiDynamizationTag only warns about a tag that is no HMI tag, and would write it."""
+        self.unknown_tag(lambda x, a: x['IO_Pieces']['bindings'][0].update(tag='No_Such_Tag'))
+
+    def test_unknown_tag_of_a_new_binding_refused_at_dry_run(self):
+        self.unknown_tag(lambda x, a: x['IO_Speed']['bindings'].append({'property': 'Visible', 'tag': 'No_Such_Tag'}))
+
     def test_group_dry_run_refused_before_the_plc_write(self):
         self.start('--fail-hmi', 'IO_Speed')
         net, scr = self.proposal(approve=False), self.hmi_edit()
