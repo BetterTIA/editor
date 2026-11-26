@@ -672,9 +672,19 @@ def api_edit_state(data, uid, body):
         raise state.StateError('the body must be a JSON object', 400)
     with state.LOCK:
         project, s, u = state.find(data, uid)
-        state.change_state(u, body.get('state'), body.get('by'), body.get('reason'))
+        state.change_state(u, body.get('state'), body.get('by'), body.get('reason'),
+                           state.version_for(s, body.get('state'), body.get('version')))
+        _keep_version(s, [u])
         state.save(data, project, s)
     return u
+
+
+def _keep_version(s, moved):
+    """The version a move forward to Uploaded recorded becomes the project's current version (base of the next proposal)."""
+    v = next((u['history'][-1]['version'] for u in moved if u['history'][-1]['state'] == 'Uploaded'
+              and u['history'][-1].get('version')), None)
+    if v:
+        s['version'] = v
 
 
 def api_add_check(data, body, advance=False):
@@ -800,6 +810,7 @@ def api_edit_detail(data, uid, width=0, root=None):
                                      'back by itself; check what was written to the project.' % u['state'])
     following, previous = state.transitions(u)
     res.update({'edit': u, 'next': following, 'previous': previous, 'checked_allowed': state.checked_allowed(u),
+                'versions': state.next_versions(s) if following == 'Uploaded' else None,
                 'errors': _validate(u['after'], u.get('f'), root, u['project'], _before(u)) if 'after' in u else []})
     return res
 
@@ -2162,7 +2173,9 @@ def api_changelog(root, data, project, jobs=None, since=None, until=None, edit_s
         for i, h in enumerate(hist):
             if i:                                     # the first entry is the proposal itself
                 add(h.get('time'), 'state', '%s → %s' % (hist[i - 1]['state'], h['state']) +
-                    (': ' + h['reason'] if h.get('reason') else ''), u, h.get('by'))
+                    (' ' + h['version'] if h.get('version') else '') + (': ' + h['reason'] if h.get('reason') else ''), u, h.get('by'))
+                if h.get('version'):
+                    items[-1]['version'] = h['version']
         reader_ts = set()
         for w in u.get('writes') or []:
             steps = w.get('steps') or []
@@ -2424,7 +2437,8 @@ def _group_view(project, gid, members):
          'state': state.DISAPPROVED if no else state.STATES[low],
          'f': any(u.get('f') for u in members), 'blocks': sorted({u['block'] for u in members}),
          'members': [{'id': u['id'], 'order': u['group']['order'], 'kind': u.get('kind', 'network'), 'block': u['block'],
-                      'where': procedure.header(u), 'state': u['state'], 'f': bool(u.get('f')), 'note': u.get('note') or ''}
+                      'where': procedure.header(u), 'state': u['state'], 'f': bool(u.get('f')), 'note': u.get('note') or '',
+                      'uploaded': u.get('uploaded'), 'tested': u.get('tested')}
                      for u in members]}
     g['next'] = state.STATES[low + 1] if low + 1 < len(state.STATES) and not no else None
     g['previous'] = 'Proposal' if no else state.STATES[low - 1] if low > 0 else None
@@ -2524,8 +2538,10 @@ def api_group_task(data, gid, body):
 
 
 def api_group(data, gid):
-    project, _, members = _group_members(data, gid)
-    return _group_view(project, gid, members)
+    project, s, members = _group_members(data, gid)
+    g = _group_view(project, gid, members)
+    g['versions'] = state.next_versions(s) if g['next'] == 'Uploaded' else None
+    return g
 
 
 DELETABLE = ('Proposal', 'Approved', state.DISAPPROVED)      # Signed and later = already in the TIA project (force needed)
@@ -2642,20 +2658,23 @@ def api_group_state(data, gid, body):
     target = body.get('state')
     with state.LOCK:
         project, s, members = _group_members(data, gid)
-        why = []
+        version = state.version_for(s, target, body.get('version'))       # one version for every member moved together
+        why, codes = [], set()
         for u in members:
             if u['state'] == target:
                 continue
             try:
-                state.change_state(json.loads(json.dumps(u)), target, body.get('by'), body.get('reason'))  # a trial on a copy
+                state.change_state(json.loads(json.dumps(u)), target, body.get('by'), body.get('reason'), version)  # a trial
             except state.StateError as e:
                 why.append('%s: %s' % (u['id'], e))
+                codes.add(e.code)
         if why:
             raise state.StateError('the group cannot move to %s — %s' % (target, '; '.join(why)),
-                                   400 if target not in state.ALL_STATES else 409)
-        for u in members:
-            if u['state'] != target:
-                state.change_state(u, target, body.get('by'), body.get('reason'))
+                                   400 if target not in state.ALL_STATES or codes == {400} else 409)
+        moved = [u for u in members if u['state'] != target]
+        for u in moved:
+            state.change_state(u, target, body.get('by'), body.get('reason'), version)
+        _keep_version(s, moved)
         state.save(data, project, s)
     return api_group(data, gid)
 

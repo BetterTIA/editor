@@ -53,9 +53,41 @@ class TestStateMachine(unittest.TestCase):
         state.change_state(u, 'Checked', 'TIAC_Reader')
         self.assertEqual((u['state'], u['history'][-1]['by']), ('Checked', 'TIAC_Reader'))
         self.assertEqual(state.transitions(u), ('Uploaded', 'Signed'))
-        state.change_state(u, 'Uploaded', 'user')
+        state.change_state(u, 'Uploaded', 'user', version='V1.0.0')
         u['checks'].append({'match': False})
         state.change_state(u, 'Checked', 'user')                      # a step back to Checked is not blocked by the check
+
+    def test_versions(self):
+        """P3: Uploaded records the project version, Tested its time and the same version; a step back drops the record."""
+        self.assertEqual([state.norm_version(v) for v in ('1.4.2', 'v1.4.2', ' V01.4.12 ')], ['V1.4.2', 'V1.4.2', 'V1.4.12'])
+        for bad in ('V1.4', '1.4.2.1', 'V1.x.2', '', None, 3):
+            with self.assertRaises(state.StateError) as e:
+                state.norm_version(bad)
+            self.assertEqual(e.exception.code, 400)
+        self.assertIsNone(state.next_versions({}))
+        self.assertEqual(state.next_versions({'version': 'V10.2.7'}), {'current': 'V10.2.7', 'patch': 'V10.2.8', 'minor': 'V10.3.0'})
+        self.assertEqual((state.version_for({}, 'Uploaded', None), state.version_for({'version': 'V1.0.0'}, 'Uploaded', '')),
+                         (None, None))                                       # Uploaded never guesses
+        self.assertEqual(state.version_for({'version': 'V1.0.0'}, 'Uploaded', '2.0.0'), 'V2.0.0')    # given wins
+        u = self.u('Checked', [{'match': True}])
+        with self.assertRaises(state.StateError) as e:
+            state.change_state(u, 'Uploaded', 'user')
+        self.assertEqual(e.exception.code, 400)
+        self.assertIn('needs the project version', str(e.exception))
+        self.assertEqual((u['state'], u['history']), ('Checked', []))                 # nothing changed
+        state.change_state(u, 'Uploaded', 'Honza', version='V1.2.3')
+        self.assertEqual((u['uploaded']['version'], u['uploaded']['by'], u['history'][-1]['version']), ('V1.2.3', 'Honza', 'V1.2.3'))
+        state.change_state(u, 'Tested', 'AI', version='V9.9.9')                  # the version of the Uploaded wins
+        self.assertEqual((u['tested']['version'], u['tested']['time']), ('V1.2.3', u['history'][-1]['time']))
+        state.change_state(u, 'Uploaded', 'user')                                # back: Tested no longer holds
+        self.assertEqual(('tested' in u, u['uploaded']['version'], 'version' in u['history'][-1]), (False, 'V1.2.3', False))
+        state.change_state(u, 'Checked', 'user')
+        self.assertNotIn('uploaded', u)
+        old = self.u('Uploaded')                                                  # uploaded before versions existed
+        with self.assertRaises(state.StateError):
+            state.change_state(old, 'Tested', 'user')
+        state.change_state(old, 'Tested', 'user', version='V3.0.0')
+        self.assertEqual(old['tested']['version'], 'V3.0.0')
 
     def test_disapproved_side_state(self):
         u = self.u('Approved')
@@ -200,6 +232,40 @@ class TestApiEdits(unittest.TestCase):
         self.assertEqual(self.req('POST', '/api/edits/U999/state', {'state': 'Approved'})[0], 404)
         _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
         self.assertEqual([h['state'] for h in st['edits'][0]['history']], ['Proposal', 'Approved', 'Signed', 'Checked'])
+
+    def test_versions_via_api(self):
+        """P3: version required / proposed at Uploaded, kept per project, shown in the detail and the changelog."""
+        def to_checked(uid):
+            for st in ('Approved', 'Signed'):
+                self.req('POST', '/api/edits/%s/state' % uid, {'state': st})
+            self.req('POST', '/api/check', {'edit_id': uid, 'match': True, 'export_ts': TS1})
+            self.assertEqual(self.req('POST', '/api/edits/%s/state' % uid, {'state': 'Checked'})[0], 200)
+        self.create()
+        self.create()
+        to_checked('U001')
+        _, d = self.req('GET', '/api/edits/U001')
+        self.assertEqual((d['next'], d['versions']), ('Uploaded', None))         # no version in the project yet
+        s, e = self.req('POST', '/api/edits/U001/state', {'state': 'Uploaded'})
+        self.assertEqual(s, 400)
+        self.assertIn('needs the project version', e['error'])
+        self.assertEqual(self.req('POST', '/api/edits/U001/state', {'state': 'Uploaded', 'version': 'V1.2'})[0], 400)
+        s, u = self.req('POST', '/api/edits/U001/state', {'state': 'Uploaded', 'version': '1.2.3', 'by': 'Honza'})
+        self.assertEqual((s, u['uploaded']['version']), (200, 'V1.2.3'))
+        to_checked('U002')
+        _, d = self.req('GET', '/api/edits/U002')
+        self.assertEqual(d['versions'], {'current': 'V1.2.3', 'patch': 'V1.2.4', 'minor': 'V1.3.0'})
+        self.assertEqual(self.req('POST', '/api/edits/U002/state', {'state': 'Uploaded'})[0], 400)   # never guessed
+        s, u = self.req('POST', '/api/edits/U002/state', {'state': 'Uploaded', 'version': d['versions']['patch']})
+        self.assertEqual((s, u['uploaded']['version']), (200, 'V1.2.4'))
+        s, u = self.req('POST', '/api/edits/U001/state', {'state': 'Tested'})
+        self.assertEqual((s, u['tested']['version'], u['tested']['time']), (200, 'V1.2.3', u['history'][-1]['time']))
+        _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
+        self.assertEqual(st['version'], 'V1.2.4')
+        _, log = self.req('GET', '/api/projects/%s/changelog' % PROJECT)
+        x = [x for x in log['items'] if x['kind'] == 'state' and x.get('version')]
+        self.assertEqual(sorted((i['edit'], i['summary'], i['version']) for i in x),
+                         [('U001', 'Checked → Uploaded V1.2.3', 'V1.2.3'), ('U001', 'Uploaded → Tested V1.2.3', 'V1.2.3'),
+                          ('U002', 'Checked → Uploaded V1.2.4', 'V1.2.4')])
 
     def test_disapproved_via_api(self):
         _, net = self.req('GET', '/api/network?project=%s&block=FB_Conveyor&nw=2' % PROJECT)
