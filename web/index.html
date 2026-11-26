@@ -842,7 +842,7 @@ async function showEdit(uid, error) {
     `<label>softwarePath <input id="tia-sp" value="${esc(d.tia?.softwarePath || '')}" placeholder="PLC_1"></label>` +
     `<label>plcName <input id="tia-plc" value="${esc(d.tia?.plcName || '')}" placeholder="PLC_1"></label>` +
     `<label>groupPath <input id="tia-grp" value="${esc(d.tia?.groupPath || '')}" placeholder="(Writer looks it up)"></label>` +
-    (d.tia_unsafe ? `<div class="warning"><b>⚠ Uploads are blocked:</b> ${esc(d.tia_unsafe)}. Fix the project in TIA first (Rebuild all, or close TIA without saving) — then Save here to confirm and allow Uploads again.</div>` : '') +
+    (d.tia_unsafe ? `<div class="warning"><b>⚠ Uploads are blocked:</b> ${esc(d.tia_unsafe)}. Fix the project in TIA first (Rebuild all, or close TIA without saving) — then confirm here. <button id="tia-fixed" class="small" title="you checked TIA: the block is consistent again (Rebuild all) or TIA was closed without saving — allows Uploads again">TIA is fixed — allow Uploads</button></div>` : '') +
     `<label title="default: SimaticML only where documents fail (OB, GRAPH, new network)"><input type="checkbox" id="tia-xml"${d.tia?.upload === 'xml' ? ' checked' : ''}> every Upload through SimaticML (XML)</label>` +
     `<label title="SaveProject right before the first import, so a TIA crash during the Upload loses nothing"><input type="checkbox" id="tia-presave"${d.tia?.save === 'no' ? '' : ' checked'}> save the project before Upload</label>` +
     `<button id="tia-save">Save</button></div></details>`;
@@ -875,6 +875,10 @@ async function showEdit(uid, error) {
                      upload: $('tia-xml').checked ? 'xml' : '', save: $('tia-presave').checked ? '' : 'no'});
       await showEdit(uid);
     } catch (e) { await showEdit(uid, 'TIA settings: ' + e.message); }
+  };
+  if ($('tia-fixed')) $('tia-fixed').onclick = async () => {
+    try { await api(`/api/state/tia/fixed?project=${enc(u.project)}`, 'POST', {by: 'user'}); await showEdit(uid); }
+    catch (e) { await showEdit(uid, 'TIA is fixed: ' + e.message); }
   };
   onDisapprove(`/api/edits/${enc(u.id)}/state`, x => showEdit(uid, x));
   // E9: the export check cannot find the change (e.g. TIA took a new network only as two) — a person records the result

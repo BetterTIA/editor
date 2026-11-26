@@ -292,8 +292,7 @@ def api_state(data, project=None):
 def api_state_tia(root, data, project, body):
     """PUT /api/state/tia?project= {softwarePath, plcName?, groupPath?, upload?, save?}: only the TIA settings change, under
     the lock (empty values are dropped, {} clears them). upload = 'xml' writes every Upload through SimaticML (default: only
-    where documents fail — OB, GRAPH, new network); save = 'no' turns off SaveProject before the first import (D4).
-    Saving the settings also confirms that TIA was fixed after an Upload that left the project unsafe to save."""
+    where documents fail — OB, GRAPH, new network); save = 'no' turns off SaveProject before the first import (D4)."""
     if not project_index(root, project):
         raise KeyError('unknown project')
     if not isinstance(body, dict) or set(body) - {'softwarePath', 'plcName', 'groupPath', 'upload', 'save'} \
@@ -307,9 +306,21 @@ def api_state_tia(root, data, project, body):
         s['tia'] = t
         if not t:
             del s['tia']
-        s.pop('unsafe_to_save', None)
         state.save(data, project, s)
     return {'project': project, 'tia': s.get('tia')}
+
+
+def api_state_tia_fixed(data, project, body):
+    """POST /api/state/tia/fixed?project= {by}: the operator confirms TIA was fixed (Rebuild all, or closed without saving)
+    after an Upload that left the project unsafe to save -> Uploads are allowed again; the confirmation is kept."""
+    with state.LOCK:
+        s = state.load(data, project)
+        if not s.get('unsafe_to_save'):
+            raise state.StateError('the project is not marked unsafe to save')
+        by = str(body.get('by') or '').strip() if isinstance(body, dict) else ''
+        s.setdefault('unsafe_fixed', []).append({'unsafe': s.pop('unsafe_to_save'), 'time': state.now(), 'by': by})
+        state.save(data, project, s)
+    return {'project': project, 'unsafe_to_save': None}
 
 
 def _after_model(after, language):
@@ -1303,11 +1314,12 @@ REBUILD_HINT = 'run Rebuild all in TIA (Compile → Software (rebuild all))'
 
 def _upload_guard(s):
     """A failed Upload that left the project unsafe to save blocks every further Upload (each one starts with SaveProject)
-    until a person confirms TIA is fixed — by saving the TIA settings of the project."""
+    until the operator confirms TIA is fixed (api_state_tia_fixed)."""
     if s.get('unsafe_to_save'):
-        raise state.StateError('Upload refused: an earlier Upload left the TIA project unsafe to save (%s). Fix it in TIA '
-                               'first (%s, or close TIA without saving), then press Save in the TIA settings of the project '
-                               '— that confirms TIA is fixed and allows Uploads again' % (s['unsafe_to_save'], REBUILD_HINT))
+        raise state.StateError('Upload refused: an earlier Upload left the TIA project unsafe to save (%s). Honza fixes it in '
+                               'TIA first (%s, or close TIA without saving), then confirms with "TIA is fixed" in the TIA '
+                               'settings of a change (POST /api/state/tia/fixed) — that allows Uploads again'
+                               % (s['unsafe_to_save'], REBUILD_HINT))
 
 
 def _upload_why(root, members, tia, compile):
@@ -1360,13 +1372,19 @@ def _reason(e):
 
 def _compiled(r, block=None):
     """CompileBlock / CompileSoftware answer -> raise when it reports errors (the Writer also raises, this covers an answer
-    without it) or when the Writer's warning 'still inconsistent after the compile' lists the block (any block when None)."""
-    i = (r or '').find('still inconsistent after the compile')
-    if i >= 0 and (block is None or block in r[i:i + 4000]):
-        raise s7dcl_write.WriteError('%s still inconsistent after the compile: %s' % (block or 'the block is', r[i:i + 600]))
+    without it) or when the Writer's 'still inconsistent after the compile' lists the block (any block when None): its full
+    stillInconsistent list when the answer is JSON (the message names only 15), else the message."""
     try:
         j = json.loads(r)
     except (TypeError, ValueError):
+        j = None
+    still = next((v for k, v in j.items() if k.lower() == 'stillinconsistent'), None) if isinstance(j, dict) else None
+    i = (r or '').find('still inconsistent after the compile')
+    names = ' | '.join(map(str, still)) if isinstance(still, list) else r[i:i + 4000] if i >= 0 else ''
+    # a whole name: FB1 is not FB12 (the list holds paths 'Group/FB1', ' (fail-safe)' appended)
+    if names and (block is None or re.search(r'(?<!\w)%s(?!\w)' % re.escape(block), names)):
+        raise s7dcl_write.WriteError('%s still inconsistent after the compile: %s' % (block or 'the block is', names[:600]))
+    if j is None:
         return r
     if isinstance(j, dict) and (str(j.get('state', '')).lower() == 'error' or (j.get('errorCount') or 0) > 0):
         raise s7dcl_write.WriteError('compiling failed: %s' % r[:600])
@@ -1435,6 +1453,11 @@ def api_upload_plc(root, data, members, mcp, timeout, portal, tia, why=None, com
                                    % (why, '; '.join(refused)))
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
+    try:                                              # an Upload that ended meanwhile may have marked the project unsafe
+        _upload_guard(state.load(data, project))
+    except Exception:
+        TIA_LOCK.release()
+        raise
     save, software = tia.get('save') != 'no', compile and not _has_f_blocks(root, project)
     steps, work, done, restore, bad, previews = [], tempfile.mkdtemp(prefix='tiac_upload_'), [], [], [], []
     saved, gone = False, None
@@ -1452,7 +1475,8 @@ def api_upload_plc(root, data, members, mcp, timeout, portal, tia, why=None, com
             if not software or k.p is None or k.p.poll() is not None:
                 raise
             try:
-                step(label + 'CompileSoftware', lambda: _compiled(k.call('CompileSoftware', {'softwarePath': sp}), block))
+                step(label + 'CompileSoftware', lambda: _compiled(k.call('CompileSoftware', {'softwarePath': sp},
+                                                                        max(timeout, OPEN_TIMEOUT)), block))
             except Exception as e2:
                 raise s7dcl_write.WriteError('CompileBlock: %s · then CompileSoftware: %s' % (_reason(e1)[:500], _reason(e2)[:500]))
     try:
@@ -1612,8 +1636,11 @@ def api_upload_plc(root, data, members, mcp, timeout, portal, tia, why=None, com
         if not ok and os.path.isdir(work) and os.listdir(work):   # E7: keep the files of a failed attempt
             keep = os.path.join(data, state.check_name(project), 'upload-failed',
                                 '%s-%s' % (order[0]['id'], state.now().replace(':', '').replace('-', '')))
-            shutil.copytree(work, keep, dirs_exist_ok=True)
-            message += ' · the files of this attempt are kept in %s' % keep
+            try:                                      # D8: a copy that fails (path too long, disk) must not skip the record
+                shutil.copytree(work, keep, dirs_exist_ok=True)
+                message += ' · the files of this attempt are kept in %s' % keep
+            except OSError as e:
+                message += ' · the files of this attempt could not be kept (%s)' % e
         write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
         if why:
             write['via'] = 'SimaticML'
@@ -2841,6 +2868,7 @@ ROUTES = [
     ('POST', r'/api/layout', lambda h: api_layout(h.root_for(h.body_project()), h._body())),
     ('GET', r'/api/state', lambda h: api_state(h.data, h.q.get('project'))),
     ('PUT', r'/api/state/tia', lambda h: api_state_tia(_project(h)[0], h.data, _project(h)[1], h._body())),
+    ('POST', r'/api/state/tia/fixed', lambda h: api_state_tia_fixed(h.data, _project(h)[1], h._body())),
     ('POST', r'/api/edits', lambda h: (api_edit_create(h.root_for(h.body_project()), h.data, h._body()), 201)),
     ('GET', E, lambda h, uid: api_edit_detail(h.data, uid, int(h.q.get('width', '0')), h.root_of(uid))),
     ('DELETE', E, lambda h, uid: api_edit_delete(h.data, uid, h.q.get('by'), h.q.get('force') in ('1', 'true'))),

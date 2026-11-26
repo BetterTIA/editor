@@ -156,7 +156,8 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/state[?project=]` | the whole `state.json` of a project; without a project `{projects: [{project, edits}]}` |
-| PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
+| PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?, upload?, save?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
+| POST | `/api/state/tia/fixed?project=` | `{by}` — the operator confirms TIA was fixed after an Upload that left the project unsafe to save; Uploads are allowed again (kept in `unsafe_fixed`); 409 when nothing is marked |
 | POST | `/api/edits` | new change `{project, round, block, nw, after, note}` → 201, state Proposal, author `editor` |
 | GET | `/api/edits/<id>[?width=]` | change + drawing of "after" with `diff` marks (`added` / `changed`, ghosts `x:<id>` = `deleted`), `next`, `previous`, `checked_allowed`, `errors`, `tia`, `warnings` |
 | POST | `/api/edits/<id>/state` | `{state, by, reason?, version?}` — one step forward/back; `version` for Uploaded (see States); Checked only after a matching check, otherwise 409 with the reason; Disapproved needs `reason` |
@@ -486,8 +487,10 @@ documents, or `Restore: ImportXmlBlock`) and is compiled as above (`Restore: Com
 A block that cannot be restored or does not compile afterwards → the message starts with **"BLOCK INCONSISTENT: <blocks>
 — DO NOT SAVE THE PROJECT; run Rebuild all in TIA"** (or close TIA without saving: the project was saved right before the
 import). The edits stay Approved. Both cases mark the project **unsafe to save** (`unsafe_to_save` in `state.json`,
-`tia_unsafe` in `GET /api/edits/<id>`): every further Upload is refused with 409 until a person saves the TIA settings
-of the project (that confirms TIA was fixed) — otherwise the next Upload's SaveProject would save the broken block.
+`tia_unsafe` in `GET /api/edits/<id>`): every further Upload is refused with 409 (checked again under the Upload lock) until
+the operator confirms that TIA was fixed — UI *TIA is fixed — allow Uploads* in the TIA settings, `POST
+/api/state/tia/fixed?project=` (saving the TIA settings does not confirm it) — otherwise the next Upload's SaveProject
+would save the broken block.
 
 **Upload without compile** (D12) — body `{"compile": false}` on `/api/edits/<id>/upload` or `/api/groups/<id>/upload`
 (UI *Upload without compile*): for blocks whose `CompileBlock` fails after any re-import. Always through SimaticML (the

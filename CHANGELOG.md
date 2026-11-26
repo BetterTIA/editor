@@ -14,7 +14,7 @@
   result says "TIA PORTAL MAY HAVE CRASHED" and nothing is restored.
 - When `CompileBlock` fails or leaves the block inconsistent, `CompileSoftware` follows — only for a PLC without
   F-blocks (Openness V21 has no rebuild all; what it does not fix needs Rebuild all in TIA). The same after a restore; a block that cannot be restored or does not compile is reported as
-  "BLOCK INCONSISTENT — DO NOT SAVE THE PROJECT", and further Uploads are refused until the TIA settings are saved again.
+  "BLOCK INCONSISTENT — DO NOT SAVE THE PROJECT", and further Uploads are refused until the operator confirms *TIA is fixed* (`POST /api/state/tia/fixed`).
 - Upload without compile (`{"compile": false}`, UI *Upload without compile*): through SimaticML, no compile, the edits go
   Signed "waiting for Rebuild all".
 - Documents Upload of a group: one export, one import and one compile per block (was one per member), and a restore of

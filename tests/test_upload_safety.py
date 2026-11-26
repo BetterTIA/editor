@@ -163,8 +163,13 @@ class TestUploadSafety(unittest.TestCase):
         s, e = self.req('POST', '/api/edits/%s/upload' % uid2)
         self.assertEqual(s, 409)
         self.assertIn('unsafe to save', e['error'])
-        self.req('PUT', '/api/state/tia?project=' + PROJECT, TIA)              # "TIA is fixed"
+        self.req('PUT', '/api/state/tia?project=' + PROJECT, TIA)              # saving the settings confirms nothing
+        self.assertIn('tia_unsafe', self.req('GET', '/api/edits/' + uid)[1])
+        self.assertEqual(self.req('POST', '/api/state/tia/fixed?project=' + PROJECT, {'by': 'user'})[0], 200)
         self.assertNotIn('tia_unsafe', self.req('GET', '/api/edits/' + uid)[1])
+        fixed = self.req('GET', '/api/state?project=' + PROJECT)[1]['unsafe_fixed']
+        self.assertEqual((len(fixed), fixed[0]['by']), (1, 'user'))
+        self.assertEqual(self.req('POST', '/api/state/tia/fixed?project=' + PROJECT, {})[0], 409)   # nothing to confirm
         self.assertEqual(self.req('POST', '/api/edits/%s/upload' % uid2)[0], 200)
 
     # ---------- D20b / D10b ----------
@@ -185,6 +190,34 @@ class TestUploadSafety(unittest.TestCase):
         self.assertEqual(server._compiled(warn, 'FB_Conveyor'), warn)
         with self.assertRaises(server.s7dcl_write.WriteError):
             server._compiled(warn.replace('FB_Other', 'FB_Conveyor'), 'FB_Conveyor')
+        self.assertEqual(server._compiled(warn.replace('FB_Other', 'Group/FB_Conveyor2'), 'FB_Conveyor'),
+                         warn.replace('FB_Other', 'Group/FB_Conveyor2'))          # a whole name, not a prefix
+        listed = json.dumps({'message': 'ok. WARNING: still inconsistent after the compile (16): ...',
+                             'stillInconsistent': ['B%d' % i for i in range(15)] + ['Group/FB_Conveyor']})
+        with self.assertRaises(server.s7dcl_write.WriteError):            # the full list, not the 15 of the message
+            server._compiled(listed, 'FB_Conveyor')
+
+    def test_guard_again_under_the_lock(self):
+        """An Upload that marked the project unsafe after the caller's check: the next one still writes nothing."""
+        self.start()
+        uid = self.proposal()
+        orig, seen = server._upload_guard, []
+
+        def first_passes(s):                                               # the caller's check ran before the mark
+            seen.append(1)
+            if len(seen) > 1:
+                orig(s)
+        server._upload_guard = first_passes
+        server._set_unsafe(self.data, PROJECT, 'block(s) X inconsistent after a failed Upload')
+        try:
+            s, e = self.req('POST', '/api/edits/%s/upload' % uid)
+        finally:
+            server._upload_guard = orig
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(s, 409, e)
+        self.assertEqual(self.calls(), [])
+        self.assertTrue(server.TIA_LOCK.acquire(blocking=False))          # released
+        server.TIA_LOCK.release()
 
     def test_inconsistent_after_restore_with_f_blocks(self):
         """F-blocks in the PLC: no CompileSoftware; the restored block does not compile -> BLOCK INCONSISTENT, unsafe."""
