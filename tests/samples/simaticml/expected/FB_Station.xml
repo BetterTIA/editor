@@ -169,28 +169,28 @@
                   <NameCon UId="24" Name="in" />
                 </Wire>
                 <Wire UId="30">
-                  <NameCon UId="24" Name="out" />
-                  <NameCon UId="25" Name="IN" />
-                </Wire>
-                <Wire UId="31">
-                  <NameCon UId="25" Name="Q" />
-                  <NameCon UId="27" Name="in" />
-                </Wire>
-                <Wire UId="32">
                   <IdentCon UId="21" />
                   <NameCon UId="24" Name="operand" />
                 </Wire>
-                <Wire UId="33">
+                <Wire UId="31">
+                  <NameCon UId="24" Name="out" />
+                  <NameCon UId="25" Name="IN" />
+                </Wire>
+                <Wire UId="32">
                   <IdentCon UId="22" />
                   <NameCon UId="25" Name="PT" />
                 </Wire>
-                <Wire UId="34">
-                  <IdentCon UId="23" />
-                  <NameCon UId="27" Name="operand" />
+                <Wire UId="33">
+                  <NameCon UId="25" Name="Q" />
+                  <NameCon UId="27" Name="in" />
                 </Wire>
-                <Wire UId="35">
+                <Wire UId="34">
                   <NameCon UId="25" Name="ET" />
                   <OpenCon UId="28" />
+                </Wire>
+                <Wire UId="35">
+                  <IdentCon UId="23" />
+                  <NameCon UId="27" Name="operand" />
                 </Wire>
               </Wires>
             </FlgNet>
@@ -252,20 +252,20 @@
                   <NameCon UId="24" Name="in" />
                 </Wire>
                 <Wire UId="28">
-                  <NameCon UId="24" Name="out" />
-                  <NameCon UId="25" Name="in" />
-                </Wire>
-                <Wire UId="29">
-                  <NameCon UId="25" Name="out" />
-                  <NameCon UId="26" Name="in" />
-                </Wire>
-                <Wire UId="30">
                   <IdentCon UId="21" />
                   <NameCon UId="24" Name="operand" />
                 </Wire>
-                <Wire UId="31">
+                <Wire UId="29">
+                  <NameCon UId="24" Name="out" />
+                  <NameCon UId="25" Name="in" />
+                </Wire>
+                <Wire UId="30">
                   <IdentCon UId="22" />
                   <NameCon UId="25" Name="operand" />
+                </Wire>
+                <Wire UId="31">
+                  <NameCon UId="25" Name="out" />
+                  <NameCon UId="26" Name="in" />
                 </Wire>
                 <Wire UId="32">
                   <IdentCon UId="23" />
