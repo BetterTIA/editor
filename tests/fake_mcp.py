@@ -7,8 +7,9 @@ python tests\\fake_mcp.py reader --export-root DIR --project Demo_Line [--state 
 until then it is read from --sample (default: the Demo_Line sample 20261012-120000\\PLC_1\\Blocks).
 Writer: Connect, ResolveObjectPath, ExportBlocksAsDocuments (copies .s7dcl/.s7res to exportPath), PreviewImport,
 ImportFromDocuments (copies the documents to --state and appends a line to <state>\\imports.jsonl), SetNetworkText
-(title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res), SetHmiItemAttribute and
-SetHmiDynamizationTag (a screen of the HMI sample copied to <state>\\HMI_1\\Screens and changed there), GetHmiTags,
+(title / comment of network n in --state: MLC ids in .s7dcl, en-US texts in .s7res), SetHmiItemAttribute,
+SetHmiDynamizationTag, SetHmiItemDynamization, CreateHmiScreenItems, DeleteHmiScreenItems (a screen of the HMI sample
+copied to <state>\\HMI_1\\Screens and changed there; dry runs answer like the Writer, --fail-hmi NAME refuses item NAME), GetHmiTags,
 RenameHmiScreen / SetHmiTagPlcTags (only answer), CompileHmi.
 Writer, SimaticML (E4/E5/E7): ExportXmlBlock copies <block>.xml (from --state after an import, else from --xml-sample) and
 answers {contentHash}; ImportXmlBlock checks expectedContentHash against the current file ('state_changed'), copies the file
@@ -232,8 +233,10 @@ def writer(a, nm, arg):
         return 'Imported %s (%s)' % (block, arg.get('importOption'))
     if nm == 'SetNetworkText':
         return set_network_text(a, arg)
-    if nm in ('SetHmiItemAttribute', 'SetHmiDynamizationTag'):
+    if nm in ('SetHmiItemAttribute', 'SetHmiDynamizationTag', 'SetHmiItemDynamization'):
         return set_hmi(a, nm, arg)
+    if nm in ('CreateHmiScreenItems', 'DeleteHmiScreenItems'):
+        return hmi_batch(a, nm, arg)
     if nm == 'GetHmiTags':
         with open(os.path.join(SAMPLE_HMI, 'Tags', 'Default tag table.json'), encoding='utf-8') as f:
             return json.dumps({'tags': [dict(t, table='Default tag table') for t in json.load(f)['tags']]})
@@ -302,9 +305,9 @@ def set_network_text(a, arg):
     return 'NW %s of %s: %s set (fake)' % (arg['network'], block, ', '.join(texts))
 
 
-def set_hmi(a, nm, arg):
-    """SetHmiItemAttribute / SetHmiDynamizationTag on <state>\\HMI_1\\Screens\\<screen>.json (copied from the sample first);
-    the fake Reader's export_hmi_to_folder takes the screen from there."""
+def _screen(a, arg):
+    """-> (path, screen) of <state>\\HMI_1\\Screens\\<screen>.json (copied from the sample first); the fake Reader's
+    export_hmi_to_folder takes the screen from there."""
     hmi = os.path.basename(SAMPLE_HMI)
     if arg['softwarePath'] != hmi:
         raise ValueError('no WinCC Unified HMI software %s (fake: %s)' % (arg['softwarePath'], hmi))
@@ -316,27 +319,106 @@ def set_hmi(a, nm, arg):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         shutil.copyfile(src, p)
     with open(p, encoding='utf-8') as f:
-        s = json.load(f)
+        return p, json.load(f)
+
+
+def _save(p, s):
+    with open(p, 'w', encoding='utf-8') as f:
+        json.dump(s, f, ensure_ascii=False, indent=2)
+
+
+def _mtext(v, culture=None):
+    return {'$type': 'MultilingualText', 'items': [{'$type': 'MultilingualTextItem', 'language': culture or 'en-US', 'text': v}]}
+
+
+def _value(v):
+    return json.loads(v) if re.fullmatch(r'-?\d+(\.\d+)?|true|false', v) else v
+
+
+def set_hmi(a, nm, arg):
+    """SetHmiItemAttribute (dotted Font.X too) / SetHmiDynamizationTag / SetHmiItemDynamization (tag only) on the screen
+    of <state>. --fail-hmi NAME: a dry run of a call on item NAME is refused (isError)."""
+    p, s = _screen(a, arg)
     x = next((i for i in s['screenItems'] if i['name'] == arg['itemName']), None) if arg.get('itemName') else s
     if x is None:
         raise ValueError('screen %s has no item %s' % (arg['screenName'], arg['itemName']))
+    if a.fail_hmi and arg.get('itemName') == a.fail_hmi:
+        raise ValueError("'%s': Hmi%s has no property '%s' (fake)" % (a.fail_hmi, x.get('$type', ''), arg.get('attribute') or arg.get('property')))
     if nm == 'SetHmiDynamizationTag':
         d = next((d for d in x.get('dynamizations') or [] if d.get('propertyName') == arg['property']), None)
         if d is None:
             raise ValueError('%s has no tag dynamization of %s' % (arg['itemName'], arg['property']))
         k, old, new, target = 'tag', d['tag'], arg['tag'], d
+    elif nm == 'SetHmiItemDynamization':
+        dyn = arg['dynamization']
+        dyn = json.loads(dyn) if dyn.startswith('{') else {'tag': dyn}
+        ds = x.setdefault('dynamizations', [])
+        old = next((d for d in ds if d.get('propertyName') == arg['property']), None)
+        k, new, target = 'dynamization ' + arg['property'], {'$type': 'TagDynamization', 'propertyName': arg['property'],
+                                                              'tag': dyn['tag'], 'useIndirectAddressing': bool(dyn.get('indirect'))}, None
+        if not arg.get('dryRun', True):
+            ds[:] = [d for d in ds if d is not old] + [new]
     else:
-        k, v = arg['attribute'][:1].lower() + arg['attribute'][1:], arg['value']
-        old, target = x.get(k), x
-        new = {'$type': 'MultilingualText', 'items': [{'$type': 'MultilingualTextItem', 'language': arg.get('culture') or 'en-US',
-                                                       'text': v}]} if k == 'text' else \
-            json.loads(v) if re.fullmatch(r'-?\d+(\.\d+)?', v) else v
+        path = arg['attribute'].split('.')
+        target = x
+        for seg in path[:-1]:
+            target = target.setdefault(seg[:1].lower() + seg[1:], {})
+        k, v = path[-1][:1].lower() + path[-1][1:], arg['value']
+        old = target.get(k)
+        new = _mtext(v, arg.get('culture')) if k == 'text' else _value(v)
     if arg.get('dryRun', True):
-        return 'dry run: %s.%s %s -> %s' % (arg.get('itemName') or arg['screenName'], k, json.dumps(old), json.dumps(new))
-    target[k] = new
-    with open(p, 'w', encoding='utf-8') as f:
-        json.dump(s, f, ensure_ascii=False, indent=2)
+        return json.dumps({'dryRun': True, 'applied': False, 'changeCount': 1, 'message': 'dry run: %s.%s %s -> %s' % (
+            arg.get('itemName') or arg['screenName'], k, json.dumps(old), json.dumps(new))})
+    if target is not None:
+        target[k] = new
+    _save(p, s)
     return '%s.%s set (fake)' % (arg.get('itemName') or arg['screenName'], k)
+
+
+def hmi_batch(a, nm, arg):
+    """CreateHmiScreenItems / DeleteHmiScreenItems in the shape of the Writer's ResponseHmiBatch (items that fail are
+    reported and skipped, a batch where none goes through fails). --fail-hmi NAME: item NAME fails its check."""
+    p, s = _screen(a, arg)
+    names = {i['name'].lower() for i in s['screenItems']}
+    if nm == 'DeleteHmiScreenItems':
+        want = [n for n in arg['names'].split(';') if n]
+        res = [{'name': n, 'ok': n.lower() in names and n != a.fail_hmi,
+                'message': '' if n.lower() in names else 'no item %s on the screen' % n} for n in want]
+        keep = [i for i in s['screenItems'] if i['name'] not in [r['name'] for r in res if r['ok']]]
+    else:
+        items = json.loads(arg['items'])
+        res = [{'name': i['name'], 'ok': i['name'].lower() not in names and i['name'] != a.fail_hmi,
+                'message': '' if i['name'].lower() not in names else 'the name is taken'} for i in items]
+        made = []
+        for i, r in zip(items, res):
+            if r['ok']:
+                x = dict({'$type': 'Hmi' + i['type'], 'name': i['name']}, **{k: i[k] for k in ('left', 'top', 'width', 'height')})
+                if 'text' in i:
+                    x['text'] = _mtext(i['text'], arg.get('culture'))
+                for k, v in (i.get('properties') or {}).items():
+                    seg = k.split('.')
+                    t = x
+                    for z in seg[:-1]:
+                        t = t.setdefault(z[:1].lower() + z[1:], {})
+                    t[seg[-1][:1].lower() + seg[-1][1:]] = _value(v)
+                x['dynamizations'] = [{'$type': 'TagDynamization', 'propertyName': k, 'tag': v if isinstance(v, str) else v['tag'],
+                                       'useIndirectAddressing': not isinstance(v, str) and bool(v.get('indirect'))}
+                                      for k, v in (i.get('dynamizations') or {}).items()]
+                x['eventHandlers'] = [{'eventType': k, 'script': {'scriptCode': v}} for k, v in (i.get('events') or {}).items()]
+                made.append(x)
+        keep = s['screenItems'] + made
+    for r in res:
+        if not r['ok'] and not r['message']:
+            r['message'] = 'refused by the check (fake)'
+    ok = sum(r['ok'] for r in res)
+    if not ok:
+        raise ValueError('No item went through: %s' % '; '.join('%s: %s' % (r['name'], r['message']) for r in res))
+    dry = arg.get('dryRun', True)
+    if not dry:
+        s['screenItems'] = keep
+        _save(p, s)
+    return json.dumps({'dryRun': dry, 'applied': not dry, 'okCount': ok, 'failedCount': len(res) - ok, 'items': res,
+                       'message': '%s%d screen item(s)' % ('Dry run: ' if dry else '', ok)})
 
 
 RUNS = {}
@@ -457,6 +539,7 @@ def main():
     ap.add_argument('--fail-compile', action='store_true', help='Writer: CompileBlock of an edited SimaticML block fails')
     ap.add_argument('--ob-renumbered', action='store_true', help='Writer: GetBlockInfo reports another OB number after an edit')
     ap.add_argument('--fail-save', action='store_true', help='Writer: SaveProject fails')
+    ap.add_argument('--fail-hmi', help='Writer: every HMI call on this screen item is refused (dry run included)')
     ap.add_argument('--crash-compile', action='store_true', help='Writer: CompileBlock of an edited block takes TIA down')
     ap.add_argument('--fail-compile-always', action='store_true',
                     help='Writer: CompileBlock of any imported block fails (also the original) until CompileSoftware')

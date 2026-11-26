@@ -277,6 +277,7 @@ def _flat(it):
     d.update({'colors.' + k: v for k, v in (it.get('colors') or {}).items()})
     d.update({'font.' + k: v for k, v in (it.get('font') or {}).items()})
     d.update({'binding ' + b['property']: b['tag'] for b in it.get('bindings') or []})
+    d['visible'] = it.get('visible') is not False
     return d
 
 

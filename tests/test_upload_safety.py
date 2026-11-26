@@ -56,8 +56,8 @@ class TestUploadSafety(unittest.TestCase):
         p = os.path.join(self.tia, 'calls.jsonl')
         if not os.path.exists(p):
             return []
-        with open(p, encoding='utf-8') as f:
-            return [json.loads(x)['tool'] for x in f]
+        with open(p, encoding='utf-8') as f:              # the writes; the HMI dry runs (round 12) are left out
+            return [z['tool'] for z in map(json.loads, f) if z['arguments'].get('dryRun') is not True]
 
     def proposal(self, approve=True):
         """FB_Conveyor NW1 with one more contact — goes through documents."""
@@ -71,11 +71,11 @@ class TestUploadSafety(unittest.TestCase):
             self.req('POST', '/api/edits/%s/state' % u['id'], {'state': 'Approved'})
         return u['id']
 
-    def hmi_edit(self, delete=False):
+    def hmi_edit(self, retype=False):
         s, u = self.req('POST', '/api/edits', {'project': PROJECT, 'round': 'K9', 'kind': 'hmi_screen', 'screen': 'Overview'})
         after = json.loads(json.dumps(u['after']))
-        if delete:                                    # the Writer has no tool to delete an item through Upload
-            after['items'] = [i for i in after['items'] if i['name'] != 'Title']
+        if retype:                                    # the Writer has no tool to change the type of an item
+            next(i for i in after['items'] if i['name'] == 'Title')['type'] = 'Label'
         else:
             next(i for i in after['items'] if i['name'] == 'IO_Speed')['left'] += 8
         self.assertEqual(self.req('POST', '/api/edits/%s/after' % u['id'], {'after': after})[0], 200)
@@ -87,9 +87,9 @@ class TestUploadSafety(unittest.TestCase):
     # ---------- D8 ----------
 
     def test_group_refused_before_any_write(self):
-        """A member Upload cannot make (an HMI item deleted) refuses the group before the first Writer call."""
+        """A member Upload cannot make (the type of an HMI item changed) refuses the group before the first Writer call."""
         self.start()
-        net, scr = self.proposal(approve=False), self.hmi_edit(delete=True)
+        net, scr = self.proposal(approve=False), self.hmi_edit(retype=True)
         self.req('POST', '/api/groups', {'edit_ids': [net, scr]})
         self.req('POST', '/api/groups/G001/state', {'state': 'Approved'})
         for _ in range(2):                            # the second try writes nothing either (D8: it did write once)

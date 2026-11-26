@@ -612,54 +612,141 @@ def _new_hmi(root, project, block, body):
             'before': {'export_ts': t, 'screen': exported}, '_block': {'kind': '', 'number': None, 'attributes': {}}}
 
 
-HMI_ATTR = {'left': 'Left', 'top': 'Top', 'width': 'Width', 'height': 'Height', 'text': 'Text', 'background': 'BackColor'}
+HMI_ATTR = {'left': 'Left', 'top': 'Top', 'width': 'Width', 'height': 'Height', 'text': 'Text', 'background': 'BackColor',
+            'visible': 'Visible'}
+HMI_TYPES = {v: k for k, v in hmi.ALIASES.items()}  # palette name -> Openness class without Hmi (Switch -> ToggleSwitch)
+
+
+def _hmi_attr(a, v):
+    """Model attribute + value -> (Openness attribute or dotted path, value as text for the Writer)."""
+    if a.startswith('colors.'):
+        return a[7:8].upper() + a[8:], hmi.tia_color(v)
+    if a.startswith('font.'):
+        return 'Font.' + a[5:6].upper() + a[6:], str(v)
+    if a == 'background':
+        return 'BackColor', hmi.tia_color(v)
+    if a == 'visible':
+        return 'Visible', 'true' if v else 'false'
+    return HMI_ATTR[a], str(v or '')               # a text keeps its "\n": the Writer (>= 6bdf962) makes the markup
+
+
+def _hmi_new_item(i):
+    """A new item of the screen model -> one item of CreateHmiScreenItems."""
+    props = dict(_hmi_attr('colors.' + k, v) for k, v in (i.get('colors') or {}).items())
+    props.update(_hmi_attr('font.' + k, v) for k, v in (i.get('font') or {}).items())
+    if i.get('visible') is False:
+        props['Visible'] = 'false'
+    spec = dict({'type': HMI_TYPES.get(i['type'], i['type']), 'name': i['name']}, **{k: i[k] for k in ('left', 'top', 'width', 'height')})
+    dyn = {b['property']: {'tag': b['tag'], 'indirect': True} if b.get('indirect') else b['tag'] for b in i.get('bindings') or []}
+    ev = {e['event']: e['script'] for e in i.get('events') or [] if e.get('script')}
+    spec.update((k, v) for k, v in (('text', i.get('text')), ('properties', props), ('dynamizations', dyn), ('events', ev)) if v)
+    return spec
 
 
 def hmi_writes(u):
-    """Writer calls for an HMI edit: SetHmiItemAttribute / SetHmiDynamizationTag for every changed attribute of the screen
-    and of its existing items. StateError 409 when the edit needs what the Writer cannot do (create a screen or an item,
-    delete an item, change a type or a font, add or remove a binding or a color)."""
+    """Writer calls for an HMI edit, in this order: DeleteHmiScreenItems (deleted items), CreateHmiScreenItems (new items
+    with their texts, colors, font, bindings and events), then per changed attribute of the screen and of its existing
+    items SetHmiItemAttribute (geometry, text, color, font, visibility), SetHmiItemDynamization (a new binding) or
+    SetHmiDynamizationTag (another tag). StateError 409 when the edit needs what the Writer cannot do: a new screen, a
+    changed type, a removed binding, color or font (Openness has no "unset")."""
     c = hmi.compare(u['before'].get('screen'), u['after'])
-    why = (['a new screen'] if u.get('new') else []) + ['new item %s' % n for n in c['added']] + \
-        ['deleted item %s' % n for n in c['deleted']] + \
-        ['%s: %s' % (n, x['attr']) for n, ch in [('screen', c['screen'])] + list(c['changed'].items()) for x in ch
-         if x['attr'] == 'type' or x['attr'].startswith('font.') or x['attr'] != 'text' and None in (x['before'], x['after'])]
+    why = (['a new screen'] if u.get('new') else []) + \
+        ['deleted item %s (";" in the name)' % n for n in c['deleted'] if ';' in n] + \
+        ['%s: %s %s' % (n, x['attr'], 'changed' if x['attr'] == 'type' else 'removed')
+         for n, ch in [('screen', c['screen'])] + list(c['changed'].items()) for x in ch
+         if x['attr'] == 'type' or x['attr'] != 'text' and x['after'] is None]
     if why:
-        raise state.StateError('Upload cannot make this edit: the Writer has no tool to create screens and items yet '
-                               '(ImportHmiScreen) and none for %s — make the change by hand following the TIA steps'
-                               % ', '.join(why))
-    calls = []
+        raise state.StateError('Upload cannot make this edit: the Writer has no tool for %s — make the change by hand '
+                               'following the TIA steps' % ', '.join(why))
+    base = {'softwarePath': u['hmi'], 'screenName': u['screen'], 'dryRun': False}
+    A = {i['name']: i for i in u['after']['items']}
+    calls = [('DeleteHmiScreenItems', dict(base, names=';'.join(c['deleted'])))] if c['deleted'] else []
+    if c['added']:
+        calls.append(('CreateHmiScreenItems', dict(base, items=json.dumps([_hmi_new_item(A[n]) for n in c['added']],
+                                                                          ensure_ascii=False), culture='en-US')))
     for n, ch in [('', c['screen'])] + list(c['changed'].items()):
         for x in ch:
-            a, base = x['attr'], {'softwarePath': u['hmi'], 'screenName': u['screen'], 'itemName': n, 'dryRun': False}
-            if a.startswith('binding '):
-                calls.append(('SetHmiDynamizationTag', dict(base, property=a[8:], tag=x['after'])))
+            a, item = x['attr'], dict(base, itemName=n)
+            if a.startswith('binding ') and x['before'] is None:
+                b = next(b for b in A[n]['bindings'] if b['property'] == a[8:])
+                calls.append(('SetHmiItemDynamization', dict(item, property=a[8:], dynamization=json.dumps(
+                    {'tag': b['tag'], 'indirect': True}) if b.get('indirect') else b['tag'])))
+            elif a.startswith('binding '):
+                calls.append(('SetHmiDynamizationTag', dict(item, property=a[8:], tag=x['after'])))
             else:
-                attr = a[7:8].upper() + a[8:] if a.startswith('colors.') else HMI_ATTR[a]
-                value = hmi.tia_color(x['after']) if a.startswith('colors.') or a == 'background' else str(x['after'] or '')
-                calls.append(('SetHmiItemAttribute', dict(base, attribute=attr, value=value, **({'culture': 'en-US'} if a == 'text' else {}))))
+                attr, value = _hmi_attr(a, x['after'])
+                calls.append(('SetHmiItemAttribute', dict(item, attribute=attr, value=value, **({'culture': 'en-US'} if a == 'text' else {}))))
     return calls
 
 
+def _hmi_label(u, nm, arg):
+    return '%s %s %s' % (nm, arg.get('itemName') or u['screen'],
+                         arg.get('attribute') or arg.get('property') or arg.get('names') or
+                         ', '.join(i['name'] for i in json.loads(arg.get('items') or '[]')))
+
+
+def _hmi_result(r):
+    """A Writer answer of an HMI tool -> r; raises when a batch reports failed items (a dry run or a write that skipped some)."""
+    try:
+        j = {k.lower(): v for k, v in json.loads(r).items()}
+    except (TypeError, ValueError, AttributeError):
+        return r
+    if j.get('failedcount'):
+        bad = ['%s: %s' % (i.get('name') or i.get('Name'), i.get('message') or i.get('Message'))
+               for i in j.get('items') or [] if isinstance(i, dict) and not (i.get('ok', i.get('Ok', True)))]
+        raise s7dcl_write.WriteError('the Writer refused %s' % ('; '.join(bad) or r[:600]))
+    return r
+
+
+def _hmi_dry_run(k, steps, u, calls):
+    """D5: every Writer call of the edit as a dry run (checked against the Openness types and the project) — raises at the
+    first one the Writer refuses, before anything is written."""
+    for nm, arg in calls:
+        _step(steps, 'dry run ' + _hmi_label(u, nm, arg), lambda: _hmi_result(k.call(nm, dict(arg, dryRun=True))))
+
+
+def _hmi_dry_runs(mcp, timeout, portal, hmis):
+    """D5 in a group: the dry runs of every HMI member before the PLC part writes anything -> the refusal, else None."""
+    if not TIA_LOCK.acquire(blocking=False):
+        raise state.StateError('another Upload / Check is running — wait until it ends')
+    steps, cur = [], 'Writer'
+    try:
+        with _client(mcp, 'writer', timeout) as k:
+            _connect(k, steps, portal)
+            for u in hmis:
+                cur = u['id']
+                _hmi_dry_run(k, steps, u, hmi_writes(u))
+    except Exception as e:
+        return '%s: %s — %s' % (cur, steps[-1]['step'] if steps else 'Writer', _reason(e))
+    finally:
+        TIA_LOCK.release()
+    return None
+
+
 def _upload_hmi(data, uid, u, mcp, timeout, portal):
-    """Approved HMI edit -> TIAC_Writer: GetPortals, Connect, one call per changed attribute -> Signed (by TIAC_Writer)."""
+    """Approved HMI edit -> TIAC_Writer: GetPortals, Connect, every call of hmi_writes as a dry run, then the same calls
+    for real -> Signed (by TIAC_Writer). A refused dry run writes nothing; a failure after the first write says so."""
     calls = hmi_writes(u)
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
-    steps = []
+    steps, done = [], []
     try:
         try:
             with _client(mcp, 'writer', timeout) as k:
                 _connect(k, steps, portal)
+                _hmi_dry_run(k, steps, u, calls)
                 for nm, arg in calls:
-                    _step(steps, '%s %s %s' % (nm, arg['itemName'] or u['screen'], arg.get('attribute') or arg.get('property')),
-                          lambda: k.call(nm, arg))
-            ok, message = True, ('%d attribute(s) written to screen %s of %s — compile the HMI and save the project in TIA '
+                    _step(steps, _hmi_label(u, nm, arg), lambda: _hmi_result(k.call(nm, arg)))
+                    done.append(nm)
+            ok, message = True, ('%d Writer call(s) written to screen %s of %s — compile the HMI and save the project in TIA '
                                  '(the Writer does not call SaveProject)' % (len(calls), u['screen'], u['hmi']))
-        except mcp_client.MCPError as e:
-            ok, message = False, CONNECTION_ERROR + str(e)
         except Exception as e:                        # whatever stops it must be recorded
-            ok, message = False, 'Upload stopped: %s' % e
+            failed = steps and not steps[-1]['ok'] and steps[-1]['step'] not in ('GetPortals', 'Connect')
+            ok, message = False, ('Upload stopped at %s: %s' % (steps[-1]['step'], _reason(e)) if failed else
+                                  CONNECTION_ERROR + str(e) if isinstance(e, mcp_client.MCPError) else 'Upload stopped: %s' % e)
+        if not ok:
+            message += (' · %d of %d Writer call(s) were written — the screen is half changed in TIA (not saved): close TIA '
+                        'without saving or finish it by hand' % (len(done), len(calls)) if done else ' · nothing was written')
         write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
         u = _write(data, uid, write, 'Signed' if ok else None, 'TIAC_Writer')
     finally:
@@ -2791,6 +2878,8 @@ def api_group_upload(root_of, data, gid, mcp, timeout=300, portal=None, compile=
         except state.StateError as e:
             refused.append('%s: %s' % (u['id'], e))
     refused += ['%s: SimaticML (%s): %s' % (u['id'], why, r) for u in plc for r in [why and xml_refused(root, u)] if r]
+    if hmis and not refused:                          # D5: the Writer's dry runs, before the PLC part writes anything
+        refused += [r for r in [_hmi_dry_runs(mcp, timeout, portal, hmis)] if r]
     if refused:
         raise state.StateError('Upload of group %s refused before any write — %s. Nothing was written; make these members by '
                                'hand (TIA steps), then "Written by hand → Signed"' % (gid, ' · '.join(refused)))

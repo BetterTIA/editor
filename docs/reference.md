@@ -254,7 +254,7 @@ has in the exported block).
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
 | POST | `/api/groups/<id>/state` | `{state, by, reason?, version?}` — one version for every member moved to Uploaded; every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
-| POST | `/api/groups/<id>/upload` | `{compile?: false}`. Every member Approved and none F (else 409). **Before any write** the group is refused (409, nothing written) when Upload cannot make one of its members — an HMI change the Writer has no tool for, or what the SimaticML way does not write when the group goes that way. Then the PLC members in one Upload (see [Upload and Check](#upload-and-check): one export, one import and one compile per block, members applied interface → new networks → changes; all through SimaticML when one member needs it — an OB, GRAPH, a new network, `upload: xml`, `compile: false` — `via: "SimaticML"`); all PLC members succeed or fail together (a failure restores every block already imported). The HMI members come last, one by one, only when the PLC part succeeded → `{ok, results: [{edit, ok, message}], view}`. Every member that was written is recorded (Signed) — nothing raises after the first write |
+| POST | `/api/groups/<id>/upload` | `{compile?: false}`. Every member Approved and none F (else 409). **Before any write** the group is refused (409, nothing written) when Upload cannot make one of its members — an HMI change the Writer has no tool for or whose Writer dry run is refused (D5), or what the SimaticML way does not write when the group goes that way. Then the PLC members in one Upload (see [Upload and Check](#upload-and-check): one export, one import and one compile per block, members applied interface → new networks → changes; all through SimaticML when one member needs it — an OB, GRAPH, a new network, `upload: xml`, `compile: false` — `via: "SimaticML"`); all PLC members succeed or fail together (a failure restores every block already imported). The HMI members come last, one by one, only when the PLC part succeeded → `{ok, results: [{edit, ok, message}], view}`. Every member that was written is recorded (Signed) — nothing raises after the first write |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
 | DELETE | `/api/groups/<id>[?edits=1][&force=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — an edit already written (Signed and later) only with `force=1`, else 409 → `{project, group, deleted}` |
 | DELETE | `/api/edits/<id>` | deletes an edit (editor state only, TIA is not touched): Proposal, Approved, Disapproved; an edit already written (Signed and later) only with `?force=1`, else 409; a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
@@ -779,13 +779,23 @@ fonts and events are not compared.
 position, size, text, colors and *dynamization <property> → tag* ⟦unverified⟧ (Properties → Dynamization → Tag),
 compile the HMI ⟦unverified⟧. The menu and task card names are not from the TIA V21 help.
 
-**Upload** (Approved, `POST /api/edits/<id>/upload`): GetPortals, Connect, then for every changed attribute of the
-screen or of an **existing** item `SetHmiItemAttribute {softwarePath: <HMI>, screenName, itemName ('' = the screen),
-attribute (Left, Top, Width, Height, Text with culture en-US, BackColor/ForeColor/… as "#AARRGGBB"), value, dryRun:
-false}` or `SetHmiDynamizationTag {…, property, tag}` → Signed. **What it cannot do — 409 with the reason:** a new
-screen, new or deleted items, a changed type or font, an added or removed binding or color. The Writer
-(BTIA_Writer) has no tool to create a screen or a screen item yet (Openness has `Screens.Create` and
-`ScreenItems.Create<T>`; a tool such as `ImportHmiScreen` would be needed); those edits are made by hand following the
+**Upload** (Approved, `POST /api/edits/<id>/upload`): GetPortals, Connect, then the Writer calls (all with
+`softwarePath: <HMI>, screenName`): `DeleteHmiScreenItems {names: "a;b"}` for deleted items, `CreateHmiScreenItems
+{items: [{type, name, left, top, width, height, text?, properties: {BackColor, Font.Size, Visible: "false", …},
+dynamizations: {<property>: tag | {tag, indirect: true}}, events: {<event>: script}}], culture: en-US}` for new items
+(palette `Switch` = `ToggleSwitch`), and per changed attribute of the screen or of an existing item
+`SetHmiItemAttribute {itemName ('' = the screen), attribute (Left, Top, Width, Height, Visible, Text with culture en-US,
+BackColor/ForeColor/… as "#AARRGGBB", Font.Size/Font.Name/Font.Weight), value}`, `SetHmiItemDynamization {property,
+dynamization}` (a new binding) or `SetHmiDynamizationTag {property, tag}` (another tag of a binding). A text keeps its
+`
+` — the Writer (≥ `6bdf962`) turns it into Unified markup. **Every call runs first as a dry run** (`dryRun: true`);
+the first one the Writer refuses (an error, or a batch item that failed its check) stops the Upload with nothing
+written (recorded, state stays Approved). Then the same calls with `dryRun: false` → Signed; a failure after the first
+real call says how many were written (the screen is half changed in TIA, not saved). In a group the dry runs of every
+HMI member run **before the PLC part writes anything** (refused → 409 "refused before any write"); the HMI members
+are written after the PLC members as before. **What it cannot do — 409 with the reason:** a new screen, a changed
+type, a removed binding, color or font (Openness has no "unset"), a deleted item with `;` in its name; those edits are
+made by hand following the
 TIA steps. **Check** (Signed): the Reader dumps the screens (`export_hmi_to_folder`, `pathPrefixes: ["Screens"]`) into
 a new folder of the export root, then the export check → Checked. The HMI `softwarePath` is the HMI folder name of the
 dump — not verified against a real Writer.

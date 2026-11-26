@@ -181,7 +181,7 @@ class TestHmiEdits(unittest.TestCase):
         with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:
             calls = [json.loads(z) for z in f]
         sets = [(z['tool'], z['arguments'].get('itemName'), z['arguments'].get('attribute') or z['arguments'].get('property'),
-                 z['arguments'].get('value') or z['arguments'].get('tag')) for z in calls if z['tool'].startswith('SetHmi')]
+                 z['arguments'].get('value') or z['arguments'].get('tag')) for z in calls if z['tool'].startswith('SetHmi') and not z['arguments']['dryRun']]
         self.assertEqual(sorted(sets), [('SetHmiDynamizationTag', 'IO_Pieces', 'ProcessValue', 'Rejects'),
                                         ('SetHmiItemAttribute', 'Header', 'BackColor', '#FF203040'),
                                         ('SetHmiItemAttribute', 'IO_Speed', 'Left', '268'),
@@ -202,7 +202,7 @@ class TestHmiEdits(unittest.TestCase):
         d = self.ok('GET', '/api/edits/' + u['id'])
         self.assertEqual(d['screen_diff']['added'][:2], ['Header', 'Title'])
         self.assertTrue(any(e.get('warning') and 'Nope' in e['error'] for e in d['errors']), d['errors'])
-        self.assertIn('ImportHmiScreen', d['upload_note'])
+        self.assertIn('a new screen', d['upload_note'])
         p = self.ok('GET', '/api/edits/%s/procedure' % u['id'])
         self.assertIn('Add new screen', p['steps'][0])
         self.assertIn('dynamization `ProcessValue` → tag `Machine_Speed`', p['markdown'])
