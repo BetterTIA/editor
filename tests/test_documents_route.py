@@ -68,6 +68,11 @@ class TestRungOrder(unittest.TestCase):
         simple = s7dcl.load_block(os.path.join(SAMPLES, PROJECT, TS0, 'PLC_1', 'Blocks', 'Conveyor', 'FC_Branches.s7dcl'))
         self.assertIsNone(s7dcl_write.nested_or(simple['networks'][0]))
         self.assertIsNone(s7dcl_write.nested_or({'language': 'FBD', 'elements': []}))
+        # a plain OR on a second output branch: both legs open from w2 (on the main rung), one closes on the other's rung
+        sibling = {'rungs': [{'from': 'powerrail', 'path': ['a', 'wire#w2', 'b', 'q1'], 'to': None},
+                             {'from': 'w2', 'path': ['c', 'wire#w3', 'q2'], 'to': None},
+                             {'from': 'w2', 'path': ['d'], 'to': 'w3'}]}
+        self.assertIsNone(s7dcl_write.nested_or(sibling))
 
 
 class TestTextsInRes(unittest.TestCase):

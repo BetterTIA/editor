@@ -204,6 +204,16 @@ class TestEditBlock(unittest.TestCase):
         self.assertIn('\r\n', new)
         self.assertNotIn('\n', new.replace('\r\n', ''))
 
+    def test_untitled_network_after_an_insertion_above_it(self):
+        """D11: a changed network without a title is found by its number — the number of the export, before the new network
+        inserted above it in the same Upload."""
+        t = read('tia', 'Station', 'FB_Station.xml')
+        edits = copy.deepcopy(STATION_EDITS)
+        edits[2]['title'] = ''
+        new, notes = simaticml.edit_block(t, edits, find, lambda n, k: simaticml.call_info(t).get((n, k)))
+        self.assertEqual(new, read('expected', 'FB_Station.xml'))
+        self.assertIn('U3: NW 3 "Run lamp" replaced', notes)
+
     def test_ob30(self):
         t = read('tia', 'Station', 'OB_Cyclic.xml')
         ob = simaticml.ob_attributes(t)

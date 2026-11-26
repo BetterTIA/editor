@@ -498,7 +498,8 @@ Several edits of one block (a group) are applied to **one** export of the block 
 interface → new networks → changes; the blocks in the order of their first member, so a block with an interface edit
 comes before the blocks that call it; HMI members after all blocks). New networks of one block are inserted from the
 highest `after_nw` down (D11: every `after_nw` counts the networks of the same export, so an insertion never moves the
-place of one still to come); two after the same network keep the group order. Only the network texts need a compile each
+place of one still to come); two after the same network keep the group order; a changed network without a title is
+found by its export number shifted by the new networks inserted above it. Only the network texts need a compile each
 (`SetNetworkText` imports the block again).
 
 **After a failure past the first import** (E8 / D10b): first `GetPortals` — when the Writer died or the TIA Portal

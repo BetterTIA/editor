@@ -158,10 +158,12 @@ def nested_or(m):
     """D15: a branch that opens on one rung and closes on a wire that rung does not pass (e.g. A ∧ (B ∨ C∧D) ∨ E: the
     branch from inside B's rung closes where B's rung closes) -> text, else None. The documents import refuses it ("Creation
     of OR gate failed with END_RUNG"); SimaticML writes it as nested O."""
-    path = {x[5:]: r for r in m.get('rungs') or [] for x in r['path'] if x.startswith('wire#')}
-    for r in m.get('rungs') or []:
+    rungs = m.get('rungs') or []
+    path = {x[5:]: r for r in rungs for x in r['path'] if x.startswith('wire#')}
+    for r in rungs:
         a, b = r.get('from'), r.get('to')
-        if a in path and b and 'wire#' + b not in path[a]['path']:
+        # a plain OR also when b is on a sibling rung that opens from the same wire (w2 → p15 → w3 …, w2 → p18 → w3)
+        if a in path and b and not any('wire#' + b in x['path'] for x in rungs if x is path[a] or x.get('from') == a):
             return 'nested OR (a branch from wire#%s closes at wire#%s, outside the rung it opens on)' % (a, b)
     return None
 
