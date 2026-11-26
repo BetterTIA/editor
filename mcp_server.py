@@ -97,7 +97,8 @@ def _summary(u):
             'block': u['block'], 'nw': u['nw'], 'where': where(u),
             'title': u.get('title'), 'language': u.get('language'), 'f': u.get('f'), 'state': u['state'],
             'author': u.get('author'), 'time': u.get('time'), 'note': u.get('note'),
-            'disapproved': u.get('disapproved'), 'last_check': k[-1] if k else None}
+            'disapproved': u.get('disapproved'), 'last_check': k[-1] if k else None,
+            'uploaded': u.get('uploaded'), 'tested': u.get('tested')}
 
 
 def list_edits(e, a):
@@ -112,6 +113,7 @@ def get_edit(e, a):
     d = e.get('/api/edits/' + q(a['id']))
     return {'edit': d['edit'], 'diff': d.get('diff'), 'errors': d.get('errors'), 'warnings': d.get('warnings'),
             'next': d.get('next'), 'previous': d.get('previous'), 'checked_allowed': d.get('checked_allowed'),
+            'versions': d.get('versions'),
             'tia': d.get('tia'), 'procedure': e.get('/api/edits/%s/procedure' % q(a['id']))['markdown'],
             'url': '%s/?edit=%s' % (e.url, q(a['id']))}
 
@@ -177,10 +179,14 @@ def run_check(e, a):
 def set_state(e, a, client=None):
     if bool(a.get('id')) == bool(a.get('group')):
         raise ToolError('give exactly one of id (an edit) or group')
-    body = {k: a[k] for k in ('state', 'by', 'reason') if a.get(k)}
+    body = {k: a[k] for k in ('state', 'by', 'reason', 'version') if a.get(k)}
     body.setdefault('by', (client or {}).get('name') or 'AI')
     r = e.req('POST', '/api/%s/%s/state' % (('edits', q(a['id'])) if a.get('id') else ('groups', q(a['group']))), body)
-    return {'id': a.get('id') or a['group'], 'state': r.get('state')}
+    out = {'id': a.get('id') or a['group'], 'state': r.get('state')}
+    if a['state'] in ('Uploaded', 'Tested'):                  # the version recorded (a group: its members')
+        k = a['state'].lower()
+        out['version'] = ', '.join(sorted({x[k]['version'] for x in ([r] if a.get('id') else r.get('members') or []) if x.get(k)}))
+    return out
 
 
 def get_procedure(e, a):
@@ -366,10 +372,15 @@ TOOLS = [
     ('set_state', 'Move an edit (id) or a whole group (group) one step along Proposal → Approved → Signed → Checked → Uploaded → '
                   'Tested, one step back, or to Disapproved (needs a reason). The editor keeps its transition rules (Checked '
                   'only after a matching run_check, which also sets Checked by itself). Use it only on a person\'s instruction; '
-                  'Uploaded and Tested only on an explicit instruction — they say the change reached the PLC / was tested on it.',
+                  'Uploaded and Tested only on an explicit instruction — they say the change reached the PLC / was tested on it. '
+                  'Uploaded records the project version V<1>.<2>.<3> (3rd number = one change, 2nd = a larger set of '
+                  'functions, 1st = release; the person confirms it): without version the editor takes the 3rd number + 1 of '
+                  'the project current version (get_edit -> versions: current / patch / minor) and refuses when the project '
+                  'has none yet. Tested records the time and carries the version of the Uploaded. A group moves with one version.',
      _schema({'id': S, 'group': S, 'state': {'type': 'string', 'enum': ALL_STATES}, 'by': {'type': 'string',
               'description': 'who decided (default: the client name)'}, 'reason': {'type': 'string',
-              'description': 'required for Disapproved'}}, ['state']), set_state),
+              'description': 'required for Disapproved'}, 'version': {'type': 'string',
+              'description': 'project version for Uploaded, e.g. V1.4.2 (1.4.2 is accepted)'}}, ['state']), set_state),
     ('get_procedure', 'Step-by-step instructions for making the edit by hand in TIA Portal (markdown).',
      _schema({'id': S}, ['id']), get_procedure),
     ('tia_status', 'TIA Portal, Writer, Reader and AI client status; refresh=true checks TIA Portal again.',

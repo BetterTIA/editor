@@ -141,6 +141,7 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
   (a later mismatch locks it again), otherwise **409**. `checked_allowed` in `GET /api/edits/<id>`. An export check of the
   editor itself (`check-export`, group check, Reader check) that matches moves a **Signed** edit to Checked (`by: "export check"`).
 - **Uploaded** / **Tested** are set by the user.
+- **Uploaded** records the project version `V<1>.<2>.<3>` (3rd number = one change, 2nd = a larger set of functions, 1st = release; a person confirms it) as `uploaded: {version, time, by}` on the edit, and the project keeps it as its current `version` in `state.json`. The editor proposes the next one (`versions: {current, patch, minor}` in `GET /api/edits/<id>` and `GET /api/groups/<id>` while the next step is Uploaded); without `version` in the request the patch proposal is taken, and when the project has no version yet the step is refused (400). `1.4.2` is accepted and stored as `V1.4.2`. **Tested** records `tested: {version, time, by}` with the version of the Uploaded. A step back drops the record of the state left; edits from before versions keep working (Tested of such an edit takes `version` or the project version).
 - Only one step forward or back at a time.
 - **Disapproved** is a side state: from Proposal or Approved with `{state: "Disapproved", reason}` (the reason is
   required, 400 without it). It is kept in `disapproved: {reason, time, by}` and in the history, and stays there after
@@ -153,7 +154,7 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 | PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
 | POST | `/api/edits` | new change `{project, round, block, nw, after, note}` → 201, state Proposal, author `editor` |
 | GET | `/api/edits/<id>[?width=]` | change + drawing of "after" with `diff` marks (`added` / `changed`, ghosts `x:<id>` = `deleted`), `next`, `previous`, `checked_allowed`, `errors`, `tia`, `warnings` |
-| POST | `/api/edits/<id>/state` | `{state, by, reason?}` — one step forward/back; Checked only after a matching check, otherwise 409 with the reason; Disapproved needs `reason` |
+| POST | `/api/edits/<id>/state` | `{state, by, reason?, version?}` — one step forward/back; `version` for Uploaded (see States); Checked only after a matching check, otherwise 409 with the reason; Disapproved needs `reason` |
 | PUT/POST | `/api/edits/<id>/after` | saves the "after" model (Proposal or Disapproved → back to Proposal; rule errors do not block saving) → `{edit, errors}` |
 | POST | `/api/check` | `{edit_id, match, export_ts, note}` — records the result of comparing an export with the proposal by hand (automatic: see [Export check](#export-check)) |
 
@@ -240,7 +241,7 @@ has in the exported block).
 | POST | `/api/groups/<id>` | `{name?, card?, card_title?}` — only the given fields change; an empty `card` / `card_title` is cleared (not derived again) |
 | POST | `/api/cleanup` | `{project?, states?, group?, card?, all?, dry_run?, force?, by?}` — deletes many edits (editor state only, TIA is not touched). A filter or `all: true` is required (400). `dry_run` (default **true**) → `{dry_run, count, needs_force: [ids written to TIA], edits: [{id, project, state, where, group}]}`; `dry_run: false` first copies `state.json` to `<data>/backups/state-<project>-<time>.json` (`backups` in the reply), written states (Signed and later) need `force: true` (else 409); tombstones and the changelog as for a single delete |
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
-| POST | `/api/groups/<id>/state` | `{state, by}` — every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
+| POST | `/api/groups/<id>/state` | `{state, by, reason?, version?}` — one version for every member moved to Uploaded; every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
 | POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}`; through SimaticML (an OB, GRAPH, a new network, `upload: xml`): one import per block, `via: "SimaticML"`, all members succeed or fail together |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
@@ -780,7 +781,7 @@ error of the editor = `isError: true` with its message):
 | `list_groups` | `project?`, `card?`, `state?` | `GET /api/groups` |
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
-| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
+| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved), `version?` (Uploaded, e.g. `V1.4.2`) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state, version?}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
 | `get_procedure` | `id` | the TIA steps as markdown text |
 | `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` = `POST /api/tia/status`, checks TIA Portal again) |
 | `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |
