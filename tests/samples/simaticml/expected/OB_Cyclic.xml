@@ -86,20 +86,20 @@
                   <NameCon UId="26" Name="in" />
                 </Wire>
                 <Wire UId="30">
-                  <NameCon UId="26" Name="out" />
-                  <NameCon UId="27" Name="in" />
-                </Wire>
-                <Wire UId="31">
-                  <NameCon UId="27" Name="out" />
-                  <NameCon UId="28" Name="en" />
-                </Wire>
-                <Wire UId="32">
                   <IdentCon UId="21" />
                   <NameCon UId="26" Name="operand" />
                 </Wire>
-                <Wire UId="33">
+                <Wire UId="31">
+                  <NameCon UId="26" Name="out" />
+                  <NameCon UId="27" Name="in" />
+                </Wire>
+                <Wire UId="32">
                   <IdentCon UId="22" />
                   <NameCon UId="27" Name="operand" />
+                </Wire>
+                <Wire UId="33">
+                  <NameCon UId="27" Name="out" />
+                  <NameCon UId="28" Name="en" />
                 </Wire>
                 <Wire UId="34">
                   <IdentCon UId="23" />

@@ -8,6 +8,7 @@
 - Signed → Checked by hand with a reason, also when the last automatic check is a MISMATCH: `POST /api/edits/<id>/state {state: "Checked", reason}`, MCP `set_state(..., reason)`, UI "Record a check by hand… → ✓ Match → Checked"; recorded as a matching check `by hand: <reason>` and in the history (D20c).
 - Retention of Tested edits: `older_than_days` filter of `POST /api/cleanup` / MCP `cleanup_edits`, and the server flag `--tested-retention-days N` (default off) that deletes Tested edits N days after Tested at start and every hour, with the backup and tombstones of a cleanup (D6).
 - Project version at Uploaded and Tested: Uploaded records `V<1>.<2>.<3>` (proposed: 3rd number + 1, or 2nd + 1; always passed explicitly, never guessed), Tested records its time and carries the same version. `version` parameter of `POST /api/edits|groups/<id>/state` and MCP `set_state`; shown in the edit, the tree, the group page and the changelog; returned by `get_edit`, `list_edits`, `get_changelog`.
+- SimaticML Upload: parts in the order of the current flow and the power rail's connections in the same walk, as TIA exports them (D13, D14, D20a); every unconnected FB/FC call parameter gets an `OpenCon`, an FC's `Ret_Val` as an output (D10a, D2); INC is written (`Part Inc` with `DestType`, D3).
 
 ### Upload safety
 - A group Upload is refused before the first write when Upload cannot make one of its members (an HMI change the Writer

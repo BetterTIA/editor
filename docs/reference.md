@@ -560,9 +560,19 @@ message has the reason, the Writer's `errorDetail` (when present) and "restored 
 
 **What the XML way writes:** LAD and FBD — NO/NC contacts, P/N contacts, coils incl. S/R, P_TRIG/N_TRIG, series and
 parallel branches (a join = `O` with `Card`), FBD &, >=1, X with negated inputs; comparisons (==, <>, <, <=, >, >=),
-MOVE, ADD/SUB/MUL/DIV, IN_RANGE/OUT_RANGE, TON/TOF/TP (multi- and single-instance), FB and FC calls with parameters
-(their `CallInfo` is taken from the export, otherwise from the callee's interface). Operands: `#local`, `"global"`,
-members, array indexes, literal and typed constants. **Refused before any write** (409, `upload_note` in the detail,
+MOVE, ADD/SUB/MUL/DIV, INC, IN_RANGE/OUT_RANGE, TON/TOF/TP (multi- and single-instance), FB and FC calls with
+parameters (their `CallInfo` is taken from the export, otherwise from the callee's interface; every parameter the
+proposal leaves empty gets an `OpenCon` wire, as in TIA's export — without it TIA refuses "The connection with the name
+'n' is not connected"). Operands: `#local`, `"global"`, members, array indexes, literal and typed constants.
+
+**Order in the FlgNet** = TIA's own export order (checked against the untouched networks of real V21 exports): the parts
+follow the current flow — depth first from the ends of the rungs (coils, boxes, in model order), each part after the
+parts feeding its inputs in pin order (so an `O` comes after its branches and before what it feeds); the power rail's
+connections in the order this walk meets them (a call's EN before the contacts feeding its pins); Access UIds in the
+order of the parts, then the parts, the OpenCons, the wires (power rail, then per part its inputs and its outputs; a P/N
+contact's edge bit before its operand); a branching wire's targets in the order of the parts. TIA refuses parts against
+the flow ("The elements must be sorted according to the current flow") and a power rail in another sequence ("… must be
+located in the same sequence"); it accepts other wire orders. **Refused before any write** (409, `upload_note` in the detail,
 "make the change by hand"; D10c: every network edit the SimaticML way cannot write also gets a warning in
 `GET /api/edits/<id>` — so in `propose_edit` / `get_edit` — even when it goes through documents alone, because a group
 with a new network or an Upload without compile sends it that way): RET, NOT, negated coils, P/N coils, negated boxes or outputs, other instructions (counters,
