@@ -15,6 +15,10 @@ answers {contentHash}; ImportXmlBlock checks expectedContentHash against the cur
 to --state and appends to imports.jsonl; GetBlockInfo answers the OB attributes (Number, SecondaryType, CyclicTime) of the
 current file. --fail-xml-import / --fail-compile fail ImportXmlBlock / CompileBlock for a file that differs from the
 sample (a restore of the original passes); --ob-renumbered reports another OB number after an edited import.
+Upload safety (round 9): SaveProject (--fail-save fails it); --fail-import fails ImportFromDocuments only for edited
+documents; --crash-compile: CompileBlock of an edited block "takes TIA down" (GetPortals then lists no instance, every other
+call fails); --fail-compile-always: CompileBlock of any imported block fails until CompileSoftware ran (--fail-compile-software
+fails that too).
 Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
 --multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
 CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
@@ -103,6 +107,20 @@ def xml_edited(a, block):
     return bool(x) and xml_hash(cur) != xml_hash(x[0])
 
 
+def edited(a, block):
+    """Was the block imported (it is in --state) with content that differs from its sample (SimaticML or documents)?"""
+    for ext, sample in (('.xml', a.xml_sample), ('.s7dcl', a.sample)):
+        cur = glob.glob(os.path.join(a.state, '**', block + ext), recursive=True)
+        if cur:
+            x = glob.glob(os.path.join(sample, '**', block + ext), recursive=True)
+            return not x or xml_hash(cur[0]) != xml_hash(x[0])
+    return False
+
+
+def imported(a, block):
+    return any(glob.glob(os.path.join(a.state, '**', block + ext), recursive=True) for ext in ('.xml', '.s7dcl'))
+
+
 def xml_writer(a, nm, arg):
     if nm == 'ExportXmlBlock':
         block = arg['blockPath'].strip('/').split('/')[-1]
@@ -152,8 +170,15 @@ def portals(a):
 
 
 def writer(a, nm, arg):
+    crashed = os.path.exists(os.path.join(a.state, 'crashed.txt'))
     if nm == 'GetPortals':
-        return json.dumps({'portalId': '', 'portals': portals(a)})
+        return json.dumps({'portalId': '', 'portals': [] if crashed else portals(a)})
+    if crashed:                                       # --crash-compile: TIA Portal is gone, every call fails
+        raise ValueError('The TIA Portal instance is no longer available (fake)')
+    if nm == 'SaveProject':
+        if a.fail_save:
+            raise ValueError('Failed to save project (fake)')
+        return json.dumps({'message': 'Local project saved (fake)'})
     if nm == 'Connect':
         if a.multi_instances and not arg.get('portalId'):
             raise ValueError('More than one TIA Portal instance is running — pass portalId')
@@ -197,8 +222,9 @@ def writer(a, nm, arg):
         return json.dumps({'groupPath': arg['groupPath'], 'overwrite': blocks})
     if nm == 'ImportFromDocuments':
         block = arg['fileNameWithoutExtension']
-        if a.fail_import:                             # the real Writer says no more than this
-            raise ValueError("Failed importing '%s' from documents" % block)
+        sample = glob.glob(os.path.join(a.sample, '**', block + '.s7dcl'), recursive=True)
+        if a.fail_import and not (sample and xml_hash(sample[0]) == xml_hash(os.path.join(arg['importPath'], block + '.s7dcl'))):
+            raise ValueError("Failed importing '%s' from documents" % block)    # the real Writer says no more than this
         target = os.path.join(a.state, *[x for x in arg['groupPath'].split('/') if x])
         copy_tree(arg['importPath'], target, block)
         with open(os.path.join(a.state, 'imports.jsonl'), 'a', encoding='utf-8') as f:
@@ -219,11 +245,20 @@ def writer(a, nm, arg):
         return xml_writer(a, nm, arg)
     if nm == 'CompileBlock':                          # the real answer: {state, errorCount, warningCount, messages: [...]}
         block = arg['path'].split('/')[-1]
-        if a.fail_compile and glob.glob(os.path.join(a.state, '**', block + '.xml'), recursive=True) and xml_edited(a, block):
+        if a.crash_compile and edited(a, block):     # D4: TIA Portal V21 went down in CompileBlock
+            open(os.path.join(a.state, 'crashed.txt'), 'w').close()
+            raise ValueError('Unexpected exception - no exception message available (fake)')
+        if a.fail_compile and edited(a, block) or a.fail_compile_always and imported(a, block) \
+                and not os.path.exists(os.path.join(a.state, 'software.txt')):
             raise ValueError("Compiling '%s' failed with 1 error(s). %s: Invalid operand (fake)" % (arg['path'], block))
         open(os.path.join(a.state, 'compiled.txt'), 'a').write(arg['path'] + '\n')
         return json.dumps({'state': 'Success', 'errorCount': 0, 'warningCount': 0, 'messages': [
             {'path': '%s (FC)' % arg['path'].split('/')[-1], 'state': 'Success', 'description': 'Block was successfully compiled.'}]})
+    if nm == 'CompileSoftware':                       # --fail-compile-always: a compile of the whole software repairs it
+        if a.fail_compile_software:
+            raise ValueError("Compiling '%s' failed with 1 error(s). FB_Other: Invalid operand (fake)" % arg['softwarePath'])
+        open(os.path.join(a.state, 'software.txt'), 'a').write(json.dumps(arg) + '\n')
+        return json.dumps({'state': 'Success', 'errorCount': 0, 'warningCount': 0, 'messages': []})
     raise ValueError('unknown tool %s for the fake Writer' % nm)
 
 
@@ -421,6 +456,11 @@ def main():
     ap.add_argument('--fail-xml-import', action='store_true', help='Writer: ImportXmlBlock of an edited file fails')
     ap.add_argument('--fail-compile', action='store_true', help='Writer: CompileBlock of an edited SimaticML block fails')
     ap.add_argument('--ob-renumbered', action='store_true', help='Writer: GetBlockInfo reports another OB number after an edit')
+    ap.add_argument('--fail-save', action='store_true', help='Writer: SaveProject fails')
+    ap.add_argument('--crash-compile', action='store_true', help='Writer: CompileBlock of an edited block takes TIA down')
+    ap.add_argument('--fail-compile-always', action='store_true',
+                    help='Writer: CompileBlock of any imported block fails (also the original) until CompileSoftware')
+    ap.add_argument('--fail-compile-software', action='store_true', help='Writer: CompileSoftware fails')
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)
     fn = writer if a.role == 'writer' else reader

@@ -121,7 +121,7 @@ class TestNewNetworkApi(unittest.TestCase):
         s, r = self.req('POST', '/api/edits/%s/upload' % u['id'], {})
         self.assertTrue(r['ok'], r)
         self.assertEqual([x['step'] for x in r['write']['steps']],
-                         ['GetPortals', 'Connect', 'ResolveObjectPath', 'ExportXmlBlock', 'Edit the SimaticML', 'ImportXmlBlock',
+                         ['GetPortals', 'Connect', 'ResolveObjectPath', 'ExportXmlBlock', 'Edit the SimaticML', 'SaveProject', 'ImportXmlBlock',
                           'CompileBlock'])
         self.assertEqual((r['edit']['state'], r['write']['via']), ('Signed', 'SimaticML'))
         with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:

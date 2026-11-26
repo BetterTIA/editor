@@ -291,6 +291,10 @@ class TestGroups(unittest.TestCase):
         s, r = self.req('POST', '/api/groups/G001/upload', {})
         self.assertTrue(r['ok'], r)
         self.assertEqual([x['edit'] for x in r['results']], [iface, change])
+        with open(os.path.join(self.tia, 'calls.jsonl'), encoding='utf-8') as f:     # P2: one export and one import per block
+            tools = [json.loads(x)['tool'] for x in f]
+        self.assertEqual(tools[2:], ['ResolveObjectPath', 'ExportBlocksAsDocuments', 'PreviewImport', 'SaveProject',
+                                     'ImportFromDocuments', 'CompileBlock', 'SetNetworkText', 'CompileBlock'])
         b = s7dcl.load_block(os.path.join(self.tia, 'Conveyor', 'FB_Conveyor.s7dcl'))
         self.assertIn('Jam_Detected', b['variables'])
         self.assertEqual(b['networks'][6]['title'], 'Faults, acknowledge and jam')
