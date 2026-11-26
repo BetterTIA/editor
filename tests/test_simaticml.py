@@ -8,6 +8,7 @@ import copy
 import http.client
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -86,10 +87,10 @@ PARALLEL_XML = '''<FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/N
     </Access>
     <Part Name="Contact" UId="24" />
     <Part Name="Contact" UId="25" />
-    <Part Name="Coil" UId="26" />
-    <Part Name="O" UId="27">
+    <Part Name="O" UId="26">
       <TemplateValue Name="Card" Type="Cardinality">2</TemplateValue>
     </Part>
+    <Part Name="Coil" UId="27" />
   </Parts>
   <Wires>
     <Wire UId="28">
@@ -98,28 +99,28 @@ PARALLEL_XML = '''<FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/N
       <NameCon UId="25" Name="in" />
     </Wire>
     <Wire UId="29">
-      <NameCon UId="27" Name="out" />
-      <NameCon UId="26" Name="in" />
-    </Wire>
-    <Wire UId="30">
-      <NameCon UId="24" Name="out" />
-      <NameCon UId="27" Name="in1" />
-    </Wire>
-    <Wire UId="31">
-      <NameCon UId="25" Name="out" />
-      <NameCon UId="27" Name="in2" />
-    </Wire>
-    <Wire UId="32">
       <IdentCon UId="21" />
       <NameCon UId="24" Name="operand" />
     </Wire>
-    <Wire UId="33">
+    <Wire UId="30">
+      <NameCon UId="24" Name="out" />
+      <NameCon UId="26" Name="in1" />
+    </Wire>
+    <Wire UId="31">
       <IdentCon UId="22" />
       <NameCon UId="25" Name="operand" />
     </Wire>
+    <Wire UId="32">
+      <NameCon UId="25" Name="out" />
+      <NameCon UId="26" Name="in2" />
+    </Wire>
+    <Wire UId="33">
+      <NameCon UId="26" Name="out" />
+      <NameCon UId="27" Name="in" />
+    </Wire>
     <Wire UId="34">
       <IdentCon UId="23" />
-      <NameCon UId="26" Name="operand" />
+      <NameCon UId="27" Name="operand" />
     </Wire>
   </Wires>
 </FlgNet>'''
@@ -248,6 +249,237 @@ class TestEditBlock(unittest.TestCase):
         new, _ = simaticml.edit_block(t, [u], find)
         self.assertEqual(simaticml.networks(new)[0]['flgnet'], '')
         self.assertIn('<NetworkSource />', new.split('Cycle counter')[0].split('CompileUnits')[1])
+
+
+def _order(x):
+    """FlgNet text -> ([part names in order], [power rail target names in order]); asserts the current flow: every wire's
+    targets come after its source in the parts list."""
+    import xml.etree.ElementTree as ET
+    f = simaticml._strip_ns(ET.fromstring(x))
+    pos, names = {}, []
+    for p in f.find('Parts'):
+        if p.tag != 'Access':
+            pos[p.get('UId')] = len(names)
+            names.append(p.get('Name') or 'Call:' + p.find('CallInfo').get('Name'))
+    rail = []
+    for w in f.find('Wires'):
+        c = list(w)
+        if c[0].tag == 'Powerrail':
+            rail = [names[pos[d.get('UId')]] for d in c[1:]]
+        elif c[0].tag == 'NameCon':
+            for d in c[1:]:
+                assert d.tag != 'NameCon' or pos[d.get('UId')] > pos[c[0].get('UId')], 'against the flow: ' + x
+    return names, rail
+
+
+def contact(i, op, t='contact'):
+    return {'id': i, 'type': t, 'operand': op}
+
+
+def coil(i, op):
+    return {'id': i, 'type': 'coil', 'operand': op}
+
+
+MOVE = {'id': 'mv', 'type': 'box', 'call': 'instruction', 'name': 'MOVE', 'instance': None, 'template': None,
+        'power': ['EN', 'ENO'], 'inputs': [{'pin': 'IN', 'operand': '#Mode'}], 'outputs': [{'pin': 'OUT1', 'operand': '#Saved'}]}
+VALVE = [('iMode', 'Input', 'Int'), ('bStop', 'Input', 'Bool'), ('bEnable', 'Input', 'Bool'), ('bCmd', 'Input', 'Bool'),
+         ('qOpen', 'Output', 'Bool'), ('qReady', 'Output', 'Bool'), ('HMI', 'InOut', '"udtValve"')]
+
+
+def valve_call(i='fb', inputs=None):
+    return {'id': i, 'type': 'box', 'call': 'fb', 'name': 'FB_Valve', 'instance': '#Valve', 'template': None,
+            'power': ['EN', 'ENO'],
+            'inputs': inputs or [{'pin': 'iMode', 'operand': '#iMode'}, {'pin': 'bEnable', 'operand': 'true'},
+                                 {'pin': 'HMI', 'operand': '"HMI_DB".Station.Valve'}],
+            'outputs': [{'pin': 'qOpen', 'operand': '"qValve"'}]}
+
+
+def valve_params(name, kind):
+    return VALVE if (name, kind) == ('FB_Valve', 'FB') else None
+
+
+# the shape of TIA's own export of such a call (V21): every parameter has a wire, an unconnected one an OpenCon (UIds after
+# the parts), the wires in the order of the parameters — inputs and in-outs, then outputs; no wire on ENO
+VALVE_XML = '''<FlgNet xmlns="http://www.siemens.com/automation/Openness/SW/NetworkSource/FlgNet/v5">
+  <Parts>
+    <Access Scope="LocalVariable" UId="21">
+      <Symbol>
+        <Component Name="iMode" />
+      </Symbol>
+    </Access>
+    <Access Scope="LiteralConstant" UId="22">
+      <Constant>
+        <ConstantType>Bool</ConstantType>
+        <ConstantValue>true</ConstantValue>
+      </Constant>
+    </Access>
+    <Access Scope="GlobalVariable" UId="23">
+      <Symbol>
+        <Component Name="HMI_DB" />
+        <Component Name="Station" />
+        <Component Name="Valve" />
+      </Symbol>
+    </Access>
+    <Access Scope="GlobalVariable" UId="24">
+      <Symbol>
+        <Component Name="qValve" />
+      </Symbol>
+    </Access>
+    <Call UId="25">
+      <CallInfo Name="FB_Valve" BlockType="FB">
+        <Instance Scope="LocalVariable" UId="26">
+          <Component Name="Valve" />
+        </Instance>
+        <Parameter Name="iMode" Section="Input" Type="Int" />
+        <Parameter Name="bStop" Section="Input" Type="Bool" />
+        <Parameter Name="bEnable" Section="Input" Type="Bool" />
+        <Parameter Name="bCmd" Section="Input" Type="Bool" />
+        <Parameter Name="qOpen" Section="Output" Type="Bool" />
+        <Parameter Name="qReady" Section="Output" Type="Bool" />
+        <Parameter Name="HMI" Section="InOut" Type="&quot;udtValve&quot;" />
+      </CallInfo>
+    </Call>
+  </Parts>
+  <Wires>
+    <Wire UId="30">
+      <Powerrail />
+      <NameCon UId="25" Name="en" />
+    </Wire>
+    <Wire UId="31">
+      <IdentCon UId="21" />
+      <NameCon UId="25" Name="iMode" />
+    </Wire>
+    <Wire UId="32">
+      <OpenCon UId="27" />
+      <NameCon UId="25" Name="bStop" />
+    </Wire>
+    <Wire UId="33">
+      <IdentCon UId="22" />
+      <NameCon UId="25" Name="bEnable" />
+    </Wire>
+    <Wire UId="34">
+      <OpenCon UId="28" />
+      <NameCon UId="25" Name="bCmd" />
+    </Wire>
+    <Wire UId="35">
+      <IdentCon UId="23" />
+      <NameCon UId="25" Name="HMI" />
+    </Wire>
+    <Wire UId="36">
+      <NameCon UId="25" Name="qOpen" />
+      <IdentCon UId="24" />
+    </Wire>
+    <Wire UId="37">
+      <NameCon UId="25" Name="qReady" />
+      <OpenCon UId="29" />
+    </Wire>
+  </Wires>
+</FlgNet>'''
+
+
+class TestFlowOrder(unittest.TestCase):
+    """D13 / D14 / D20a / D10a / D2 / D3 — TIA imports a network only when its parts follow the current flow and the power
+    rail's connections follow the walk that orders them; a call needs a wire on every parameter. The order is the one of
+    TIA's own exports (a part after the parts feeding its inputs, depth first from the ends of the rungs)."""
+
+    def test_or_join_before_its_coil(self):
+        """D13: (A <> B ∥ P edge) → O → coil, and a MOVE rung after it; the model lists the coil before the second branch."""
+        m = {'elements': [{'id': 'ne', 'type': 'comparison', 'op': '<>', 'in1': '#Mode', 'in2': '#Saved', 'template': 'Int'},
+                          coil('q', '#Changed'), {'id': 'pc', 'type': 'contact_p', 'operand': '#Ack', 'bit': '#AckMem'}, MOVE],
+             'rungs': [{'from': 'powerrail', 'path': ['ne', 'wire#w1', 'q'], 'to': None},
+                       {'from': 'powerrail', 'path': ['pc'], 'to': 'w1'},
+                       {'from': 'powerrail', 'path': ['mv'], 'to': None}]}
+        x = simaticml.flgnet(m)
+        simaticml.check_flgnet(x)
+        self.assertEqual(_order(x), (['Ne', 'PContact', 'O', 'Coil', 'Move'], ['Ne', 'PContact', 'Move']))
+        pc = re.search(r'<Part Name="PContact" UId="(\d+)"', x).group(1)                  # TIA wires the edge bit first
+        self.assertLess(x.index('<NameCon UId="%s" Name="bit" />' % pc), x.index('<NameCon UId="%s" Name="operand" />' % pc))
+
+    def test_two_or_joins_and_a_nested_one(self):
+        """D20a: two joins into separate wires (the O parts used to come last), and an O feeding another O."""
+        m = {'elements': [coil('q1', '#Enable'), coil('q2', '#Toggle'), contact('man', '#Man'), contact('auto', '#Auto'),
+                          contact('x', '#X'), contact('e1', '#Edge'), contact('nx', '#X', 'contact_nc'),
+                          contact('ne', '#Edge', 'contact_nc'), contact('x2', '#X')],
+             'rungs': [{'from': 'powerrail', 'path': ['man', 'wire#w1', 'q1'], 'to': None},
+                       {'from': 'powerrail', 'path': ['auto', 'x'], 'to': 'w1'},
+                       {'from': 'powerrail', 'path': ['e1', 'nx', 'wire#w2', 'q2'], 'to': None},
+                       {'from': 'powerrail', 'path': ['ne', 'x2'], 'to': 'w2'}]}
+        x = simaticml.flgnet(m)
+        simaticml.check_flgnet(x)
+        self.assertEqual(_order(x)[0], ['Contact'] * 3 + ['O', 'Coil'] + ['Contact'] * 4 + ['O', 'Coil'])
+        shuffled = dict(m, elements=m['elements'][:2] + m['elements'][2:][::-1])        # the walk starts at the coils
+        self.assertEqual(simaticml.flgnet(shuffled), x)
+        nested = {'elements': [contact('b', '#B'), contact('c', '#C'), contact('d', '#D'), contact('e', '#E'), coil('q', '#Q')],
+                  'rungs': [{'from': 'powerrail', 'path': ['b', 'wire#w2', 'wire#w1', 'q'], 'to': None},
+                            {'from': 'powerrail', 'path': ['c', 'd'], 'to': 'w2'},
+                            {'from': 'powerrail', 'path': ['e'], 'to': 'w1'}]}
+        x = simaticml.flgnet(nested)
+        simaticml.check_flgnet(x)
+        self.assertEqual(_order(x), (['Contact', 'Contact', 'Contact', 'O', 'Contact', 'O', 'Coil'], ['Contact'] * 3))
+        self.assertIn(('O[].out', 'O[].in1'), simaticml.graph(x))
+
+    def test_power_rail_follows_the_parts(self):
+        """D14: a contact from the rail added to an existing join (Card 3), listed last in the model, after another rung."""
+        m = {'elements': [contact('a', '#A'), coil('q', '#Q'), contact('b', '#B'), MOVE, contact('c', '#C')],
+             'rungs': [{'from': 'powerrail', 'path': ['a', 'wire#w1', 'q'], 'to': None},
+                       {'from': 'powerrail', 'path': ['b'], 'to': 'w1'},
+                       {'from': 'powerrail', 'path': ['mv'], 'to': None},
+                       {'from': 'powerrail', 'path': ['c'], 'to': 'w1'}]}
+        x = simaticml.flgnet(m)
+        self.assertEqual(_order(x), (['Contact', 'Contact', 'Contact', 'O', 'Coil', 'Move'],
+                                     ['Contact', 'Contact', 'Contact', 'Move']))
+        self.assertIn('<TemplateValue Name="Card" Type="Cardinality">3</TemplateValue>', x)
+        rail = x[x.index('<Powerrail />'):x.index('</Wire>')]
+        self.assertEqual(re.findall(r'NameCon UId="(\d+)"', rail), ['27', '28', '29', '32'])
+
+    def test_call_with_unconnected_parameters(self):
+        """D10a: the call gets an OpenCon on each parameter the proposal leaves empty — byte for byte TIA's export shape."""
+        m = lad(valve_call())
+        self.assertEqual(simaticml.flgnet(m, valve_params), VALVE_XML)
+        simaticml.check_flgnet(VALVE_XML)
+        self.assertNotIn('"eno"', VALVE_XML)
+        empty = valve_call(inputs=[{'pin': 'iMode', 'operand': '#iMode'}, {'pin': 'bStop', 'operand': ''},
+                                   {'pin': 'bEnable', 'operand': 'true'}, {'pin': 'HMI', 'operand': '"HMI_DB".Station.Valve'}])
+        self.assertEqual(simaticml.flgnet(lad(empty), valve_params), VALVE_XML)           # an empty pin = not connected
+        # the before-check ignores open pins: the export with OpenCons = the proposal's model
+        self.assertEqual(simaticml.graph(VALVE_XML), simaticml.graph(simaticml.flgnet(m, valve_params)))
+
+    def test_call_beside_a_parallel_branch(self):
+        """D2: (A ∥ B ∧ C) → coil and an FB call on its own rung in the same network."""
+        m = {'elements': [contact('a', '#A'), contact('b', '#B'), contact('c', '#C'), coil('q', '#Q'), valve_call()],
+             'rungs': [{'from': 'powerrail', 'path': ['a', 'wire#w1', 'q'], 'to': None},
+                       {'from': 'powerrail', 'path': ['b', 'c'], 'to': 'w1'},
+                       {'from': 'powerrail', 'path': ['fb'], 'to': None}]}
+        x = simaticml.flgnet(m, valve_params)
+        simaticml.check_flgnet(x)
+        self.assertEqual(_order(x), (['Contact'] * 3 + ['O', 'Coil', 'Call:FB_Valve'], ['Contact', 'Contact', 'Call:FB_Valve']))
+        self.assertEqual(x.count('<OpenCon '), 3)
+
+    def test_call_fed_by_contacts_on_its_pins(self):
+        """Contacts feeding a call's input pin come first in the parts; the call's EN is first on the power rail (TIA)."""
+        call = valve_call(inputs=[{'pin': 'iMode', 'operand': '#iMode'}, {'pin': 'bCmd', 'operand': 'wire#w1'}])
+        m = {'elements': [contact('a', '#A'), contact('b', '#B'), call],
+             'rungs': [{'from': 'powerrail', 'path': ['fb'], 'to': None},
+                       {'from': 'powerrail', 'path': ['a', 'b'], 'to': 'w1'}]}
+        x = simaticml.flgnet(m, valve_params)
+        simaticml.check_flgnet(x)
+        self.assertEqual(_order(x), (['Contact', 'Contact', 'Call:FB_Valve'], ['Call:FB_Valve', 'Contact']))
+        self.assertIn(('Contact[operand=#B].out', 'Call:FB_Valve@Valve[iMode=#iMode|qOpen="qValve].bCmd'), simaticml.graph(x))
+        self.assertEqual(x.count('<OpenCon '), 4)                    # bStop, bEnable, HMI, qReady; bCmd is wired
+
+    def test_inc(self):
+        """D3: INC (documents: `Inc( #x )` with DestType) -> Part Inc, DisabledENO, DestType, pin operand."""
+        import s7dcl
+        inc = dict(s7dcl.element('Inc', '#Count', {'S7_Templates': 'DestType := Int'}), id='inc')
+        x = simaticml.flgnet(lad(contact('a', '#Step'), inc))
+        simaticml.check_flgnet(x)
+        self.assertIn('<Part Name="Inc" UId="24" DisabledENO="true">\n      <TemplateValue Name="DestType" Type="Type">Int'
+                      '</TemplateValue>\n    </Part>', x)
+        g = simaticml.graph(x)
+        self.assertIn(('Contact[operand=#Step].out', 'Inc[operand=#Count].en'), g)
+        named = dict(inc, inputs=[{'pin': 'OPERAND', 'operand': '#Count'}])
+        self.assertEqual(simaticml.flgnet(lad(contact('a', '#Step'), named)), x)
+        self.assertIn('INC without its data type', simaticml.unsupported(lad(dict(inc, template=None))))
 
 
 class TestObInfo(unittest.TestCase):

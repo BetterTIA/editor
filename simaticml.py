@@ -14,9 +14,11 @@ change byte for byte:
   TIA is still the proposal's "before" network;
 - `ob_attributes` / `ob_mismatch` — number, event class and cycle of an OB, compared with GetBlockInfo after the import.
 
-The shapes follow V21 exports (Contact / Coil / SCoil / RCoil / PContact / NContact, Eq…Le, Move, Add…Div, InRange,
-TON / TP with Instance and time_type, PBox, Call with CallInfo, O with Card). OutRange, TOF, NBox and the FBD parts
-A / X are written by analogy and are not verified in an export. Everything else is refused before any write (`unsupported`).
+The shapes follow V21 exports (Contact / Coil / SCoil / RCoil / PContact / NContact, Eq…Le, Move, Add…Div, Inc, InRange,
+TON / TP with Instance and time_type, PBox, Call with CallInfo and an OpenCon on each unconnected parameter, O with Card),
+and so does the order (`_Net._flow`): parts by the current flow (a part after the parts feeding it), the power rail's
+connections in the order that walk meets them, accesses, OpenCons and wires in the order of the parts. OutRange, TOF,
+NBox and the FBD parts A / X are written by analogy and are not verified in an export. Everything else is refused before any write (`unsupported`).
 """
 import collections
 import re
@@ -40,7 +42,7 @@ REAL = {'Real', 'LReal'}
 VERSIONED = {'TON_TIME', 'TOF_TIME', 'TP_TIME', 'TONR_TIME', 'IEC_TIMER', 'IEC_COUNTER', 'CTU_INT', 'CTD_INT', 'CTUD_INT',
              'R_TRIG', 'F_TRIG'}
 SUPPORTED = ('contacts (NO, NC, P, N), coils (=, S, R), parallel branches, comparisons (==, <>, <, >, <=, >=), MOVE, '
-             'ADD, SUB, MUL, DIV, IN_RANGE, OUT_RANGE, TON, TOF, TP, P_TRIG, N_TRIG and FB / FC calls; FBD &, >=1, x, =, S, R')
+             'ADD, SUB, MUL, DIV, INC, IN_RANGE, OUT_RANGE, TON, TOF, TP, P_TRIG, N_TRIG and FB / FC calls; FBD &, >=1, x, =, S, R')
 
 
 class XmlError(ValueError):
@@ -159,6 +161,7 @@ class _Net:
         self.sinks = collections.OrderedDict()                 # source -> [targets]  (source = ('P',) | (uid, pin))
         self.operands = []                                     # (access uid, part uid, pin, out?)
         self.open = []                                         # (part uid, pin, out?)
+        self.pins = {}                                         # part key -> its xml pins in declaration order
 
     def next(self):
         self.uid += 1
@@ -176,30 +179,70 @@ class _Net:
         attrs = [(k, self.next() if k == 'UId' and v is None else v) for k, v in attrs]
         return tag, attrs, [self._number(c) for c in body] if isinstance(body, list) else body
 
+    def _rank(self, part, pin):
+        """Order of a part's pins: the power pins (en, in, pre…) first, then the box pins as declared (in1 < in2 < … for O)."""
+        p = self.pins.get(part, [])
+        return p.index(pin) + 1 if pin in p else int(re.sub(r'\D', '', pin) or 0)
+
+    def _flow(self):
+        """-> (part keys, power rail connections) in the order of the current flow, the way TIA exports a network: depth
+        first from the parts that feed no other part (in model order), each part after the parts feeding its inputs (in
+        pin order); a power rail connection where this walk meets it. TIA refuses other orders ("The elements must be sorted according to the
+        current flow"; "… the connections in the power rail must be located in the same sequence")."""
+        feeds = collections.defaultdict(list)
+        for s, ds in self.sinks.items():
+            for d in ds:
+                feeds[d[0]].append((self._rank(*d), s, d))
+        seen, order, rail = set(), [], []
+
+        def visit(k):
+            if k not in seen:
+                seen.add(k)
+                for _, s, d in sorted(feeds[k], key=lambda x: x[0]):
+                    if s == ('P',):
+                        rail.append(d)
+                    else:
+                        visit(s[0])
+                order.append(k)
+        fed = {s[0] for s in self.sinks if s != ('P',)}
+        for k in [k for k, _, _ in self.parts if k not in fed] + [k for k, _, _ in self.parts]:
+            visit(k)                                           # from the ends of the rungs (coils, boxes), in model order
+        return order, rail
+
     def build(self):
+        """Everything in the order of the parts, as TIA exports it: Access UIds first (in the order of the parts they feed),
+        then the parts, the OpenCons and the wires (power rail first, then per part its inputs and its outputs); the
+        connections of a branching wire in the order of the parts."""
+        order, rail = self._flow()
+        at = {k: i for i, k in enumerate(order)}
+        node_of = {k: n for k, _, n in self.parts}
+        rank = self._rank
         acc = []
-        for text, hint, part, pin, out in self.operands:      # Access UIds first, like TIA
+        for text, hint, part, pin, out in sorted(self.operands, key=lambda o: (at[o[2]], o[4])):
             uid = self.next()
             acc.append((uid, part, pin, out))
             self.accesses.append(access(uid, text, hint))
         ids, parts = {}, []
-        for key, _, node in self.parts:                        # parts after the accesses; an Instance right after its part
-            node = self._number(node)
+        for key in order:                                      # parts after the accesses; an Instance right after its part
+            node = self._number(node_of[key])
             ids[key] = dict(node[1])['UId']
             parts.append(node)
+        opens = [(self.next(), part, pin, out) for part, pin, out in self.open]
         wires = []
 
         def con(c):
             return ('Powerrail', [], None) if c == ('P',) else ('NameCon', [('UId', ids[c[0]]), ('Name', c[1])], None)
         for s, ds in self.sinks.items():
-            wires.append([con(s)] + [con(d) for d in ds])
+            k = (-1, 0, 0) if s == ('P',) else (at[s[0]], 1, rank(*s))
+            ds = rail if s == ('P',) else sorted(ds, key=lambda d: at[d[0]])
+            wires.append((k, [con(s)] + [con(d) for d in ds]))
         for uid, part, pin, out in acc:
             ident = ('IdentCon', [('UId', uid)], None)
-            wires.append([con((part, pin)), ident] if out else [ident, con((part, pin))])
-        for part, pin, out in self.open:
-            o = ('OpenCon', [('UId', self.next())], None)
-            wires.append([con((part, pin)), o] if out else [o, con((part, pin))])
-        wires = [('Wire', [('UId', self.next())], w) for w in wires]
+            wires.append(((at[part], int(out), rank(part, pin)), [con((part, pin)), ident] if out else [ident, con((part, pin))]))
+        for uid, part, pin, out in opens:
+            o = ('OpenCon', [('UId', uid)], None)
+            wires.append(((at[part], int(out), rank(part, pin)), [con((part, pin)), o] if out else [o, con((part, pin))]))
+        wires = [('Wire', [('UId', self.next())], w) for _, w in sorted(wires, key=lambda w: w[0])]
         return ('FlgNet', [('xmlns', FLG_NS)], [('Parts', [], self.accesses + parts or None), ('Wires', [], wires or None)])
 
 
@@ -232,18 +275,23 @@ def _box(p, call_params):
             raise XmlError('a call of an unknown block (instance %s) — the XML way needs the called block' % inst)
         params = call_params(name, kind) if call_params else None
         if params == 'any':                                    # a check before the export: the pins are taken as they are
-            params = [(x['pin'], 'Input', '') for x in p.get('inputs', []) + p.get('outputs', [])]
+            params = [(x['pin'], 'Input', '') for x in p.get('inputs', [])] + \
+                [(x['pin'], 'Output', '') for x in p.get('outputs', [])]
         if params is None:
             raise XmlError('the interface of %s "%s" is not in the export — the XML way cannot write its call' % (kind, name))
         info = [('Parameter', [('Name', n), ('Section', s), ('Type', t)], None) for n, s, t in params]
-        types = {n: t for n, s, t in params}
+        pins = {n: (n, t) for n, s, t in params}
         for x in p.get('inputs', []) + p.get('outputs', []):
-            if x['pin'] not in types:
+            if x['pin'] not in pins:
                 raise XmlError('%s "%s" has no parameter %s' % (kind, name, x['pin']))
-            pins[x['pin']] = (x['pin'], types[x['pin']])
         ci = [('Instance', [('Scope', _scope(inst, inst)), ('UId', None)], _symbol(inst, inst))] if kind == 'FB' else []
         node = ('Call', [('UId', None)], [('CallInfo', [('Name', name), ('BlockType', kind)], ci + info)])
-        return node, 'en', 'eno', pins, False
+        return node, 'en', 'eno', pins, {n: s for n, s, t in params}
+    if name == 'INC':
+        if not tmpl:
+            raise XmlError('INC without its data type — the XML way needs it (DestType)')
+        pins.update({'IN': ('operand', tmpl), 'OPERAND': ('operand', tmpl)})  # positional / named in the documents
+        return _part_node('Inc', disabled_eno=True, children=[_template('DestType', tmpl)]), 'en', 'eno', pins, True
     if name == 'MOVE':
         outs = p.get('outputs', [])
         for i, x in enumerate(outs, 1):
@@ -279,6 +327,7 @@ def _element(net, p, call_params):
         net.operand(key, 'operand', _required(p, 'operand'))
         if t in ('contact_p', 'contact_n'):
             net.operand(key, 'bit', _required(p, 'bit'))
+            net.pins[key] = ['bit', 'operand']                # TIA wires the edge bit first (its accesses: operand first)
             return key, 'pre', 'out'
         return key, 'in', 'out'
     if t in COILS:
@@ -316,7 +365,11 @@ def _required(p, k):
 
 
 def _box_pins(net, key, p, pins, open_out, skip=()):
-    """Operands of a box's pins (inputs fed by a node are wired by the caller). Pins the XML way does not know -> error."""
+    """Operands of a box's pins (inputs fed by a node are wired by the caller). Pins the XML way does not know -> error.
+    open_out: True = open outputs get an OpenCon; a call's {parameter: section} = every parameter without a connection
+    gets an OpenCon, as in TIA's export (without it TIA refuses: "The connection with the name 'n' is not connected")."""
+    call = isinstance(open_out, dict)
+    net.pins[key] = [v[0] for v in pins.values()]
     for x in p.get('inputs', []):
         if x['pin'] in skip or (x.get('operand') or '').startswith('wire#') or x.get('signal'):
             continue
@@ -324,7 +377,7 @@ def _box_pins(net, key, p, pins, open_out, skip=()):
             raise XmlError('pin %s of %s is not written by the XML way' % (x['pin'], p.get('name')))
         if (x.get('operand') or '').strip():
             net.operand(key, pins[x['pin']][0], x['operand'], pins[x['pin']][1])
-        elif p.get('call') not in ('fb', 'fc'):
+        elif not call:
             net.open.append((key, pins[x['pin']][0], False))
     for x in p.get('outputs', []):
         if x['pin'] not in pins:
@@ -333,8 +386,11 @@ def _box_pins(net, key, p, pins, open_out, skip=()):
             raise XmlError('a negated output (%s) is not written by the XML way' % x['pin'])
         if (x.get('operand') or '').strip():
             net.operand(key, pins[x['pin']][0], x['operand'], pins[x['pin']][1], out=True)
-        elif open_out:
+        elif open_out is True:
             net.open.append((key, pins[x['pin']][0], True))
+    if call:
+        used = {x['pin'] for x in p.get('inputs', []) + p.get('outputs', []) if (x.get('operand') or '').strip() or x.get('signal')}
+        net.open += [(key, n, s == 'Output') for n, s in open_out.items() if n not in used and n not in skip]
 
 
 def _lad(model, call_params):
