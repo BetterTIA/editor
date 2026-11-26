@@ -128,6 +128,17 @@ class TestValidation(unittest.TestCase):
         m, i = model.insert(nw(2), {'r': 0, 'k': 0}, catalog.element(CAT, 'MOVE'))   # main branch inside the parallel section
         self.assertTrue(any('parallel branch' in c for c in self.errors(m)))
 
+    def test_box_in_branch_from_export(self):
+        """D9: a box TIA already holds in a parallel branch (unchanged from before) is not reported; a changed one is."""
+        before, i = model.branch(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.element(CAT, 'fb:FB_Belt'))
+        m, _ = model.branch(before, {'r': 0, 'k': 0}, {'r': 0, 'k': 1}, {'type': 'contact', 'operand': '"Ack"'})
+        self.assertEqual(model.validate(m, before), [])
+        self.assertEqual([c['id'] for c in model.validate(m)], [i])                 # without before: still reported
+        m = model.change(m, i, {'instance': '"Other_DB"'})
+        self.assertEqual([c['id'] for c in model.validate(m, before)], [i])         # changed -> reported again
+        m2, j = model.branch(nw(1), {'r': 0, 'k': 1}, {'r': 0, 'k': 2}, catalog.element(CAT, 'MOVE'))
+        self.assertEqual([c['id'] for c in model.validate(m2, nw(1)) if 'parallel' in c['error']], [j])   # new -> reported
+
     def test_coil_middle(self):
         m, _ = model.insert(nw(1), {'r': 0, 'k': 4}, {'type': 'contact', 'operand': '"Ack"'})
         self.assertEqual([c['id'] for c in model.validate(m)], ['p4'])

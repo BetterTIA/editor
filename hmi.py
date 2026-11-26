@@ -72,7 +72,11 @@ def text(v):
         def culture(x):                               # the real dump: language = {"$type": "Language", "culture": "en-US"}
             return x['language'].get('culture') if isinstance(x.get('language'), dict) else x.get('language')
         v = next((x for x in items if culture(x) == 'en-US'), items[0] if items else {}).get('text')
-    return (re.sub(r'<[^>]+>', '', v).strip() or None) if isinstance(v, str) else None
+    return (re.sub(r'<[^>]+>', '', BR.sub('\n', v)).strip() or None) if isinstance(v, str) else None
+
+
+# a line break of Unified rich text (<br/>, <br />, <br>) = "\n" in the model, so a proposal with "\n" or "<br/>" checks equal
+BR = re.compile(r'<br\s*/?>', re.I)
 
 
 def color(v):
@@ -269,7 +273,7 @@ def validate(m, known_tags=None, hmi_tables=True):
 
 def _flat(it):
     d = {k: it.get(k) for k in ('type', 'left', 'top', 'width', 'height')}
-    d['text'] = it.get('text') or None
+    d['text'] = BR.sub('\n', it.get('text') or '') or None
     d.update({'colors.' + k: v for k, v in (it.get('colors') or {}).items()})
     d.update({'font.' + k: v for k, v in (it.get('font') or {}).items()})
     d.update({'binding ' + b['property']: b['tag'] for b in it.get('bindings') or []})

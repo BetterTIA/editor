@@ -21,6 +21,9 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
 - `--demo` = a demo instance (see [Demo mode](#demo-mode)); implied when `--writer-cmd` / `--reader-cmd` (or the
   `.mcp.json` entries) run `tests\fake_mcp.py`.
 - `--ai-timeout` (60 s) = an AI client (see [MCP server](#mcp-server)) without a heartbeat for this long is forgotten.
+- `--tested-retention-days N` (default 0 = off) = at start and every hour delete Tested edits tested at least N days ago
+  (as `POST /api/cleanup {states: ["Tested"], older_than_days: N, dry_run: false, force: true}`: backup of `state.json`,
+  tombstones, ids are never reused).
 - The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403,
   and so does every request whose `Host` is not `localhost:<port>` / `127.0.0.1:<port>` (a page of another name that
   resolves to 127.0.0.1 cannot read the API). A `project` from the URL is a folder name, never a path (400 otherwise).
@@ -145,7 +148,10 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 - **Checked** = the export after writing matches the proposal; allowed only when the **last** check is a match
   (a later mismatch locks it again), otherwise **409**. `checked_allowed` in `GET /api/edits/<id>`. An export check of the
   editor itself (`check-export`, group check, Reader check) that matches moves a **Signed** edit to Checked (`by: "export check"`).
+  **By hand:** Signed → Checked with a `reason` (what a person checked in TIA) is allowed whatever the last check says
+  (e.g. a false MISMATCH); it records a matching check `by hand: <reason>` and the history entry `reason: "checked by hand: …"`.
 - **Uploaded** / **Tested** are set by the user.
+- **Uploaded** records the project version `V<1>.<2>.<3>` (3rd number = one change, 2nd = a larger set of functions, 1st = release; a person confirms it) as `uploaded: {version, time, by}` on the edit, and the project keeps it as its current `version` in `state.json`. The editor proposes the next one (`versions: {current, patch, minor}` in `GET /api/edits/<id>` and `GET /api/groups/<id>` while the next step is Uploaded); the request must carry `version` (a person confirms it; the UI field is prefilled with the patch proposal), without it the step is refused (400). `1.4.2` is accepted and stored as `V1.4.2`. **Tested** records `tested: {version, time, by}` with the version of the Uploaded. A step back drops the record of the state left; edits from before versions keep working (Tested of such an edit takes `version` or the project version).
 - Only one step forward or back at a time.
 - **Disapproved** is a side state: from Proposal or Approved with `{state: "Disapproved", reason}` (the reason is
   required, 400 without it). It is kept in `disapproved: {reason, time, by}` and in the history, and stays there after
@@ -155,10 +161,11 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/state[?project=]` | the whole `state.json` of a project; without a project `{projects: [{project, edits}]}` |
-| PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
+| PUT | `/api/state/tia?project=` | `{softwarePath, plcName?, groupPath?, upload?, save?}` — sets only the TIA settings (empty values dropped, `{}` clears them) → `{project, tia}` |
+| POST | `/api/state/tia/fixed?project=` | `{by}` — the operator confirms TIA was fixed after an Upload that left the project unsafe to save; Uploads are allowed again (kept in `unsafe_fixed`); 409 when nothing is marked |
 | POST | `/api/edits` | new change `{project, round, block, nw, after, note}` → 201, state Proposal, author `editor` |
 | GET | `/api/edits/<id>[?width=]` | change + drawing of "after" with `diff` marks (`added` / `changed`, ghosts `x:<id>` = `deleted`), `next`, `previous`, `checked_allowed`, `errors`, `tia`, `warnings` |
-| POST | `/api/edits/<id>/state` | `{state, by, reason?}` — one step forward/back; Checked only after a matching check, otherwise 409 with the reason; Disapproved needs `reason` |
+| POST | `/api/edits/<id>/state` | `{state, by, reason?, version?}` — one step forward/back; `version` for Uploaded (see States); Checked only after a matching check, otherwise 409 with the reason; Disapproved needs `reason` |
 | PUT/POST | `/api/edits/<id>/after` | saves the "after" model (Proposal or Disapproved → back to Proposal; rule errors do not block saving) → `{edit, errors}` |
 | POST | `/api/check` | `{edit_id, match, export_ts, note}` — records the result of comparing an export with the proposal by hand (automatic: see [Export check](#export-check)) |
 
@@ -243,11 +250,11 @@ has in the exported block).
 | POST | `/api/groups` | `{edit_ids: [...] in order, name?, card?, card_title?, task?, goal?}` → 201 the group; at least two edits of one project, none in another group (409) |
 | GET | `/api/groups` | `?project=&card=&state=` → `{groups: [...]}` (the group shape below); `card` is an exact match. A group whose name starts with `#<card> ` and has no `card` field gets `card` / `card_title` derived from the name when the state is loaded |
 | POST | `/api/groups/<id>` | `{name?, card?, card_title?}` — only the given fields change; an empty `card` / `card_title` is cleared (not derived again) |
-| POST | `/api/cleanup` | `{project?, states?, group?, card?, all?, dry_run?, force?, by?}` — deletes many edits (editor state only, TIA is not touched). A filter or `all: true` is required (400). `dry_run` (default **true**) → `{dry_run, count, needs_force: [ids written to TIA], edits: [{id, project, state, where, group}]}`; `dry_run: false` first copies `state.json` to `<data>/backups/state-<project>-<time>.json` (`backups` in the reply), written states (Signed and later) need `force: true` (else 409); tombstones and the changelog as for a single delete |
+| POST | `/api/cleanup` | `{project?, states?, group?, card?, older_than_days?, all?, dry_run?, force?, by?}` — deletes many edits (editor state only, TIA is not touched). A filter or `all: true` is required (400); `older_than_days` = reached the current state at least that many days ago (the last history entry). `dry_run` (default **true**) → `{dry_run, count, needs_force: [ids written to TIA], edits: [{id, project, state, where, group}]}`; `dry_run: false` first copies `state.json` to `<data>/backups/state-<project>-<time>.json` (`backups` in the reply), written states (Signed and later) need `force: true` (else 409); tombstones and the changelog as for a single delete |
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
-| POST | `/api/groups/<id>/state` | `{state, by}` — every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
+| POST | `/api/groups/<id>/state` | `{state, by, reason?, version?}` — one version for every member moved to Uploaded; every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
-| POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}`; through SimaticML (an OB, GRAPH, a new network, `upload: xml`): one import per block, `via: "SimaticML"`, all members succeed or fail together |
+| POST | `/api/groups/<id>/upload` | `{compile?: false}`. Every member Approved and none F (else 409). **Before any write** the group is refused (409, nothing written) when Upload cannot make one of its members — an HMI change the Writer has no tool for, or what the SimaticML way does not write when the group goes that way. Then the PLC members in one Upload (see [Upload and Check](#upload-and-check): one export, one import and one compile per block, members applied interface → new networks → changes; all through SimaticML when one member needs it — an OB, GRAPH, a new network, `upload: xml`, `compile: false` — `via: "SimaticML"`); all PLC members succeed or fail together (a failure restores every block already imported). The HMI members come last, one by one, only when the PLC part succeeded → `{ok, results: [{edit, ok, message}], view}`. Every member that was written is recorded (Signed) — nothing raises after the first write |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
 | DELETE | `/api/groups/<id>[?edits=1][&force=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — an edit already written (Signed and later) only with `force=1`, else 409 → `{project, group, deleted}` |
 | DELETE | `/api/edits/<id>` | deletes an edit (editor state only, TIA is not touched): Proposal, Approved, Disapproved; an edit already written (Signed and later) only with `?force=1`, else 409; a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
@@ -447,7 +454,8 @@ as SimaticML with `<ProgrammingLanguage>GRAPH` — and a **new network** (the do
 uploaded only with its group (409 otherwise — one member alone leaves the block half changed). When an Upload fails,
 the documents of the attempt are kept in `<--data>\<project>\upload-failed\<id>-<time>\` (the message names the folder).
 When the export check cannot find a change (e.g. TIA took a new network only as two networks), a person records the
-result by hand on a Signed edit ("Record a check by hand…" → `POST /api/check` with a note). The server starts
+result by hand on a Signed edit ("Record a check by hand…": ✓ Match → `POST /api/edits/<id>/state {state: "Checked", reason}`,
+also over a MISMATCH; ✗ Mismatch → `POST /api/check` with the note). The server starts
 TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 1. `GetPortals {}` → `Connect {portalId}` (the instance attached in the status, otherwise the only running one). No
    instance → `ok: false` "TIA Portal is not running" and **no `Connect`** (Upload never starts TIA Portal); several
@@ -462,9 +470,39 @@ TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
    written only for a comparison or TON (other instructions: stop, make it by hand); a title / comment-only edit leaves
    the network text as it is; `.s7res` is not changed, BOM and CRLF are kept,
 5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (the text is stored in the record as `preview`),
-6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`,
-7. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
+6. `SaveProject {}` — once per Upload, right before the first import (D4: a TIA crash during the import or the compile
+   then loses nothing of before the Upload; turned off by the TIA setting `save: "no"`, UI *save the project before
+   Upload*). When it fails, nothing is written,
+7. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`,
+8. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
    exports no inconsistent block (`SetNetworkText`, the Check and the next Upload would find nothing; seen on a real project).
+   A block the Writer reports as "still inconsistent after the compile" counts as failed. When `CompileBlock` fails and
+   the PLC of the newest export has **no F-blocks**, `CompileSoftware {softwarePath}` follows (D20b; it fails, too, when
+   its "still inconsistent" warning names the block — Openness V21 has no rebuild all). With F-blocks the editor never
+   compiles the whole software — it would compile the safety program, which stays with the operator.
+
+Several edits of one block (a group) are applied to **one** export of the block and imported and compiled **once** (P2:
+interface → new networks → changes; the blocks in the order of their first member, so a block with an interface edit
+comes before the blocks that call it; HMI members after all blocks). Only the network texts need a compile each
+(`SetNetworkText` imports the block again).
+
+**After a failure past the first import** (E8 / D10b): first `GetPortals` — when the Writer died or the TIA Portal
+instance is gone, the result starts with **"TIA PORTAL MAY HAVE CRASHED"** and nothing is restored (D4). Otherwise every
+block already imported gets its export from before the write back (`Restore: ImportFromDocuments` with the exported
+documents, or `Restore: ImportXmlBlock`) and is compiled as above (`Restore: CompileBlock` → `Restore: CompileSoftware`).
+A block that cannot be restored or does not compile afterwards → the message starts with **"BLOCK INCONSISTENT: <blocks>
+— DO NOT SAVE THE PROJECT; run Rebuild all in TIA"** (or close TIA without saving: the project was saved right before the
+import). The edits stay Approved. Both cases mark the project **unsafe to save** (`unsafe_to_save` in `state.json`,
+`tia_unsafe` in `GET /api/edits/<id>`): every further Upload is refused with 409 (checked again under the Upload lock) until
+the operator confirms that TIA was fixed — UI *TIA is fixed — allow Uploads* in the TIA settings, `POST
+/api/state/tia/fixed?project=` (saving the TIA settings does not confirm it) — otherwise the next Upload's SaveProject
+would save the broken block.
+
+**Upload without compile** (D12) — body `{"compile": false}` on `/api/edits/<id>/upload` or `/api/groups/<id>/upload`
+(UI *Upload without compile*): for blocks whose `CompileBlock` fails after any re-import. Always through SimaticML (the
+documents way needs a compiled block for the network texts); no `CompileBlock`, no `CompileSoftware`. The edits go
+**Signed** with the history note "not compiled — waiting for Rebuild all"; the message says NOT COMPILED. The Check can
+export the block only after Rebuild all in TIA.
 
 Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network,
 only through `insert_network` when called directly — Upload sends a new network through SimaticML);
@@ -474,7 +512,8 @@ a network edit with `title_after` / `comment_after` get a step `SetNetworkText` 
 Result → `edit.writes` = `[{time, tool: "TIAC_Writer", steps: [{step, ok, message}], ok, message, preview?}]`; on
 success Signed with `by: "TIAC_Writer"`. Response `200 {ok, message, write, edit}` — also on a connection error
 (`ok: false`, message "TIA is busy or the Writer/Reader cannot be started: …", the state does not change).
-**The Writer does not call SaveProject** — the change is in the open TIA project; saving it is up to the user.
+**No SaveProject after the write** — the change is in the open TIA project; saving it is up to the user (the SaveProject
+before the first import saves the project as it was before the Upload).
 
 **Check** — `POST /api/edits/<id>/check` (only **Signed**, `tia` required, otherwise 409). TIAC_Reader
 `export_to_folder {pathPrefixes: ["<PLC>/Blocks/<Group>/<block>"], include: ["blocks"], formats: ["documents"], plcName}`
@@ -509,6 +548,9 @@ Steps, one import per block (a group: interface → new networks → changes, ap
 5. `CompileBlock`; for an OB also `GetBlockInfo` — Number, SecondaryType (event class) and, for a cyclic interrupt,
    CyclicTime must equal the export.
 
+SaveProject, the compile with its CompileSoftware fallback, the crash check and the restore are the same as for documents
+(see above).
+
 **E8 — restore:** when the import, the compile or the OB check fails, every block already imported gets its original
 export back (`Restore: ImportXmlBlock` → `Restore: CompileBlock`) — **without `expectedContentHash`** (the Writer returns no hash after an import; the step says "UNPROTECTED" and the message "WITHOUT a content-hash check": a change made in TIA meanwhile is overwritten). The edits stay **Approved**; the
 message has the reason, the Writer's `errorDetail` (when present) and "restored from the export before the write" — or
@@ -531,12 +573,15 @@ order of the parts, then the parts, the OpenCons, the wires (power rail, then pe
 contact's edge bit before its operand); a branching wire's targets in the order of the parts. TIA refuses parts against
 the flow ("The elements must be sorted according to the current flow") and a power rail in another sequence ("… must be
 located in the same sequence"); it accepts other wire orders. **Refused before any write** (409, `upload_note` in the detail,
-"make the change by hand"): RET, NOT, negated coils, P/N coils, negated boxes or outputs, other instructions (counters,
+"make the change by hand"; D10c: every network edit the SimaticML way cannot write also gets a warning in
+`GET /api/edits/<id>` — so in `propose_edit` / `get_edit` — even when it goes through documents alone, because a group
+with a new network or an Upload without compile sends it that way): RET, NOT, negated coils, P/N coils, negated boxes or outputs, other instructions (counters,
 SR/RS, CONV, …), absolute addresses (`%I0.0`) and slices. Not yet verified against a live TIA V21: the shapes of
 OutRange, TOF, NBox, FBD & / X, a literal array index, `Version` on IEC member types (`TON_TIME`).
 
 **TIA settings per project** (in `state.json` next to `edits`): `"tia": {"softwarePath": "PLC_1", "plcName": "PLC_1",
-"groupPath": "Conveyor", "upload": "xml"}` (`groupPath` and `upload` are optional — otherwise the Writer resolves the
+"groupPath": "Conveyor", "upload": "xml", "save": "no"}` (`groupPath`, `upload` and `save` — no SaveProject before the
+first import — are optional — otherwise the Writer resolves the
 group, and Upload goes through documents except where they fail). Set through
 `PUT /api/state/tia?project=` or in the UI in the collapsible TIA settings on a change. Without it the buttons are greyed
 out and the API returns 409 with a hint.
@@ -695,7 +740,8 @@ default):
           text?, colors?: {backColor, foreColor, borderColor, lineColor, …}, font?: {name, size, weight},
           bindings: [{property, tag, indirect?}], events?: [{event, script}], visible?}]}
 ```
-Texts: the `en-US` translation (else the first one) without rich-text markup — one language only.
+Texts: the `en-US` translation (else the first one) without rich-text markup — one language only; a line break
+(`<br/>`, `<br />`, `<br>`) is `\n`, and the export check reads `<br/>` in a proposal as `\n` too.
 
 | API | Returns / does |
 |---|---|
@@ -789,13 +835,13 @@ error of the editor = `isError: true` with its message):
 | `propose_edit` | `project`, `round`, `block`, `kind?` + per kind: `nw`, `after?`, `title_after?`, `comment_after?` (network) · `section`, `members` (interface) · `after_nw`, `title`, `after`, `comment?`, `language?` (new_network); `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout`, `warnings` include the #operand warning |
 | `update_edit` | `id`, `after?`, `note?`, `section?`, `members?`, `title?`, `comment?`, `title_after?`, `comment_after?` | changes a Proposal (a Disapproved edit goes back to Proposal) → `{id, state, errors}` |
 | `delete_edit` | `id`, `force?` | `DELETE /api/edits/<id>` (`force: true` = `?force=1`, also an edit written to TIA; only on a person's explicit instruction) |
-| `cleanup_edits` | `project?`, `states?`, `group?`, `card?`, `all?`, `dry_run?` (default true), `force?` | `POST /api/cleanup` |
+| `cleanup_edits` | `project?`, `states?`, `group?`, `card?`, `older_than_days?`, `all?`, `dry_run?` (default true), `force?` | `POST /api/cleanup` |
 | `create_group` | `edit_ids`, `name?`, `card?`, `card_title?` | `POST /api/groups` → the group + `url` |
 | `update_group` | `id`, `name?`, `card?`, `card_title?` | `POST /api/groups/<id>` → the group |
 | `list_groups` | `project?`, `card?`, `state?` | `GET /api/groups` |
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
-| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
+| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved; Checked by hand), `version?` (Uploaded, e.g. `V1.4.2`) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state, version?}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
 | `get_procedure` | `id` | the TIA steps as markdown text |
 | `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` = `POST /api/tia/status`, checks TIA Portal again) |
 | `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |

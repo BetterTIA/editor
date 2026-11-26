@@ -118,7 +118,7 @@ class TestUploadCheck(unittest.TestCase):
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertTrue(r['ok'], r)
         self.assertEqual([k['step'] for k in r['edit']['writes'][0]['steps']][3:],
-                         ['ExportXmlBlock', 'Edit the SimaticML', 'ImportXmlBlock', 'CompileBlock'])
+                         ['ExportXmlBlock', 'Edit the SimaticML', 'SaveProject', 'ImportXmlBlock', 'CompileBlock'])
         self.assertEqual([x['tool'] for x in self.calls()].count('ImportFromDocuments'), 0)
 
     def calls(self):
@@ -145,7 +145,7 @@ class TestUploadCheck(unittest.TestCase):
         self.assertEqual((u['state'], u['history'][-1]['by']), ('Signed', 'TIAC_Writer'))
         self.assertEqual([k['step'] for k in u['writes'][0]['steps']],
                          ['GetPortals', 'Connect', 'ResolveObjectPath', 'ExportBlocksAsDocuments', 'Replace the network in .s7dcl',
-                          'PreviewImport', 'ImportFromDocuments', 'CompileBlock'])
+                          'PreviewImport', 'SaveProject', 'ImportFromDocuments', 'CompileBlock'])
         imp = self.imports()
         self.assertEqual((len(imp), imp[0]['groupPath'], imp[0]['importOption'], imp[0]['fileNameWithoutExtension']),
                          (1, 'Conveyor', 'Override', 'FB_Conveyor'))

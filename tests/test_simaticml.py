@@ -561,7 +561,7 @@ class TestXmlUpload(unittest.TestCase):
         self.assertTrue(r['ok'], r)
         self.assertEqual(([x['edit'] for x in r['results']], r['view']['state']), ([ids[2], ids[1], ids[0]], 'Signed'))
         self.assertEqual([c['tool'] for c in self.calls()][2:],
-                         ['ExportXmlBlock', 'ImportXmlBlock', 'CompileBlock'])     # groupPath set: no ResolveObjectPath
+                         ['ExportXmlBlock', 'SaveProject', 'ImportXmlBlock', 'CompileBlock'])     # groupPath set: no ResolveObjectPath
         imp = self.calls('ImportXmlBlock')[0]['arguments']
         self.assertEqual((imp['groupPath'], imp['expectedContentHash'][:11]), ('Station', 'xml:sha256:'))
         self.assertEqual(self.written(), read('expected', 'FB_Station.xml'))
@@ -585,7 +585,7 @@ class TestXmlUpload(unittest.TestCase):
         s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         self.assertTrue(r['ok'], r)
         self.assertEqual([k['step'] for k in r['write']['steps']][2:],
-                         ['ExportXmlBlock', 'Edit the SimaticML', 'GetBlockInfo before', 'ImportXmlBlock', 'CompileBlock', 'GetBlockInfo'])
+                         ['ExportXmlBlock', 'Edit the SimaticML', 'GetBlockInfo before', 'SaveProject', 'ImportXmlBlock', 'CompileBlock', 'GetBlockInfo'])
         self.assertIn('OB: documents would lose its event class and number', r['message'])
         self.assertEqual(self.written('OB_Cyclic'), read('expected', 'OB_Cyclic.xml'))
 
@@ -599,8 +599,8 @@ class TestXmlUpload(unittest.TestCase):
         self.assertEqual((r['ok'], r['edit']['state']), (False, 'Approved'), r)
         self.assertIn('Number 130, before the write 30', r['message'])
         self.assertIn('OB_Cyclic restored from the export before the write', r['message'])
-        self.assertEqual([k['step'] for k in r['write']['steps']][-3:],
-                         ['GetBlockInfo', 'Restore: ImportXmlBlock', 'Restore: CompileBlock'])
+        self.assertEqual([k['step'] for k in r['write']['steps']][-4:],
+                         ['GetBlockInfo', 'GetPortals (is TIA still running?)', 'Restore: ImportXmlBlock', 'Restore: CompileBlock'])
         self.assertEqual(self.written('OB_Cyclic'), read('tia', 'Station', 'OB_Cyclic.xml'))
         self.assertNotIn('expectedContentHash', self.calls('ImportXmlBlock')[-1]['arguments'])
         keep = r['message'].split('are kept in ')[1]
@@ -637,7 +637,7 @@ class TestXmlUpload(unittest.TestCase):
         """expectedContentHash refused (state_changed): someone else's change stays, nothing is re-imported."""
         uid = self.edit(block='OB_Cyclic', nw=1, after=COUNTER_AFTER)
         self.approve(uid)
-        orig = server.api_upload_xml
+        orig = server.api_upload_plc
         cur = os.path.join(self.tia, 'Station', 'OB_Cyclic.xml')
 
         def changed_in_between(*a, **k):                          # "TIA" changes the block after the export
@@ -647,11 +647,11 @@ class TestXmlUpload(unittest.TestCase):
                 return orig(*a, **k)
             finally:
                 server._content_hash = real
-        server.api_upload_xml = changed_in_between
+        server.api_upload_plc = changed_in_between
         try:
             s, r = self.req('POST', '/api/edits/%s/upload' % uid)
         finally:
-            server.api_upload_xml = orig
+            server.api_upload_plc = orig
         self.assertFalse(r['ok'])
         self.assertIn('state_changed', r['message'])
         self.assertNotIn('Restore', ' '.join(k['step'] for k in r['write']['steps']))

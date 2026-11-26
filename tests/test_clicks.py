@@ -206,6 +206,18 @@ class TestClicks(unittest.TestCase):
         self.assertEqual(self.js("document.querySelector('.edit-head .state').textContent"), 'Approved')
         self.assertTrue(self.js("document.querySelector('details.disapprove').open"))
 
+    def test_hand_check_over_a_mismatch(self):
+        """D20c: Record a check by hand… → ✓ Match → Checked, although the last automatic check is a MISMATCH."""
+        uid = self.edit('FB_Conveyor', 1, False)
+        for st in ('Approved', 'Signed'):
+            server.api_edit_state(self.data, uid, {'state': st, 'by': 'test'})
+        server.api_add_check(self.data, {'edit_id': uid, 'match': False, 'export_ts': '', 'note': 'MISMATCH: br'})
+        self.ws.call('Page.navigate', url=self.url + '/?edit=%s' % uid)
+        self.wait_for("document.body && document.body.dataset.done === '1' && !!document.getElementById('hand-match')")
+        self.js("document.getElementById('hand-note').value = 'text checked on the panel'; document.getElementById('hand-match').click(); 1")
+        self.wait_for("document.querySelector('.edit-head .state') && document.querySelector('.edit-head .state').textContent === 'Checked'")
+        self.assertEqual(server.state.find(self.data, uid)[2]['checks'][-1]['note'], 'by hand: text checked on the panel')
+
 
 if __name__ == '__main__':
     unittest.main()
