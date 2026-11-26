@@ -101,6 +101,26 @@ class TestGroups(unittest.TestCase):
         s, g = self.req('POST', '/api/groups/G001/state', {'state': 'Proposal'})
         self.assertEqual((s, g['state']), (200, 'Proposal'))
 
+    def test_group_version(self):
+        """P3: a group moves to Uploaded with one version for every member; Tested carries it (MCP set_state reports it)."""
+        ids = self.three()
+        self.req('POST', '/api/groups', {'edit_ids': list(ids)})
+        for st in ('Approved', 'Signed'):
+            self.req('POST', '/api/groups/G001/state', {'state': st})
+        for uid in ids:
+            self.req('POST', '/api/check', {'edit_id': uid, 'match': True, 'export_ts': TS0})
+        self.assertEqual(self.req('POST', '/api/groups/G001/state', {'state': 'Checked'})[0], 200)
+        s, r = self.req('POST', '/api/groups/G001/state', {'state': 'Uploaded'})
+        self.assertEqual(s, 400)
+        self.assertIn('needs the project version', r['error'])
+        s, g = self.req('POST', '/api/groups/G001/state', {'state': 'Uploaded', 'version': 'v2.0.0'})
+        self.assertEqual((s, {m['uploaded']['version'] for m in g['members']}, g['versions']), (200, {'V2.0.0'}, None))
+        e = mcp_server.Editor(self.url)
+        x = json.loads(mcp_server.call_tool(e, 'set_state', {'group': 'G001', 'state': 'Tested'})['content'][0]['text'])
+        self.assertEqual(x, {'id': 'G001', 'state': 'Tested', 'version': 'V2.0.0'})
+        x = json.loads(mcp_server.call_tool(e, 'get_edit', {'id': ids[0]})['content'][0]['text'])
+        self.assertEqual((x['edit']['tested']['version'], x['versions']), ('V2.0.0', None))
+
     def test_delete_edit_and_group(self):
         """E3: delete an edit / a group before it is written; ids are not reused; the changelog lists it."""
         iface, new, change = self.three()

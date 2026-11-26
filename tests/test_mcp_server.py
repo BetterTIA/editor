@@ -100,7 +100,10 @@ class TestMcpServer(unittest.TestCase):
         self.assertEqual(self.call(k, 'set_state', id=uid, state='Signed', by='Honza')['state'], 'Signed')
         c = self.call(k, 'run_check', id=uid)
         self.assertEqual((c['match'], c['state']), (True, 'Checked'))
-        self.assertEqual(self.call(k, 'set_state', id=uid, state='Uploaded')['state'], 'Uploaded')
+        self.assertTrue(k.call_raw('set_state', {'id': uid, 'state': 'Uploaded'}).get('isError'))           # no version yet
+        self.assertEqual(self.call(k, 'set_state', id=uid, state='Uploaded', version='1.0.0'),
+                         {'id': uid, 'state': 'Uploaded', 'version': 'V1.0.0'})
+        self.assertEqual(self.call(k, 'list_edits', project=PROJECT)['edits'][0]['uploaded']['version'], 'V1.0.0')
         self.assertEqual(self.call(k, 'run_check', id=uid)['state'], 'Uploaded')                           # only Signed moves
 
         job = self.call(k, 'take_snapshot', project=PROJECT)                # no Writer configured -> the job fails

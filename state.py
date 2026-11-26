@@ -190,7 +190,39 @@ def transitions(u):
     return (STATES[i + 1] if i + 1 < len(STATES) else None, STATES[i - 1] if i > 0 else None)
 
 
-def change_state(u, new_value, by, reason=None):
+# project version V<1>.<2>.<3>: 1st = release milestone, 2nd = a larger set of functions, 3rd = one change
+VERSION = re.compile(r'[Vv]?(\d+)\.(\d+)\.(\d+)')
+
+
+def norm_version(v):
+    """'1.4.2' / 'v1.4.2' / 'V1.4.2' -> 'V1.4.2'; anything else is a 400."""
+    m = VERSION.fullmatch(v.strip()) if isinstance(v, str) else None
+    if not m:
+        raise StateError('version must be V<1>.<2>.<3>, e.g. V1.4.2 (got %r)' % (v,), 400)
+    return 'V%d.%d.%d' % tuple(int(x) for x in m.groups())
+
+
+def next_versions(s):
+    """Proposals for the next Uploaded from the project's current version: patch (3rd + 1, the default) or minor (2nd + 1);
+    None when the project has no version yet. The 1st number (release) is only ever typed by a person."""
+    v = s.get('version')
+    if not v:
+        return None
+    a, b, c = (int(x) for x in VERSION.fullmatch(v).groups())
+    return {'current': v, 'patch': 'V%d.%d.%d' % (a, b, c + 1), 'minor': 'V%d.%d.0' % (a, b + 1)}
+
+
+def version_for(s, target, given):
+    """The version a move to Uploaded / Tested records: the given one, else for Uploaded the patch proposal and for Tested
+    (of an edit uploaded before versions existed) the project's current version; None = none known."""
+    if given not in (None, ''):
+        return norm_version(given)
+    if target == 'Uploaded':
+        return (next_versions(s) or {}).get('patch')
+    return s.get('version') if target == 'Tested' else None
+
+
+def change_state(u, new_value, by, reason=None, version=None):
     if new_value not in ALL_STATES:
         raise StateError('unknown state %r' % (new_value,), 400)
     if DISAPPROVED in (u['state'], new_value):
@@ -211,5 +243,15 @@ def change_state(u, new_value, by, reason=None):
     if new_value == DISAPPROVED:
         h['reason'] = reason
         u['disapproved'] = dict(h)                    # the latest rejection stays readable after a reopen
+    forward = u['state'] != DISAPPROVED and rank(new_value) > rank(u['state'])
+    if forward and new_value in ('Uploaded', 'Tested'):
+        h['version'] = (new_value == 'Tested' and (u.get('uploaded') or {}).get('version')) or version
+        if not h['version']:
+            raise StateError('%s needs the project version V<1>.<2>.<3> (3rd number = one change, 2nd = a '
+                             'larger set of functions, 1st = release) — the project has no version yet, pass it, e.g. '
+                             '{"state": "%s", "version": "V1.0.1"}' % (new_value, new_value), 400)
+        u[new_value.lower()] = dict(h)                # u['uploaded'] / u['tested']: {version, time, by}
+    elif u['state'] in ('Uploaded', 'Tested'):        # a step back: the record of the state left no longer holds
+        u.pop(u['state'].lower(), None)
     u['state'] = new_value
     u.setdefault('history', []).append(h)
