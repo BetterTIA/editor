@@ -18,7 +18,7 @@ sample (a restore of the original passes); --ob-renumbered reports another OB nu
 Upload safety (round 9): SaveProject (--fail-save fails it); --fail-import fails ImportFromDocuments only for edited
 documents; --crash-compile: CompileBlock of an edited block "takes TIA down" (GetPortals then lists no instance, every other
 call fails); --fail-compile-always: CompileBlock of any imported block fails until CompileSoftware ran (--fail-compile-software
-fails that too); tools/list shows CompileSoftware, with a 'rebuild' parameter under --rebuild-param.
+fails that too).
 Writer, TIA side: GetPortals (default one instance with Demo_Line open, --no-portal = TIA is not running,
 --multi-instances = two), Connect, GetProject, GetDevices, GetProjectTree, GetSoftwareTree, GetState, OpenTiaProject,
 CloseProject. Every tool call is appended to <state>\\calls.jsonl (tests check that Connect was not called).
@@ -461,7 +461,6 @@ def main():
     ap.add_argument('--fail-compile-always', action='store_true',
                     help='Writer: CompileBlock of any imported block fails (also the original) until CompileSoftware')
     ap.add_argument('--fail-compile-software', action='store_true', help='Writer: CompileSoftware fails')
-    ap.add_argument('--rebuild-param', action='store_true', help='Writer: tools/list shows CompileSoftware with "rebuild"')
     a = ap.parse_args()
     os.makedirs(a.state, exist_ok=True)
     fn = writer if a.role == 'writer' else reader
@@ -474,11 +473,6 @@ def main():
         if z['method'] == 'initialize':
             v = {'protocolVersion': z['params'].get('protocolVersion'), 'capabilities': {'tools': {}},
                  'serverInfo': {'name': 'fake-' + a.role, 'version': '0'}}
-        elif z['method'] == 'tools/list' and a.role == 'writer':      # only what the editor looks at
-            props = {'softwarePath': {'type': 'string'}, 'password': {'type': 'string'}}
-            if a.rebuild_param:
-                props['rebuild'] = {'type': 'boolean'}
-            v = {'tools': [{'name': 'CompileSoftware', 'inputSchema': {'type': 'object', 'properties': props}}]}
         elif z['method'] == 'tools/call':
             time.sleep(a.slow)
             with open(os.path.join(a.state, 'calls.jsonl'), 'a', encoding='utf-8') as f:

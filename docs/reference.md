@@ -464,9 +464,9 @@ TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 8. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
    exports no inconsistent block (`SetNetworkText`, the Check and the next Upload would find nothing; seen on a real project).
    A block the Writer reports as "still inconsistent after the compile" counts as failed. When `CompileBlock` fails and
-   the PLC of the newest export has **no F-blocks**, `CompileSoftware {softwarePath}` follows (D20b; with `rebuild: true`
-   when the Writer's `tools/list` offers that parameter). With F-blocks the editor never compiles the whole software — it
-   would compile the safety program, which stays with the operator.
+   the PLC of the newest export has **no F-blocks**, `CompileSoftware {softwarePath}` follows (D20b; it fails, too, when
+   its "still inconsistent" warning names the block — Openness V21 has no rebuild all). With F-blocks the editor never
+   compiles the whole software — it would compile the safety program, which stays with the operator.
 
 Several edits of one block (a group) are applied to **one** export of the block and imported and compiled **once** (P2:
 interface → new networks → changes; the blocks in the order of their first member, so a block with an interface edit

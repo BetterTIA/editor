@@ -177,14 +177,14 @@ class TestUploadSafety(unittest.TestCase):
         self.assertEqual(self.steps(r)[-3:], ['ImportFromDocuments', 'CompileBlock', 'CompileSoftware'])
         self.assertFalse(r['write']['steps'][-2]['ok'])
         with open(os.path.join(self.tia, 'software.txt'), encoding='utf-8') as f:
-            self.assertEqual(json.loads(f.readline()), {'softwarePath': 'PLC_1'})     # no 'rebuild' offered
+            self.assertEqual(json.loads(f.readline()), {'softwarePath': 'PLC_1'})
 
-    def test_compile_software_with_rebuild_when_offered(self):
-        self.start('--fail-compile-always', '--rebuild-param', f_blocks=False)
-        s, r = self.req('POST', '/api/edits/%s/upload' % self.proposal())
-        self.assertTrue(r['ok'], r)
-        with open(os.path.join(self.tia, 'software.txt'), encoding='utf-8') as f:
-            self.assertEqual(json.loads(f.readline()), {'softwarePath': 'PLC_1', 'rebuild': True})
+    def test_still_inconsistent_warning(self):
+        """The Writer's 'still inconsistent after the compile' fails the compile only when it names the block."""
+        warn = 'ok. WARNING: still inconsistent after the compile (1): FB_Other - run Compile > Software (rebuild all)'
+        self.assertEqual(server._compiled(warn, 'FB_Conveyor'), warn)
+        with self.assertRaises(server.s7dcl_write.WriteError):
+            server._compiled(warn.replace('FB_Other', 'FB_Conveyor'), 'FB_Conveyor')
 
     def test_inconsistent_after_restore_with_f_blocks(self):
         """F-blocks in the PLC: no CompileSoftware; the restored block does not compile -> BLOCK INCONSISTENT, unsafe."""

@@ -1347,11 +1347,12 @@ def _reason(e):
     return t
 
 
-def _compiled(r):
+def _compiled(r, block=None):
     """CompileBlock / CompileSoftware answer -> raise when it reports errors (the Writer also raises, this covers an answer
-    without it) or when the compiled block is still inconsistent afterwards (the Writer's warning)."""
-    if 'still inconsistent after the compile' in (r or ''):
-        raise s7dcl_write.WriteError('the block is still inconsistent after the compile: %s' % r[:600])
+    without it) or when the Writer's warning 'still inconsistent after the compile' lists the block (any block when None)."""
+    i = (r or '').find('still inconsistent after the compile')
+    if i >= 0 and (block is None or block in r[i:i + 4000]):
+        raise s7dcl_write.WriteError('%s still inconsistent after the compile: %s' % (block or 'the block is', r[i:i + 600]))
     try:
         j = json.loads(r)
     except (TypeError, ValueError):
@@ -1375,18 +1376,6 @@ def _has_f_blocks(root, project):
         return any(b.get('f') for b in api_catalog(root, project)['blocks'])
     except (KeyError, OSError, ValueError):
         return True
-
-
-def _compile_software(k, sp):
-    """CompileSoftware of the PLC; with Rebuild all when the Writer offers a 'rebuild' parameter (round W7)."""
-    arg = {'softwarePath': sp}
-    try:
-        tool = next((t for t in k.list_tools(60) if t.get('name') == 'CompileSoftware'), {})
-        if 'rebuild' in ((tool.get('inputSchema') or {}).get('properties') or {}):
-            arg['rebuild'] = True
-    except mcp_client.MCPError:                       # an older Writer without tools/list: compile without it
-        pass
-    return _compiled(k.call('CompileSoftware', arg))
 
 
 def _tia_gone(k, step, portal_id):
@@ -1443,14 +1432,16 @@ def api_upload_plc(root, data, members, mcp, timeout, portal, tia, why=None, com
         return _step(steps, name, fn)
 
     def consistent(k, sp, bpath, label=''):
-        """CompileBlock; when it fails, CompileSoftware (D20b) if allowed; raises when the block stays inconsistent."""
+        """CompileBlock; when it fails, CompileSoftware (D20b) if allowed; raises when the block stays inconsistent.
+        Openness V21 has no 'rebuild all' (round W7): what CompileSoftware does not fix needs Rebuild all by hand."""
+        block = bpath.rsplit('/', 1)[-1]
         try:
-            step(label + 'CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+            step(label + 'CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}), block))
         except Exception as e1:
             if not software or k.p is None or k.p.poll() is not None:
                 raise
             try:
-                step(label + 'CompileSoftware', lambda: _compile_software(k, sp))
+                step(label + 'CompileSoftware', lambda: _compiled(k.call('CompileSoftware', {'softwarePath': sp}), block))
             except Exception as e2:
                 raise s7dcl_write.WriteError('CompileBlock: %s · then CompileSoftware: %s' % (_reason(e1)[:500], _reason(e2)[:500]))
     try:
