@@ -390,7 +390,7 @@ def _box_pins(net, key, p, pins, open_out, skip=()):
             net.open.append((key, pins[x['pin']][0], True))
     if call:
         used = {x['pin'] for x in p.get('inputs', []) + p.get('outputs', []) if (x.get('operand') or '').strip() or x.get('signal')}
-        net.open += [(key, n, s == 'Output') for n, s in open_out.items() if n not in used and n not in skip]
+        net.open += [(key, n, s in ('Output', 'Return')) for n, s in open_out.items() if n not in used and n not in skip]
 
 
 def _lad(model, call_params):

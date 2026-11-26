@@ -467,6 +467,14 @@ class TestFlowOrder(unittest.TestCase):
         self.assertIn(('Contact[operand=#B].out', 'Call:FB_Valve@Valve[iMode=#iMode|qOpen="qValve].bCmd'), simaticml.graph(x))
         self.assertEqual(x.count('<OpenCon '), 4)                    # bStop, bEnable, HMI, qReady; bCmd is wired
 
+    def test_fc_return_left_open(self):
+        """An FC's Ret_Val is an output (TIA exports it NameCon first): left open, its OpenCon follows the NameCon."""
+        fc = {'id': 'fc', 'type': 'box', 'call': 'fc', 'name': 'FC_Scale', 'instance': None, 'template': None,
+              'power': ['EN', 'ENO'], 'inputs': [{'pin': 'x', 'operand': '#X'}], 'outputs': []}
+        x = simaticml.flgnet(lad(fc), lambda n, k: [('x', 'Input', 'Int'), ('Ret_Val', 'Return', 'Int')])
+        simaticml.check_flgnet(x)
+        self.assertRegex(x, r'<NameCon UId="\d+" Name="Ret_Val" />\s*<OpenCon ')
+
     def test_inc(self):
         """D3: INC (documents: `Inc( #x )` with DestType) -> Part Inc, DisabledENO, DestType, pin operand."""
         import s7dcl
