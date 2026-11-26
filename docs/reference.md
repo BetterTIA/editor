@@ -242,7 +242,7 @@ has in the exported block).
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
 | POST | `/api/groups/<id>/state` | `{state, by}` — every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
-| POST | `/api/groups/<id>/upload` | every member Approved and none F (else 409) → Upload of the members one by one: interface edits, new networks, then network changes (group order within a kind); stops at the first failure → `{ok, results: [{edit, ok, message}], view}`; through SimaticML (an OB, GRAPH, a new network, `upload: xml`): one import per block, `via: "SimaticML"`, all members succeed or fail together |
+| POST | `/api/groups/<id>/upload` | `{compile?: false}`. Every member Approved and none F (else 409). **Before any write** the group is refused (409, nothing written) when Upload cannot make one of its members — an HMI change the Writer has no tool for, or what the SimaticML way does not write when the group goes that way. Then the PLC members in one Upload (see [Upload and Check](#upload-and-check): one export, one import and one compile per block, members applied interface → new networks → changes; all through SimaticML when one member needs it — an OB, GRAPH, a new network, `upload: xml`, `compile: false` — `via: "SimaticML"`); all PLC members succeed or fail together (a failure restores every block already imported). The HMI members come last, one by one, only when the PLC part succeeded → `{ok, results: [{edit, ok, message}], view}`. Every member that was written is recorded (Signed) — nothing raises after the first write |
 | POST | `/api/groups/<id>/check-export` | export check of every member → `{match: all, results, view}` |
 | DELETE | `/api/groups/<id>[?edits=1][&force=1]` | ungroup (the edits stay); `edits=1` deletes the edits too — an edit already written (Signed and later) only with `force=1`, else 409 → `{project, group, deleted}` |
 | DELETE | `/api/edits/<id>` | deletes an edit (editor state only, TIA is not touched): Proposal, Approved, Disapproved; an edit already written (Signed and later) only with `?force=1`, else 409; a group member leaves its group (the rest is renumbered, one left = no group) → `{project, deleted}` |
@@ -457,9 +457,37 @@ TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
    written only for a comparison or TON (other instructions: stop, make it by hand); a title / comment-only edit leaves
    the network text as it is; `.s7res` is not changed, BOM and CRLF are kept,
 5. `PreviewImport {softwarePath, importPath, kind: "block", groupPath}` (the text is stored in the record as `preview`),
-6. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`,
-7. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
+6. `SaveProject {}` — once per Upload, right before the first import (D4: a TIA crash during the import or the compile
+   then loses nothing of before the Upload; turned off by the TIA setting `save: "no"`, UI *save the project before
+   Upload*). When it fails, nothing is written,
+7. `ImportFromDocuments {softwarePath, groupPath, importPath, fileNameWithoutExtension: block, importOption: "Override"}`,
+8. `CompileBlock {softwarePath, path: "Group/Block"}` — an imported block is inconsistent until it compiles, and TIA
    exports no inconsistent block (`SetNetworkText`, the Check and the next Upload would find nothing; seen on a real project).
+   A block the Writer reports as "still inconsistent after the compile" counts as failed. When `CompileBlock` fails and
+   the PLC of the newest export has **no F-blocks**, `CompileSoftware {softwarePath}` follows (D20b; with `rebuild: true`
+   when the Writer's `tools/list` offers that parameter). With F-blocks the editor never compiles the whole software — it
+   would compile the safety program, which stays with the operator.
+
+Several edits of one block (a group) are applied to **one** export of the block and imported and compiled **once** (P2:
+interface → new networks → changes; the blocks in the order of their first member, so a block with an interface edit
+comes before the blocks that call it; HMI members after all blocks). Only the network texts need a compile each
+(`SetNetworkText` imports the block again).
+
+**After a failure past the first import** (E8 / D10b): first `GetPortals` — when the Writer died or the TIA Portal
+instance is gone, the result starts with **"TIA PORTAL MAY HAVE CRASHED"** and nothing is restored (D4). Otherwise every
+block already imported gets its export from before the write back (`Restore: ImportFromDocuments` with the exported
+documents, or `Restore: ImportXmlBlock`) and is compiled as above (`Restore: CompileBlock` → `Restore: CompileSoftware`).
+A block that cannot be restored or does not compile afterwards → the message starts with **"BLOCK INCONSISTENT: <blocks>
+— DO NOT SAVE THE PROJECT; run Rebuild all in TIA"** (or close TIA without saving: the project was saved right before the
+import). The edits stay Approved. Both cases mark the project **unsafe to save** (`unsafe_to_save` in `state.json`,
+`tia_unsafe` in `GET /api/edits/<id>`): every further Upload is refused with 409 until a person saves the TIA settings
+of the project (that confirms TIA was fixed) — otherwise the next Upload's SaveProject would save the broken block.
+
+**Upload without compile** (D12) — body `{"compile": false}` on `/api/edits/<id>/upload` or `/api/groups/<id>/upload`
+(UI *Upload without compile*): for blocks whose `CompileBlock` fails after any re-import. Always through SimaticML (the
+documents way needs a compiled block for the network texts); no `CompileBlock`, no `CompileSoftware`. The edits go
+**Signed** with the history note "not compiled — waiting for Rebuild all"; the message says NOT COMPILED. The Check can
+export the block only after Rebuild all in TIA.
 
 Other kinds: step 4 is *Add interface members in .s7dcl* (interface) or *Insert the network in .s7dcl* (new network,
 only through `insert_network` when called directly — Upload sends a new network through SimaticML);
@@ -469,7 +497,8 @@ a network edit with `title_after` / `comment_after` get a step `SetNetworkText` 
 Result → `edit.writes` = `[{time, tool: "TIAC_Writer", steps: [{step, ok, message}], ok, message, preview?}]`; on
 success Signed with `by: "TIAC_Writer"`. Response `200 {ok, message, write, edit}` — also on a connection error
 (`ok: false`, message "TIA is busy or the Writer/Reader cannot be started: …", the state does not change).
-**The Writer does not call SaveProject** — the change is in the open TIA project; saving it is up to the user.
+**No SaveProject after the write** — the change is in the open TIA project; saving it is up to the user (the SaveProject
+before the first import saves the project as it was before the Upload).
 
 **Check** — `POST /api/edits/<id>/check` (only **Signed**, `tia` required, otherwise 409). TIAC_Reader
 `export_to_folder {pathPrefixes: ["<PLC>/Blocks/<Group>/<block>"], include: ["blocks"], formats: ["documents"], plcName}`
@@ -504,6 +533,9 @@ Steps, one import per block (a group: interface → new networks → changes, ap
 5. `CompileBlock`; for an OB also `GetBlockInfo` — Number, SecondaryType (event class) and, for a cyclic interrupt,
    CyclicTime must equal the export.
 
+SaveProject, the compile with its CompileSoftware fallback, the crash check and the restore are the same as for documents
+(see above).
+
 **E8 — restore:** when the import, the compile or the OB check fails, every block already imported gets its original
 export back (`Restore: ImportXmlBlock` → `Restore: CompileBlock`) — **without `expectedContentHash`** (the Writer returns no hash after an import; the step says "UNPROTECTED" and the message "WITHOUT a content-hash check": a change made in TIA meanwhile is overwritten). The edits stay **Approved**; the
 message has the reason, the Writer's `errorDetail` (when present) and "restored from the export before the write" — or
@@ -516,12 +548,15 @@ parallel branches (a join = `O` with `Card`), FBD &, >=1, X with negated inputs;
 MOVE, ADD/SUB/MUL/DIV, IN_RANGE/OUT_RANGE, TON/TOF/TP (multi- and single-instance), FB and FC calls with parameters
 (their `CallInfo` is taken from the export, otherwise from the callee's interface). Operands: `#local`, `"global"`,
 members, array indexes, literal and typed constants. **Refused before any write** (409, `upload_note` in the detail,
-"make the change by hand"): RET, NOT, negated coils, P/N coils, negated boxes or outputs, other instructions (counters,
+"make the change by hand"; D10c: every network edit the SimaticML way cannot write also gets a warning in
+`GET /api/edits/<id>` — so in `propose_edit` / `get_edit` — even when it goes through documents alone, because a group
+with a new network or an Upload without compile sends it that way): RET, NOT, negated coils, P/N coils, negated boxes or outputs, other instructions (counters,
 SR/RS, CONV, …), absolute addresses (`%I0.0`) and slices. Not yet verified against a live TIA V21: the shapes of
 OutRange, TOF, NBox, FBD & / X, a literal array index, `Version` on IEC member types (`TON_TIME`).
 
 **TIA settings per project** (in `state.json` next to `edits`): `"tia": {"softwarePath": "PLC_1", "plcName": "PLC_1",
-"groupPath": "Conveyor", "upload": "xml"}` (`groupPath` and `upload` are optional — otherwise the Writer resolves the
+"groupPath": "Conveyor", "upload": "xml", "save": "no"}` (`groupPath`, `upload` and `save` — no SaveProject before the
+first import — are optional — otherwise the Writer resolves the
 group, and Upload goes through documents except where they fail). Set through
 `PUT /api/state/tia?project=` or in the UI in the collapsible TIA settings on a change. Without it the buttons are greyed
 out and the API returns 409 with a hint.

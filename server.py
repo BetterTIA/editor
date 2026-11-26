@@ -290,20 +290,24 @@ def api_state(data, project=None):
 
 
 def api_state_tia(root, data, project, body):
-    """PUT /api/state/tia?project= {softwarePath, plcName?, groupPath?, upload?}: only the TIA settings change, under the
-    lock (empty values are dropped, {} clears them). upload = 'xml' writes every Upload through SimaticML (default: only
-    where documents fail — OB, GRAPH, new network)."""
+    """PUT /api/state/tia?project= {softwarePath, plcName?, groupPath?, upload?, save?}: only the TIA settings change, under
+    the lock (empty values are dropped, {} clears them). upload = 'xml' writes every Upload through SimaticML (default: only
+    where documents fail — OB, GRAPH, new network); save = 'no' turns off SaveProject before the first import (D4).
+    Saving the settings also confirms that TIA was fixed after an Upload that left the project unsafe to save."""
     if not project_index(root, project):
         raise KeyError('unknown project')
-    if not isinstance(body, dict) or set(body) - {'softwarePath', 'plcName', 'groupPath', 'upload'} \
-            or not all(isinstance(v, str) for v in body.values()) or body.get('upload', '').strip() not in ('', 'auto', 'xml'):
-        raise state.StateError('tia must be {softwarePath, plcName?, groupPath?, upload?: auto|xml} (strings)', 400)
-    t = {k: v.strip() for k, v in body.items() if v.strip() and not (k == 'upload' and v.strip() == 'auto')}
+    if not isinstance(body, dict) or set(body) - {'softwarePath', 'plcName', 'groupPath', 'upload', 'save'} \
+            or not all(isinstance(v, str) for v in body.values()) or body.get('upload', '').strip() not in ('', 'auto', 'xml') \
+            or body.get('save', '').strip() not in ('', 'yes', 'no'):
+        raise state.StateError('tia must be {softwarePath, plcName?, groupPath?, upload?: auto|xml, save?: yes|no} (strings)', 400)
+    t = {k: v.strip() for k, v in body.items() if v.strip() and not (k == 'upload' and v.strip() == 'auto')
+         and not (k == 'save' and v.strip() == 'yes')}
     with state.LOCK:
         s = state.load(data, project)
         s['tia'] = t
         if not t:
             del s['tia']
+        s.pop('unsafe_to_save', None)
         state.save(data, project, s)
     return {'project': project, 'tia': s.get('tia')}
 
@@ -772,14 +776,24 @@ def api_edit_detail(data, uid, width=0, root=None):
             res['texts'] = {k: [u.get(old) or '', u.get(k, u.get(old) or '')]
                             for k, old in (('title_after', 'title'), ('comment_after', 'comment_before')) if k in u}
     why = root and u.get('kind') != 'hmi_screen' and xml_reason(root, u, s.get('tia'))
-    refused = why and xml_refused(root, u)
+    try:
+        refused = root and u.get('kind') not in ('hmi_screen', 'interface') and xml_refused(root, u)
+    except Exception as e:                            # the detail must open even when the check itself breaks
+        refused = 'not checked (%s)' % e if why else None
     if why:
         res['upload_via'] = 'SimaticML (%s)' % why
-    if refused:
+    if refused:                                       # D10c: told at propose time, not only by the Upload
+        res['warnings'].insert(0, 'Upload through SimaticML cannot write this edit: %s — %s' % (refused, (
+            'this edit goes that way (%s), so Upload refuses it: make the change by hand (TIA steps)' % why) if why else (
+            'it goes through documents alone, but not in a group with a new network, an OB or a GRAPH block, with the TIA '
+            'setting "every Upload through SimaticML" or with an Upload without CompileBlock')))
+    if refused and why:
         res['upload_note'] = 'Upload through SimaticML (%s) refused — %s; make the change by hand (TIA steps)' % (why, refused)
     elif u.get('group'):
         res['upload_note'] = 'member of group %s — Upload is on the group page (members in order)' % u['group']['id']
     res['tia'] = s.get('tia')
+    if s.get('unsafe_to_save'):
+        res['tia_unsafe'] = s['unsafe_to_save']
     k = u.get('checks') or []
     if state.rank(u['state']) >= state.STATES.index('Checked') and k and k[-1].get('match') is False:
         res['warnings'].insert(0, 'The last export check is a MISMATCH, but the change is already %s — the state does not go '
@@ -1166,16 +1180,20 @@ def _connect(k, steps, portal):
     if chosen is None:
         raise SnapshotError('More than one TIA Portal instance is running — choose one in the status bar')
     _step(steps, 'Connect', lambda: k.call('Connect', {'portalId': chosen['portalId']}))
+    return chosen['portalId']
 
 
-def _write(data, uid, write, new_state, by):
-    """Store the Upload/Check record in u['writes'] and on success change the state (if nobody changed it meanwhile)."""
+def _write(data, uid, write, new_state, by, note=None):
+    """Store the Upload/Check record in u['writes'] and on success change the state (if nobody changed it meanwhile);
+    note goes into that history entry (D12: 'waiting for Rebuild all')."""
     with state.LOCK:
         project, s, u = state.find(data, uid)
         u.setdefault('writes', []).append(write)
         if new_state and u['state'] != new_state:         # a match of the check already moved it to Checked
             try:
                 state.change_state(u, new_state, by)
+                if note:
+                    u['history'][-1]['note'] = note
             except state.StateError as e:
                 write['message'] += ' · state unchanged: %s' % e
         state.save(data, project, s)
@@ -1268,91 +1286,43 @@ def xml_refused(root, u):
     return None
 
 
-def api_upload(root, data, uid, mcp, timeout=300, portal=None, in_group=False):
-    """Approved non-safety change -> TIAC_Writer: GetPortals, Connect {portalId}, ResolveObjectPath, export the block as documents,
-    replace the network, PreviewImport, ImportFromDocuments Override -> Signed (by TIAC_Writer).
-    A group member only through the group Upload (in_group): one member alone leaves the block half changed (E8)."""
+NO_COMPILE = 'no CompileBlock: compiling is left to Rebuild all'
+REBUILD_HINT = 'run Rebuild all in TIA (Compile → Software (rebuild all))'
+
+
+def _upload_guard(s):
+    """A failed Upload that left the project unsafe to save blocks every further Upload (each one starts with SaveProject)
+    until a person confirms TIA is fixed — by saving the TIA settings of the project."""
+    if s.get('unsafe_to_save'):
+        raise state.StateError('Upload refused: an earlier Upload left the TIA project unsafe to save (%s). Fix it in TIA '
+                               'first (%s, or close TIA without saving), then press Save in the TIA settings of the project '
+                               '— that confirms TIA is fixed and allows Uploads again' % (s['unsafe_to_save'], REBUILD_HINT))
+
+
+def _upload_why(root, members, tia, compile):
+    """Why the PLC members go through SimaticML (xml_reason of any of them; D12: no compile = always SimaticML, the documents
+    way needs a compiled block for the network texts) -> text, None = documents."""
+    why = next((r for u in members for r in [xml_reason(root, u, tia)] if r), None)
+    return why if compile else NO_COMPILE + ('; ' + why if why else '')
+
+
+def api_upload(root, data, uid, mcp, timeout=300, portal=None, compile=True):
+    """Approved non-safety change -> TIAC_Writer (api_upload_plc; HMI: _upload_hmi) -> Signed (by TIAC_Writer).
+    A group member only through the group Upload: one member alone leaves the block half changed (E8)."""
     _, s, u = state.find(data, uid)
     if u['state'] != 'Approved':
         raise state.StateError('Upload only in state Approved (now %s)' % u['state'])
-    if u.get('group') and not in_group:
+    if u.get('group'):
         raise state.StateError('%s is member %d of group %s — upload the group (members in order), not one member: '
                                'alone it leaves the block half changed' % (uid, u['group']['order'], u['group']['id']))
     if _is_f_edit(root, u):
         raise state.StateError('F-block: no Upload — make the change by hand following the TIA steps')
+    _upload_guard(s)
     if u.get('kind') == 'hmi_screen':
         return _upload_hmi(data, uid, u, mcp, timeout, portal)
     tia = _tia(s, u['project'], data)
-    why = xml_reason(root, u, tia)
-    if why:
-        r = api_upload_xml(root, data, [u], mcp, timeout, portal, tia, why)
-        return {'ok': r['ok'], 'message': r['message'], 'write': r['write'], 'edit': state.find(data, uid)[2]}
-    if not TIA_LOCK.acquire(blocking=False):
-        raise state.StateError('another Upload / Check is running — wait until it ends')
-    steps, work = [], tempfile.mkdtemp(prefix='tiac_upload_')
-
-    def step(name, fn):
-        return _step(steps, name, fn)
-    try:
-        sp, block = tia['softwarePath'], u['block']
-        try:
-            with _client(mcp, 'writer', timeout) as k:
-                _connect(k, steps, portal)
-                grp = tia.get('groupPath')
-                if not grp:
-                    fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
-                        'ResolveObjectPath', {'softwarePath': sp, 'name': block, 'kind': 'block'})))
-                    grp = fpath.rsplit('/', 1)[0] if '/' in fpath else ''
-                bpath = (grp + '/' if grp else '') + block
-                export = lambda: k.call('ExportBlocksAsDocuments', {
-                    'softwarePath': sp, 'exportPath': work, 'regexName': '^%s$' % re.escape(block), 'preservePath': False})
-                step('ExportBlocksAsDocuments', export)
-                files = glob.glob(os.path.join(work, '**', block + '.s7dcl'), recursive=True)
-                if not files:                         # TIA exports no inconsistent block (a hand edit, an Upload that stopped)
-                    step('CompileBlock', lambda: k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}))
-                    step('ExportBlocksAsDocuments', export)
-                    files = glob.glob(os.path.join(work, '**', block + '.s7dcl'), recursive=True)
-                if not files:
-                    raise s7dcl_write.WriteError('the Writer did not export %s.s7dcl — compile the block in TIA' % block)
-                folder = os.path.dirname(files[0])
-                step({'interface': 'Add interface members in .s7dcl', 'new_network': 'Insert the network in .s7dcl'}.get(
-                    u.get('kind'), 'Replace the network in .s7dcl'),
-                     lambda: _replace_in_file(files[0], u))
-                preview = step('PreviewImport', lambda: k.call('PreviewImport', {
-                    'softwarePath': sp, 'importPath': folder, 'kind': 'block', 'groupPath': grp}))
-                step('ImportFromDocuments', lambda: k.call('ImportFromDocuments', {
-                    'softwarePath': sp, 'groupPath': grp, 'importPath': folder, 'fileNameWithoutExtension': block,
-                    'importOption': 'Override'}))
-                # an imported block is inconsistent until it compiles, and TIA exports no inconsistent block — neither for
-                # SetNetworkText (it exports and imports the block again) nor for the Check or the next Upload
-                step('CompileBlock', lambda: k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}))
-                texts = _network_texts(u, files[0])
-                if texts:                             # title / comment: the Writer edits the texts of the imported block
-                    arg = {'softwarePath': sp, 'blockPath': bpath, 'network': texts[0], 'dryRun': False}
-                    arg.update({k_: v for k_, v in (('title', texts[1]), ('comment', texts[2])) if v is not None})
-                    step('SetNetworkText', lambda: k.call('SetNetworkText', arg))
-                    step('CompileBlock', lambda: k.call('CompileBlock', {'softwarePath': sp, 'path': bpath}))
-            ok, message = True, ('written to the project (%s, group %s) — save the project in TIA (the Writer does not call '
-                                   'SaveProject)') % (sp, grp or '/')
-        except mcp_client.MCPError as e:
-            ok, message, preview = False, CONNECTION_ERROR + str(e), None
-        except SnapshotError as e:
-            ok, message, preview = False, str(e), None
-        except Exception as e:                        # whatever stops it (also after the import) must be recorded
-            ok, message, preview = False, 'Upload stopped: %s' % e, None
-        if not ok and os.listdir(work):              # E7: keep the documents of a failed attempt for the diagnosis
-            keep = os.path.join(data, state.check_name(u['project']), 'upload-failed',
-                                '%s-%s' % (uid, state.now().replace(':', '').replace('-', '')))
-            shutil.copytree(work, keep, dirs_exist_ok=True)
-            message += ' · the documents of this attempt are kept in %s' % keep
-        write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
-        if preview is not None:
-            write['preview'] = preview[:4000]
-        u = _write(data, uid, write, 'Signed' if ok else None, 'TIAC_Writer')
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-        TIA_LOCK.release()
-    return {'ok': ok, 'message': write['message'], 'write': write, 'edit': u}
+    r = api_upload_plc(root, data, [u], mcp, timeout, portal, tia, _upload_why(root, [u], tia, compile), compile)
+    return {'ok': r['ok'], 'message': r['message'], 'write': r['write'], 'edit': state.find(data, uid)[2]}
 
 
 def _reason(e):
@@ -1378,7 +1348,10 @@ def _reason(e):
 
 
 def _compiled(r):
-    """CompileBlock answer -> raise when it reports errors (the Writer also raises, this covers an answer without it)."""
+    """CompileBlock / CompileSoftware answer -> raise when it reports errors (the Writer also raises, this covers an answer
+    without it) or when the compiled block is still inconsistent afterwards (the Writer's warning)."""
+    if 'still inconsistent after the compile' in (r or ''):
+        raise s7dcl_write.WriteError('the block is still inconsistent after the compile: %s' % r[:600])
     try:
         j = json.loads(r)
     except (TypeError, ValueError):
@@ -1396,32 +1369,99 @@ def _content_hash(r):
     return next((v for k, v in j.items() if k.lower() == 'contenthash' and v), None) if isinstance(j, dict) else None
 
 
-def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
-    """Upload through SimaticML (E4/E5/E7) of edits (one edit or a group, all Approved, non-safety), one import per block:
-    ExportXmlBlock → edit the export (interface → new networks → changes) → ImportXmlBlock {expectedContentHash} →
-    CompileBlock → for an OB GetBlockInfo (number, event class, cycle as before). E8: when anything after the first
-    import fails, every block already imported gets its export from before the write back (ImportXmlBlock + CompileBlock);
-    the edits stay Approved. -> {ok, message, write}"""
+def _has_f_blocks(root, project):
+    """Does the PLC of the newest export have F-blocks (a safety program)? Unknown = yes."""
+    try:
+        return any(b.get('f') for b in api_catalog(root, project)['blocks'])
+    except (KeyError, OSError, ValueError):
+        return True
+
+
+def _compile_software(k, sp):
+    """CompileSoftware of the PLC; with Rebuild all when the Writer offers a 'rebuild' parameter (round W7)."""
+    arg = {'softwarePath': sp}
+    try:
+        tool = next((t for t in k.list_tools(60) if t.get('name') == 'CompileSoftware'), {})
+        if 'rebuild' in ((tool.get('inputSchema') or {}).get('properties') or {}):
+            arg['rebuild'] = True
+    except mcp_client.MCPError:                       # an older Writer without tools/list: compile without it
+        pass
+    return _compiled(k.call('CompileSoftware', arg))
+
+
+def _tia_gone(k, step, portal_id):
+    """D4: after a failed Writer call — is the Writer still running and the TIA Portal instance still there? -> why not, else None."""
+    if k.p is None or k.p.poll() is not None:
+        return 'the Writer is no longer running'
+    try:
+        inst = portal_instances(step('GetPortals (is TIA still running?)', lambda: k.call('GetPortals', {}, 60))) or []
+    except Exception as e:
+        return 'the Writer does not answer (%s)' % str(e)[:200]
+    if str(portal_id) not in [str(x['portalId']) for x in inst]:
+        return 'the TIA Portal instance %s is gone' % portal_id
+    return None
+
+
+def _set_unsafe(data, project, why):
+    with state.LOCK:
+        s = state.load(data, project)
+        s['unsafe_to_save'] = '%s: %s' % (state.now(), why[:600])
+        state.save(data, project, s)
+
+
+def api_upload_plc(root, data, members, mcp, timeout, portal, tia, why=None, compile=True):
+    """Upload of PLC edits (one edit or the PLC members of a group; all Approved, non-safety): one export, one import and
+    one compile per block, the members applied in the order interface → new networks → changes; the blocks in the order of
+    their first member (a block with an interface edit before the blocks that call it).
+    - why = None: documents — ExportBlocksAsDocuments → edit the .s7dcl → PreviewImport → ImportFromDocuments Override;
+      network texts after the compile through SetNetworkText (+ CompileBlock).
+    - why = text: SimaticML (E4/E5/E7) — ExportXmlBlock → edit → ImportXmlBlock {expectedContentHash}; OB: GetBlockInfo.
+    Safety of the write:
+    - D4: SaveProject once, right before the first import (TIA settings save = 'no' turns it off), so a TIA crash loses
+      nothing; a Writer that dies or a TIA instance that is gone after a failed Writer call → 'TIA PORTAL MAY HAVE CRASHED',
+      nothing is restored.
+    - D20b: when CompileBlock fails, CompileSoftware — only for a PLC without F-blocks (it would compile the safety program,
+      which stays with the operator).
+    - D12: compile=False — no compile at all; the edits go Signed with the note 'waiting for Rebuild all'.
+    - E8 / D10b: when anything fails after the first import, every block already imported gets its export from before the
+      write back and is compiled the same way; a block that is not consistent afterwards → 'BLOCK INCONSISTENT — DO NOT SAVE
+      THE PROJECT', and the project is marked unsafe to save (_upload_guard). -> {ok, message, write, edits}"""
     project = members[0]['project']
     order = sorted(members, key=lambda u: (UPLOAD_ORDER.get(u.get('kind', 'network'), 2), (u.get('group') or {}).get('order', 0)))
-    refused = ['%s: %s' % (u['id'], r) for u in order for r in [xml_refused(root, u)] if r]
-    if refused:                                       # before the first write
-        raise state.StateError('Upload through SimaticML (%s) refused — %s; make the change by hand (TIA steps)'
-                               % (why, '; '.join(refused)))
+    if why:
+        refused = ['%s: %s' % (u['id'], r) for u in order for r in [xml_refused(root, u)] if r]
+        if refused:                                   # before the first write
+            raise state.StateError('Upload through SimaticML (%s) refused — %s; make the change by hand (TIA steps)'
+                                   % (why, '; '.join(refused)))
     if not TIA_LOCK.acquire(blocking=False):
         raise state.StateError('another Upload / Check is running — wait until it ends')
-    steps, work, done, restore = [], tempfile.mkdtemp(prefix='tiac_upload_xml_'), [], []
+    save, software = tia.get('save') != 'no', compile and not _has_f_blocks(root, project)
+    steps, work, done, restore, bad, previews = [], tempfile.mkdtemp(prefix='tiac_upload_'), [], [], [], []
+    saved, gone = False, None
 
     def step(name, fn):
         return _step(steps, name, fn)
+
+    def consistent(k, sp, bpath, label=''):
+        """CompileBlock; when it fails, CompileSoftware (D20b) if allowed; raises when the block stays inconsistent."""
+        try:
+            step(label + 'CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+        except Exception as e1:
+            if not software or k.p is None or k.p.poll() is not None:
+                raise
+            try:
+                step(label + 'CompileSoftware', lambda: _compile_software(k, sp))
+            except Exception as e2:
+                raise s7dcl_write.WriteError('CompileBlock: %s · then CompileSoftware: %s' % (_reason(e1)[:500], _reason(e2)[:500]))
     try:
         sp = tia['softwarePath']
         blocks = list(dict.fromkeys(u['block'] for u in order))
         try:
             with _client(mcp, 'writer', timeout) as k:
-                _connect(k, steps, portal)
+                pid = _connect(k, steps, portal)
                 try:
                     for block in blocks:
+                        mine = [u for u in order if u['block'] == block]
                         grp = tia.get('groupPath')
                         if not grp:
                             fpath = _path_from_text(step('ResolveObjectPath', lambda: k.call(
@@ -1429,63 +1469,119 @@ def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
                             grp = fpath.rsplit('/', 1)[0] if '/' in fpath else ''
                         bpath = (grp + '/' if grp else '') + block
                         folder = os.path.join(work, 'export', block)
-                        export = lambda: k.call('ExportXmlBlock', {'softwarePath': sp, 'blockPath': bpath,
-                                                                   'exportPath': folder, 'preservePath': False})
-                        r = step('ExportXmlBlock', export)
-                        file = os.path.join(folder, block + '.xml')
-                        if not os.path.exists(file):          # TIA exports no inconsistent block
-                            step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                        ob = None
+                        if why:
+                            export = lambda: k.call('ExportXmlBlock', {'softwarePath': sp, 'blockPath': bpath,
+                                                                       'exportPath': folder, 'preservePath': False})
                             r = step('ExportXmlBlock', export)
-                        if not os.path.exists(file):
-                            raise s7dcl_write.WriteError('the Writer did not export %s.xml — compile the block in TIA' % block)
-                        with open(file, 'rb') as f:
-                            raw = f.read()
-                        bom, text = raw.startswith(b'\xef\xbb\xbf'), raw.decode('utf-8-sig')
-                        mine = [u for u in order if u['block'] == block]
-                        new, notes = step('Edit the SimaticML', lambda: simaticml.edit_block(
-                            text, mine, lambda nets, u: _find_network(nets, u)[0], _call_params(root, project, text)))
-                        steps[-1]['message'] = ('%s: %s' % (block, '; '.join(notes)))[:1000]
-                        out = os.path.join(work, 'import', block + '.xml')
-                        os.makedirs(os.path.dirname(out), exist_ok=True)
-                        _write_text(out, bom, new)
-                        arg = {'softwarePath': sp, 'groupPath': grp, 'importPath': out}
-                        h = _content_hash(r)
-                        if h:
-                            arg['expectedContentHash'] = h
-                        ob = simaticml.ob_attributes(text)
-                        info0 = step('GetBlockInfo before', lambda: k.call('GetBlockInfo', {'softwarePath': sp, 'blockPath': bpath})) if ob else None
-                        done.append((block, bpath, grp, file))     # from now on the block may be changed: restore on failure
+                            file = os.path.join(folder, block + '.xml')
+                            if not os.path.exists(file):          # TIA exports no inconsistent block
+                                step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                                r = step('ExportXmlBlock', export)
+                            if not os.path.exists(file):
+                                raise s7dcl_write.WriteError('the Writer did not export %s.xml — compile the block in TIA' % block)
+                            with open(file, 'rb') as f:
+                                raw = f.read()
+                            bom, text = raw.startswith(b'\xef\xbb\xbf'), raw.decode('utf-8-sig')
+                            new, notes = step('Edit the SimaticML', lambda: simaticml.edit_block(
+                                text, mine, lambda nets, u: _find_network(nets, u)[0], _call_params(root, project, text)))
+                            steps[-1]['message'] = ('%s: %s' % (block, '; '.join(notes)))[:1000]
+                            out = os.path.join(work, 'import', block + '.xml')
+                            os.makedirs(os.path.dirname(out), exist_ok=True)
+                            _write_text(out, bom, new)
+                            imp = ('ImportXmlBlock', {'softwarePath': sp, 'groupPath': grp, 'importPath': out})
+                            h = _content_hash(r)
+                            if h:
+                                imp[1]['expectedContentHash'] = h
+                            # the Writer returns no hash after an import: the restore cannot pass expectedContentHash
+                            back = ('ImportXmlBlock', {'softwarePath': sp, 'groupPath': grp, 'importPath': file})
+                            ob = simaticml.ob_attributes(text)
+                            info0 = step('GetBlockInfo before', lambda: k.call(
+                                'GetBlockInfo', {'softwarePath': sp, 'blockPath': bpath})) if ob else None
+                        else:
+                            export = lambda: k.call('ExportBlocksAsDocuments', {
+                                'softwarePath': sp, 'exportPath': folder, 'regexName': '^%s$' % re.escape(block),
+                                'preservePath': False})
+                            step('ExportBlocksAsDocuments', export)
+                            files = glob.glob(os.path.join(folder, '**', block + '.s7dcl'), recursive=True)
+                            if not files:                         # TIA exports no inconsistent block (a hand edit, an Upload that stopped)
+                                step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                                step('ExportBlocksAsDocuments', export)
+                                files = glob.glob(os.path.join(folder, '**', block + '.s7dcl'), recursive=True)
+                            if not files:
+                                raise s7dcl_write.WriteError('the Writer did not export %s.s7dcl — compile the block in TIA' % block)
+                            file, src = files[0], os.path.dirname(files[0])
+                            orig = os.path.join(work, 'restore', block)
+                            shutil.copytree(src, orig)
+                            for u in mine:
+                                step({'interface': 'Add interface members in .s7dcl', 'new_network': 'Insert the network in .s7dcl'}.get(
+                                    u.get('kind'), 'Replace the network in .s7dcl'), lambda: _replace_in_file(file, u))
+                            previews.append(step('PreviewImport', lambda: k.call('PreviewImport', {
+                                'softwarePath': sp, 'importPath': src, 'kind': 'block', 'groupPath': grp})))
+                            imp = ('ImportFromDocuments', {'softwarePath': sp, 'groupPath': grp, 'importPath': src,
+                                                           'fileNameWithoutExtension': block, 'importOption': 'Override'})
+                            back = (imp[0], dict(imp[1], importPath=orig))
+                        if save and not saved:                    # D4: nothing of before the Upload is lost if TIA goes down
+                            step('SaveProject', lambda: k.call('SaveProject', {}))
+                            saved = True
+                        done.append((block, bpath, back))         # from now on the block may be changed: restore on failure
                         try:
-                            step('ImportXmlBlock', lambda: k.call('ImportXmlBlock', arg))
+                            step(imp[0], lambda: k.call(*imp))
                         except Exception as e:
                             if 'state_changed' in str(e):         # refused before the write: someone else's change stays
                                 done.pop()
                             raise
-                        step('CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
+                        if compile:
+                            consistent(k, sp, bpath)
                         if ob:
                             info = step('GetBlockInfo', lambda: k.call('GetBlockInfo', {'softwarePath': sp, 'blockPath': bpath}))
-                            bad = simaticml.ob_mismatch(ob, info) or simaticml.info_changed(info0, info)
-                            if bad:
-                                steps[-1].update(ok=False, message=('OB changed: ' + bad)[:1000])
-                                raise simaticml.XmlError('OB %s after the import: %s' % (block, bad))
-                    ok, message = True, ('written through SimaticML (%s; %s, group %s) — save the project in TIA (the Writer '
-                                         'does not call SaveProject)') % (why, sp, tia.get('groupPath') or '/')
+                            wrong = simaticml.ob_mismatch(ob, info) or simaticml.info_changed(info0, info)
+                            if wrong:
+                                steps[-1].update(ok=False, message=('OB changed: ' + wrong)[:1000])
+                                raise simaticml.XmlError('OB %s after the import: %s' % (block, wrong))
+                        for u in mine if not why else []:
+                            texts = _network_texts(u, file)
+                            if texts:                             # title / comment: the Writer edits the texts of the imported block
+                                arg = {'softwarePath': sp, 'blockPath': bpath, 'network': texts[0], 'dryRun': False}
+                                arg.update({k_: v for k_, v in (('title', texts[1]), ('comment', texts[2])) if v is not None})
+                                step('SetNetworkText', lambda: k.call('SetNetworkText', arg))
+                                consistent(k, sp, bpath)
+                    ok, message = True, 'written %s(%s, group %s)' % (
+                        'through SimaticML (%s; ' % why if why else 'to the project (', sp, tia.get('groupPath') or '/')
+                    if not compile:
+                        message += (' · NOT COMPILED: %s wait for Rebuild all — %s; the Check can export the block only '
+                                    'after it' % (', '.join(blocks), REBUILD_HINT))
+                    message += ' — save the project in TIA to keep the change%s' % (
+                        ' (it was saved right before the import, without the change)' if saved else '')
                 except Exception as e:
                     ok, message = False, 'Upload stopped: %s' % _reason(e)
-                    for block, bpath, grp, file in reversed(done):     # E8: back to the export from before the write
+                    if steps and steps[-1]['step'] == 'SaveProject' and not steps[-1]['ok']:
+                        message += (' — nothing was written; to upload without saving first, untick "save the project '
+                                    'before Upload" in the TIA settings')
+                    gone = done and _tia_gone(k, step, pid)          # D4: a failure after the first import — is TIA still there?
+                    for block, bpath, back in reversed(done if not gone else []):   # E8: back to the export from before the write
                         try:
-                            # the Writer returns no hash after an import: the restore cannot pass expectedContentHash
-                            step('Restore: ImportXmlBlock', lambda: k.call('ImportXmlBlock', {
-                                'softwarePath': sp, 'groupPath': grp, 'importPath': file}))
-                            steps[-1]['message'] = ('UNPROTECTED (no expectedContentHash): ' + steps[-1]['message'])[:1000]
-                            step('Restore: CompileBlock', lambda: _compiled(k.call('CompileBlock', {'softwarePath': sp, 'path': bpath})))
-                            restore.append('%s restored from the export before the write — WITHOUT a content-hash check '
-                                           '(no hash of the block after the import), so a change made in TIA meanwhile '
-                                           'was overwritten' % block)
+                            step('Restore: ' + back[0], lambda: k.call(*back))
                         except Exception as e2:
-                            restore.append('%s NOT RESTORED (%s) — check it in TIA, its export from before the write is '
-                                           'kept below' % (block, _reason(e2)[:300]))
-                            ok = None                           # marks: keep the files
+                            restore.append('%s NOT RESTORED (%s) — its export from before the write is kept below'
+                                           % (block, _reason(e2)[:300]))
+                            bad.append(block)
+                            continue
+                        hashless = (' — WITHOUT a content-hash check (no hash of the block after the import), so a change '
+                                    'made in TIA meanwhile was overwritten') if back[0] == 'ImportXmlBlock' else ''
+                        if back[0] == 'ImportXmlBlock':
+                            steps[-1]['message'] = ('UNPROTECTED (no expectedContentHash): ' + steps[-1]['message'])[:1000]
+                        if not compile:
+                            restore.append('%s restored from the export before the write (not compiled: %s)%s'
+                                           % (block, REBUILD_HINT, hashless))
+                            continue
+                        try:
+                            consistent(k, sp, bpath, 'Restore: ')
+                            restore.append('%s restored from the export before the write%s' % (block, hashless))
+                        except Exception as e3:
+                            restore.append('%s restored from the export before the write, but it does not compile (%s)%s'
+                                           % (block, _reason(e3)[:300], hashless))
+                            bad.append(block)
         except mcp_client.MCPError as e:
             ok, message = False, CONNECTION_ERROR + _reason(e)
         except SnapshotError as e:
@@ -1494,20 +1590,40 @@ def api_upload_xml(root, data, members, mcp, timeout, portal, tia, why):
             ok, message = False, 'Upload stopped: %s' % _reason(e)
         if restore:
             message += ' · ' + '; '.join(restore)
-        elif done and not ok:
+        elif done and not ok and not gone:
             message += ' · the block(s) %s may be changed and were not restored — check them in TIA' % ', '.join(b[0] for b in done)
-            ok = None
+            bad += [b[0] for b in done]
+        unsafe = None
+        if gone:                                      # D4
+            unsafe = 'TIA Portal may have crashed during the Upload of %s' % ', '.join(b[0] for b in done)
+            message = ('TIA PORTAL MAY HAVE CRASHED (%s) — nothing was restored. %s Check TIA before anything else (%s); '
+                       'the edits stay Approved. %s' % (gone, 'The project was saved right before the first import '
+                       '(SaveProject): reopen it, nothing of before the Upload is lost.' if saved else 'The project was '
+                       'NOT saved before the import (TIA settings): unsaved changes may be lost.', ', '.join(b[0] for b in done),
+                       message))
+        elif bad:                                     # D10b / D20b
+            unsafe = 'block(s) %s inconsistent after a failed Upload' % ', '.join(bad)
+            message = ('BLOCK INCONSISTENT: %s — DO NOT SAVE THE PROJECT; %s%s%s. %s' % (
+                ', '.join(bad), REBUILD_HINT, ' or close TIA without saving (the project was saved right before the import)'
+                if saved else '', '' if software or not compile else ' (the editor runs no CompileSoftware: this PLC has '
+                'F-blocks, compiling the safety program stays with you)', message))
         if not ok and os.path.isdir(work) and os.listdir(work):   # E7: keep the files of a failed attempt
             keep = os.path.join(data, state.check_name(project), 'upload-failed',
                                 '%s-%s' % (order[0]['id'], state.now().replace(':', '').replace('-', '')))
             shutil.copytree(work, keep, dirs_exist_ok=True)
-            message += ' · the XML files of this attempt are kept in %s' % keep
-        ok = bool(ok)
-        write = {'time': state.now(), 'tool': 'TIAC_Writer', 'via': 'SimaticML', 'steps': steps, 'ok': ok, 'message': message}
+            message += ' · the files of this attempt are kept in %s' % keep
+        write = {'time': state.now(), 'tool': 'TIAC_Writer', 'steps': steps, 'ok': ok, 'message': message}
+        if why:
+            write['via'] = 'SimaticML'
+        if previews:
+            write['preview'] = '\n'.join(previews)[:4000]
         if len(order) > 1:
             write['edits'] = [u['id'] for u in order]
-        for u in order:
-            _write(data, u['id'], write, 'Signed' if ok else None, 'TIAC_Writer')
+        for u in order:                               # D8: whatever was written is recorded, also on a failure
+            _write(data, u['id'], write, 'Signed' if ok else None, 'TIAC_Writer',
+                   None if compile else 'not compiled — waiting for Rebuild all')
+        if unsafe:
+            _set_unsafe(data, project, unsafe)
     finally:
         shutil.rmtree(work, ignore_errors=True)
         TIA_LOCK.release()
@@ -2588,32 +2704,50 @@ def api_group_check(root_of, data, gid):
     return {'group': gid, 'match': all(x['match'] for x in res), 'results': res, 'view': api_group(data, gid)}
 
 
-def api_group_upload(root_of, data, gid, upload, upload_xml=None):
-    """Upload of the members (Approved, non-F) one by one: interface edits, then new networks, then network changes;
-    stops at the first failure. upload(uid) = api_upload for one edit. When one member needs SimaticML (xml_reason), the
-    whole group goes that way: upload_xml(members, tia, why) = api_upload_xml, one import per block."""
+def api_group_upload(root_of, data, gid, mcp, timeout=300, portal=None, compile=True):
+    """Upload of a group (every member Approved, none F). D8: what the Upload cannot do for ANY member (an HMI change the
+    Writer has no tool for, what the SimaticML way does not write) is refused before the first write. Then the PLC members
+    in one api_upload_plc (one import and one compile per block: interface → new networks → changes; through SimaticML for
+    all of them when one needs it — xml_reason — or without compile, D12), then the HMI members one by one, only when the PLC
+    part succeeded. Nothing raises after the first write: every written member is recorded (Signed) by its Upload."""
     project, s, members = _group_members(data, gid)
-    if any(_is_f_edit(root_of(u['id']), u) for u in members):     # no 'f' key = unknown: from the export, else F
+    root = root_of(members[0]['id'])
+    if any(_is_f_edit(root, u) for u in members):     # no 'f' key = unknown: from the export, else F
         raise state.StateError('F-block in the group: no Upload — make the changes by hand following the TIA steps, '
                                'then compile the safety program once')
     not_ready = ['%s (%s)' % (u['id'], u['state']) for u in members if u['state'] != 'Approved']
     if not_ready:
         raise state.StateError('Upload of a group only when every member is Approved: %s' % ', '.join(not_ready))
-    tia = s.get('tia') or next((p.get('tia') for p in state.registry(data) if p['name'] == project), None) or {}
-    why = next((r for u in members for r in [xml_reason(root_of(u['id']), u, tia)] if r), None)
-    if why and upload_xml:
-        r = upload_xml(members, _tia(s, project, data), why)
-        return {'group': gid, 'ok': r['ok'], 'via': 'SimaticML',
-                'results': [{'edit': x, 'ok': r['ok'], 'message': r['message']} for x in r['edits']],
-                'view': api_group(data, gid)}
-    res = []
-    for u in sorted(members, key=lambda u: (UPLOAD_ORDER.get(u.get('kind', 'network'), 2), u['group']['order'])):
-        r = upload(u['id'])
+    _upload_guard(s)
+    plc = [u for u in members if u.get('kind') != 'hmi_screen']
+    hmis = [u for u in members if u.get('kind') == 'hmi_screen']
+    tia = _tia(s, project, data) if plc else {}
+    why = _upload_why(root, plc, tia, compile) if plc else None
+    refused = []
+    for u in hmis:
+        try:
+            hmi_writes(u)
+        except state.StateError as e:
+            refused.append('%s: %s' % (u['id'], e))
+    refused += ['%s: SimaticML (%s): %s' % (u['id'], why, r) for u in plc for r in [why and xml_refused(root, u)] if r]
+    if refused:
+        raise state.StateError('Upload of group %s refused before any write — %s. Nothing was written; make these members by '
+                               'hand (TIA steps), then "Written by hand → Signed"' % (gid, ' · '.join(refused)))
+    res, ok = [], True
+    if plc:
+        r = api_upload_plc(root, data, plc, mcp, timeout, portal, tia, why, compile)
+        res += [{'edit': x, 'ok': r['ok'], 'message': r['message']} for x in r['edits']]
+        ok = r['ok']
+    for u in hmis if ok else []:
+        try:
+            r = _upload_hmi(data, u['id'], u, mcp, timeout, portal)
+        except state.StateError as e:                 # e.g. another Upload took the lock: nothing written for this member
+            r = {'ok': False, 'message': str(e)}
         res.append({'edit': u['id'], 'ok': r['ok'], 'message': r['message']})
         if not r['ok']:
             break
     ok = len(res) == len(members) and all(x['ok'] for x in res)
-    return {'group': gid, 'ok': ok, 'results': res, 'view': api_group(data, gid)}
+    return dict({'group': gid, 'ok': ok, 'results': res, 'view': api_group(data, gid)}, **({'via': 'SimaticML'} if why else {}))
 
 
 # ---------- HTTP routes ----------
@@ -2646,12 +2780,15 @@ def _add_project(h):
     raise state.StateError('source must be exports | tia | ap21', 400)
 
 
+def _compile_opt(h):
+    """D12: an Upload body {compile: false} leaves compiling to Rebuild all."""
+    b = h._body()
+    return not (isinstance(b, dict) and b.get('compile') is False)
+
+
 def _group_upload(h, gid):
     _demo_guard(h, _group_members(h.data, gid)[2][0]['id'])
-    return api_group_upload(h.root_of, h.data, gid, lambda uid: api_upload(
-        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h), in_group=True),
-        lambda members, tia, why: api_upload_xml(h.root_of(members[0]['id']), h.data, members, h.mcp, h.mcp_timeout,
-                                                 _portal(h), tia, why))
+    return api_group_upload(h.root_of, h.data, gid, h.mcp, h.mcp_timeout, _portal(h), _compile_opt(h))
 
 
 def _changelog(h, name):
@@ -2702,7 +2839,7 @@ ROUTES = [
     ('POST PUT', E + '/after', lambda h, uid: api_edit_after(h.data, uid, h._body(), h.root_of(uid))),
     ('POST', E + '/check-export', lambda h, uid: api_check_export(h.root_of(uid), h.data, uid, h._body())),
     ('POST', E + '/upload', lambda h, uid: _demo_guard(h, uid) or api_upload(
-        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h))),
+        h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout, _portal(h), _compile_opt(h))),
     ('POST', E + '/check', lambda h, uid: _demo_guard(h, uid) or api_check(h.root_of(uid), h.data, uid, h.mcp, h.mcp_timeout)),
     ('POST', r'/api/check', lambda h: api_add_check(h.data, h._body())),
     ('POST', r'/api/groups', lambda h: (api_group_create(h.data, h._body()), 201)),
