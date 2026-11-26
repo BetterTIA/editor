@@ -67,7 +67,7 @@ class TestStateMachine(unittest.TestCase):
         self.assertIsNone(state.next_versions({}))
         self.assertEqual(state.next_versions({'version': 'V10.2.7'}), {'current': 'V10.2.7', 'patch': 'V10.2.8', 'minor': 'V10.3.0'})
         self.assertEqual((state.version_for({}, 'Uploaded', None), state.version_for({'version': 'V1.0.0'}, 'Uploaded', '')),
-                         (None, 'V1.0.1'))
+                         (None, None))                                       # Uploaded never guesses
         self.assertEqual(state.version_for({'version': 'V1.0.0'}, 'Uploaded', '2.0.0'), 'V2.0.0')    # given wins
         u = self.u('Checked', [{'match': True}])
         with self.assertRaises(state.StateError) as e:
@@ -254,7 +254,8 @@ class TestApiEdits(unittest.TestCase):
         to_checked('U002')
         _, d = self.req('GET', '/api/edits/U002')
         self.assertEqual(d['versions'], {'current': 'V1.2.3', 'patch': 'V1.2.4', 'minor': 'V1.3.0'})
-        s, u = self.req('POST', '/api/edits/U002/state', {'state': 'Uploaded'})   # no version: the patch proposal
+        self.assertEqual(self.req('POST', '/api/edits/U002/state', {'state': 'Uploaded'})[0], 400)   # never guessed
+        s, u = self.req('POST', '/api/edits/U002/state', {'state': 'Uploaded', 'version': d['versions']['patch']})
         self.assertEqual((s, u['uploaded']['version']), (200, 'V1.2.4'))
         s, u = self.req('POST', '/api/edits/U001/state', {'state': 'Tested'})
         self.assertEqual((s, u['tested']['version'], u['tested']['time']), (200, 'V1.2.3', u['history'][-1]['time']))

@@ -374,9 +374,8 @@ TOOLS = [
                   'only after a matching run_check, which also sets Checked by itself). Use it only on a person\'s instruction; '
                   'Uploaded and Tested only on an explicit instruction — they say the change reached the PLC / was tested on it. '
                   'Uploaded records the project version V<1>.<2>.<3> (3rd number = one change, 2nd = a larger set of '
-                  'functions, 1st = release; the person confirms it): without version the editor takes the 3rd number + 1 of '
-                  'the project current version (get_edit -> versions: current / patch / minor) and refuses when the project '
-                  'has none yet. Tested records the time and carries the version of the Uploaded. A group moves with one version.',
+                  'functions, 1st = release; the person confirms it): pass version always - show the person the proposals '
+                  '(get_edit / get_group -> versions: current / patch / minor) first; without version Uploaded is refused. Tested records the time and carries the version of the Uploaded. A group moves with one version.',
      _schema({'id': S, 'group': S, 'state': {'type': 'string', 'enum': ALL_STATES}, 'by': {'type': 'string',
               'description': 'who decided (default: the client name)'}, 'reason': {'type': 'string',
               'description': 'required for Disapproved'}, 'version': {'type': 'string',

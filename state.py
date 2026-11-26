@@ -213,12 +213,11 @@ def next_versions(s):
 
 
 def version_for(s, target, given):
-    """The version a move to Uploaded / Tested records: the given one, else for Uploaded the patch proposal and for Tested
-    (of an edit uploaded before versions existed) the project's current version; None = none known."""
+    """The version a move to Uploaded / Tested records: the given one; Uploaded never guesses (a person confirms the
+    version, the proposals are only offered); Tested of an edit uploaded before versions existed takes the project's
+    current version; None = none known."""
     if given not in (None, ''):
         return norm_version(given)
-    if target == 'Uploaded':
-        return (next_versions(s) or {}).get('patch')
     return s.get('version') if target == 'Tested' else None
 
 
@@ -248,7 +247,8 @@ def change_state(u, new_value, by, reason=None, version=None):
         h['version'] = (new_value == 'Tested' and (u.get('uploaded') or {}).get('version')) or version
         if not h['version']:
             raise StateError('%s needs the project version V<1>.<2>.<3> (3rd number = one change, 2nd = a '
-                             'larger set of functions, 1st = release) — the project has no version yet, pass it, e.g. '
+                             'larger set of functions, 1st = release), confirmed by a person — pass it (proposals: '
+                             '"versions" of GET /api/edits/<id>), e.g. '
                              '{"state": "%s", "version": "V1.0.1"}' % (new_value, new_value), 400)
         u[new_value.lower()] = dict(h)                # u['uploaded'] / u['tested']: {version, time, by}
     elif u['state'] in ('Uploaded', 'Tested'):        # a step back: the record of the state left no longer holds
