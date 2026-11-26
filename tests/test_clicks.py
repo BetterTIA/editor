@@ -191,6 +191,21 @@ class TestClicks(unittest.TestCase):
         self.click("document.getElementById('ed-undo')")
         self.wait_for("he.after.items.some(x => x.name === 'IO_Setpoint')")
 
+    def test_auto_refresh_keeps_typed_text(self):
+        uid = self.edit('FB_Conveyor', 1, False)
+        self.ws.call('Page.navigate', url=self.url + '/?edit=%s' % uid)
+        self.wait_for("document.body && document.body.dataset.done === '1' && !!document.getElementById('dis-reason')")
+        self.assertTrue(self.js("document.querySelector('link[rel=icon]').href.startsWith('data:image/svg+xml')"))
+        self.js("document.querySelector('details.disapprove').open = true; document.getElementById('dis-reason').value = 'half typed'; 1")
+        server.api_edit_state(self.data, uid, {'state': 'Approved', 'by': 'test'})     # e.g. an AI agent through MCP
+        self.js('autoRefresh().then(() => 1)')                                         # typed text -> no redraw
+        self.assertEqual(self.js("document.getElementById('dis-reason').value"), 'half typed')
+        self.assertEqual(self.js("document.querySelector('.edit-head .state').textContent"), 'Proposal')
+        self.js("document.getElementById('dis-reason').value = ''; 1")
+        self.js('autoRefresh().then(() => 1)')                                         # nothing typed -> redrawn, details stay open
+        self.assertEqual(self.js("document.querySelector('.edit-head .state').textContent"), 'Approved')
+        self.assertTrue(self.js("document.querySelector('details.disapprove').open"))
+
 
 if __name__ == '__main__':
     unittest.main()

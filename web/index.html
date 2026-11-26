@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BetterTIA Editor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23062530'/><path d='M3 16h9.4M19.6 16H29' stroke='%234cc9e0' stroke-width='3.4'/><path d='M12.4 7.2v17.4M19.6 7.2v17.4' stroke='%234cc9e0' stroke-width='4'/></svg>">
 <style>
 /* ---------- tokens: dark is the default, [data-theme="light"] overrides (set before paint by the script below) ---------- */
 :root {
@@ -404,11 +405,15 @@ const NS = 'http://www.w3.org/2000/svg';
 const L = 18, MAX_CHARS = 30;
 
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+let writing = 0;          // POST / PUT / DELETE in flight (Upload, Check…): the auto refresh waits for them
 async function api(path, method = 'GET', body) {
-  const r = await fetch(path, method === 'GET' ? {} : {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || r.status);
-  return j;
+  if (method !== 'GET') writing++;
+  try {
+    const r = await fetch(path, method === 'GET' ? {} : {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    return j;
+  } finally { if (method !== 'GET') writing--; }
 }
 function link(par) {
   const u = new URLSearchParams(q);
@@ -2045,11 +2050,12 @@ function connectionHtml() {
     `Viewing and editing work without them; snapshots, Upload and Check need both. Start the server with ` +
     `<code>--mcp-json</code> (or <code>--writer-cmd</code> / <code>--reader-cmd</code>) and press Refresh.</div>`;
 }
-let homeJob = null;
+let homeJob = null, homeData = '';
 async function showHome() {
   document.querySelector('.main').classList.add('home');
   $('info').textContent = '';
   const r = await api('/api/projects');
+  homeData = JSON.stringify(r);
   const flow = `<ol class="stepper flow" aria-label="workflow">${STATES.map(x => `<li class="s-${x} done"><span class="node"></span>${x}</li>`).join('')}</ol>`;
   let h = `<div class="home"><div class="hero"><h1>Review AI-proposed changes to TIA Portal networks</h1>` +
     `<p>An AI agent proposes a change to one LAD or FBD network. You see the diff drawn as in TIA Portal, approve it, ` +
@@ -2123,9 +2129,57 @@ async function start() {
   }
   await status;
   document.body.dataset.done = '1';
-  if (q.get('screenshot') !== '1') setInterval(async () => {   // an AI agent connects / leaves -> update the chip
-    try { if ((await api('/api/tia/status')).ai !== tiaStatus.ai) await loadStatus(false); } catch (e) {}
-  }, 10000);
+  if (q.get('screenshot') === '1') return;
+  setInterval(checkStatus, 10000);
+  setInterval(autoRefresh, 90000);
+  const back = () => { if (!document.hidden) { checkStatus(); autoRefresh(); } };   // the window (msedge --app) is shown again
+  document.addEventListener('visibilitychange', back);
+  addEventListener('focus', back);
+}
+
+// ---------- auto refresh: the page follows the server (AI agents, MCP, other windows) without F5 ----------
+// GET /api/tia/status is the cached status (no TIA, no Writer); the heartbeat time of AI clients alone is no change
+const statusKey = st => JSON.stringify(Object.assign({}, st, {ai_clients: (st.ai_clients || []).map(c => c.id)}));
+async function checkStatus() {
+  try {
+    if (!writing && document.activeElement?.id !== 'portal' && statusKey(await api('/api/tia/status')) !== statusKey(tiaStatus)) await loadStatus(false);
+  } catch (e) { /* server away: keep the last status */ }
+}
+// work in progress the redraw would destroy: a request running, the graphic editor, the clean-up form, a snapshot job,
+// a focused field, typed text not saved yet (the card filter is only a view and is restored)
+function busy() {
+  const a = document.activeElement;
+  return writing > 0 || q.get('edit_mode') === '1' || !!q.get('cleanup') || !!document.querySelector('.job.running') ||
+    !!(a && a.matches('input, textarea, select')) ||
+    [...document.querySelectorAll('input:not(#card-filter), textarea')].some(x =>
+      ['checkbox', 'radio'].includes(x.type) ? x.checked !== x.defaultChecked : x.value !== x.defaultValue);
+}
+let refreshing = false;
+async function autoRefresh() {
+  if (refreshing || document.hidden || busy()) return;
+  refreshing = true;
+  try {
+    const home = !q.get('project') && !q.get('edit') && !q.get('group');
+    const now = await api(home ? '/api/projects' : '/api/state');
+    if (JSON.stringify(now) === (home ? homeData : JSON.stringify(lastState)) || busy()) return;   // redraw only on a change
+    const scroll = [...document.querySelectorAll('#nw, #content, #content .canvas')].map(x => [x.scrollLeft, x.scrollTop]);
+    const key = d => d.classList[0] + ':' + (d.querySelector('summary')?.firstChild?.textContent || '');
+    const open = new Map([...document.querySelectorAll('details')].map(d => [key(d), d.open]));
+    const filter = $('card-filter')?.value;
+    if (home) await showHome();
+    else if (q.get('edit')) await showEdit(q.get('edit'));
+    else if (q.get('group')) await showGroup(q.get('group'));
+    else {                                   // project, network and screen pages: only the edit tree, the content stays
+      lastState = now;
+      const t = document.createElement('div');
+      t.innerHTML = treeHtml(now, null);
+      document.querySelector('#nw .tree')?.replaceWith(t.querySelector('.tree'));
+    }
+    for (const d of document.querySelectorAll('details')) if (open.has(key(d))) d.open = open.get(key(d));
+    if (filter && $('card-filter')) { $('card-filter').value = filter; $('card-filter').dispatchEvent(new Event('input', {bubbles: true})); }
+    document.querySelectorAll('#nw, #content, #content .canvas').forEach((x, i) => { if (scroll[i]) [x.scrollLeft, x.scrollTop] = scroll[i]; });
+  } catch (e) { /* server away or the edit deleted: the page stays as it is */ }
+  finally { refreshing = false; }
 }
 start().catch(e => {
   $('content').innerHTML = `<div class="notice"><b>This page could not load</b><span>${esc(e.message)}. ` +

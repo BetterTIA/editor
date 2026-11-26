@@ -33,6 +33,11 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
   see [Changelog and versions](#changelog-and-versions),
 - every page has the status bar (TIA, Writer, Reader, AI with a state dot each, Refresh), a Home link and a theme
   toggle (light / dark, remembered in the browser's `localStorage`) in the header,
+- the page follows the server without F5: the status bar every 10 s (`GET /api/tia/status`, the cached status — no TIA
+  call), the data every 90 s and when the window is shown again (`GET /api/state`, on the home page `GET /api/projects`);
+  it redraws only on a change and not while something is being worked on (a request running, a focused field, typed
+  text, the editor, Clean up, a running snapshot) — open panels, the card filter and the scroll position stay; project,
+  network and screen pages only redraw the edit tree; not with `screenshot=1`,
 - left: the block's networks (number + title, language when not LAD); right: the network drawn as in TIA Portal,
 - `?edit=<id>` opens a change, `?edit=<id>&edit_mode=1` opens it in the editor; `screenshot=1` marks the page for
   a screenshot; `theme` forces the theme (otherwise the saved choice, then the system theme); `lad=1` shows an FBD network
