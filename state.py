@@ -224,21 +224,27 @@ def version_for(s, target, given):
 def change_state(u, new_value, by, reason=None, version=None):
     if new_value not in ALL_STATES:
         raise StateError('unknown state %r' % (new_value,), 400)
+    reason = reason.strip()[:4000] if isinstance(reason, str) else ''
     if DISAPPROVED in (u['state'], new_value):
         if not (new_value == DISAPPROVED and u['state'] in ('Proposal', 'Approved')
                 or u['state'] == DISAPPROVED and new_value == 'Proposal'):
             raise StateError('transition %s → %s is not allowed (Disapproved only from Proposal or Approved, '
                              'and back only to Proposal)' % (u['state'], new_value))
-        reason = reason.strip()[:4000] if isinstance(reason, str) else ''
         if new_value == DISAPPROVED and not reason:
             raise StateError('Disapproved needs a reason: why the edit is rejected (the AI reads it to propose a fix)', 400)
     else:
         i, j = STATES.index(u['state']), STATES.index(new_value)
         if abs(i - j) != 1:
             raise StateError('transition %s → %s is not allowed (only one step forward or back)' % (u['state'], new_value))
-        if new_value == 'Checked' and j > i and not checked_allowed(u):
-            raise StateError('Checked only after an export check with a match (Check / POST /api/check)')
+        if new_value == 'Checked' and j > i and not (checked_allowed(u) or reason):
+            raise StateError('Checked only after an export check with a match (Check / POST /api/check), or by hand with a '
+                             'reason: what a person checked in TIA, e.g. {"state": "Checked", "reason": "texts checked on '
+                             'the screen, the MISMATCH is the line break"}')
     h = {'state': new_value, 'time': now(), 'by': by or 'user'}
+    if new_value == 'Checked' and reason and u['state'] == 'Signed':     # D20c: a manual check, also over a false MISMATCH
+        h['reason'] = 'checked by hand: ' + reason
+        u.setdefault('checks', []).append({'time': h['time'], 'match': True, 'export_ts': '', 'by': h['by'],
+                                           'note': 'by hand: ' + reason})
     if new_value == DISAPPROVED:
         h['reason'] = reason
         u['disapproved'] = dict(h)                    # the latest rejection stays readable after a reopen

@@ -21,6 +21,9 @@ python server.py --port 8765 --export-root "C:\TIA\export" --data "data\editor"
 - `--demo` = a demo instance (see [Demo mode](#demo-mode)); implied when `--writer-cmd` / `--reader-cmd` (or the
   `.mcp.json` entries) run `tests\fake_mcp.py`.
 - `--ai-timeout` (60 s) = an AI client (see [MCP server](#mcp-server)) without a heartbeat for this long is forgotten.
+- `--tested-retention-days N` (default 0 = off) = at start and every hour delete Tested edits tested at least N days ago
+  (as `POST /api/cleanup {states: ["Tested"], older_than_days: N, dry_run: false, force: true}`: backup of `state.json`,
+  tombstones, ids are never reused).
 - The server listens on `127.0.0.1` only; POST/PUT/DELETE with an `Origin` other than `localhost`/`127.0.0.1` get 403,
   and so does every request whose `Host` is not `localhost:<port>` / `127.0.0.1:<port>` (a page of another name that
   resolves to 127.0.0.1 cannot read the API). A `project` from the URL is a folder name, never a path (400 otherwise).
@@ -145,6 +148,8 @@ States: `Proposal → Approved → Signed → Checked → Uploaded → Tested`.
 - **Checked** = the export after writing matches the proposal; allowed only when the **last** check is a match
   (a later mismatch locks it again), otherwise **409**. `checked_allowed` in `GET /api/edits/<id>`. An export check of the
   editor itself (`check-export`, group check, Reader check) that matches moves a **Signed** edit to Checked (`by: "export check"`).
+  **By hand:** Signed → Checked with a `reason` (what a person checked in TIA) is allowed whatever the last check says
+  (e.g. a false MISMATCH); it records a matching check `by hand: <reason>` and the history entry `reason: "checked by hand: …"`.
 - **Uploaded** / **Tested** are set by the user.
 - **Uploaded** records the project version `V<1>.<2>.<3>` (3rd number = one change, 2nd = a larger set of functions, 1st = release; a person confirms it) as `uploaded: {version, time, by}` on the edit, and the project keeps it as its current `version` in `state.json`. The editor proposes the next one (`versions: {current, patch, minor}` in `GET /api/edits/<id>` and `GET /api/groups/<id>` while the next step is Uploaded); the request must carry `version` (a person confirms it; the UI field is prefilled with the patch proposal), without it the step is refused (400). `1.4.2` is accepted and stored as `V1.4.2`. **Tested** records `tested: {version, time, by}` with the version of the Uploaded. A step back drops the record of the state left; edits from before versions keep working (Tested of such an edit takes `version` or the project version).
 - Only one step forward or back at a time.
@@ -244,7 +249,7 @@ has in the exported block).
 | POST | `/api/groups` | `{edit_ids: [...] in order, name?, card?, card_title?, task?, goal?}` → 201 the group; at least two edits of one project, none in another group (409) |
 | GET | `/api/groups` | `?project=&card=&state=` → `{groups: [...]}` (the group shape below); `card` is an exact match. A group whose name starts with `#<card> ` and has no `card` field gets `card` / `card_title` derived from the name when the state is loaded |
 | POST | `/api/groups/<id>` | `{name?, card?, card_title?}` — only the given fields change; an empty `card` / `card_title` is cleared (not derived again) |
-| POST | `/api/cleanup` | `{project?, states?, group?, card?, all?, dry_run?, force?, by?}` — deletes many edits (editor state only, TIA is not touched). A filter or `all: true` is required (400). `dry_run` (default **true**) → `{dry_run, count, needs_force: [ids written to TIA], edits: [{id, project, state, where, group}]}`; `dry_run: false` first copies `state.json` to `<data>/backups/state-<project>-<time>.json` (`backups` in the reply), written states (Signed and later) need `force: true` (else 409); tombstones and the changelog as for a single delete |
+| POST | `/api/cleanup` | `{project?, states?, group?, card?, older_than_days?, all?, dry_run?, force?, by?}` — deletes many edits (editor state only, TIA is not touched). A filter or `all: true` is required (400); `older_than_days` = reached the current state at least that many days ago (the last history entry). `dry_run` (default **true**) → `{dry_run, count, needs_force: [ids written to TIA], edits: [{id, project, state, where, group}]}`; `dry_run: false` first copies `state.json` to `<data>/backups/state-<project>-<time>.json` (`backups` in the reply), written states (Signed and later) need `force: true` (else 409); tombstones and the changelog as for a single delete |
 | GET | `/api/groups/<id>` | `{id, project, name, card, card_title, task, state, next, previous, f, f_note?, blocks, members: [{id, order, kind, block, where, state, f, note}]}` |
 | POST | `/api/groups/<id>/state` | `{state, by, reason?, version?}` — one version for every member moved to Uploaded; every member not yet in that state makes the step; when one of them cannot (one step only, Checked after a match), nothing moves → 409 with the reasons |
 | GET | `/api/groups/<id>/procedure` | `{parts: [{edit, header, steps}], markdown}` — the members' TIA steps in order; for an F-block one "compile the safety program" part at the end |
@@ -448,7 +453,8 @@ as SimaticML with `<ProgrammingLanguage>GRAPH` — and a **new network** (the do
 uploaded only with its group (409 otherwise — one member alone leaves the block half changed). When an Upload fails,
 the documents of the attempt are kept in `<--data>\<project>\upload-failed\<id>-<time>\` (the message names the folder).
 When the export check cannot find a change (e.g. TIA took a new network only as two networks), a person records the
-result by hand on a Signed edit ("Record a check by hand…" → `POST /api/check` with a note). The server starts
+result by hand on a Signed edit ("Record a check by hand…": ✓ Match → `POST /api/edits/<id>/state {state: "Checked", reason}`,
+also over a MISMATCH; ✗ Mismatch → `POST /api/check` with the note). The server starts
 TIAC_Writer (MCP over stdio, `mcp_client.py`) and:
 1. `GetPortals {}` → `Connect {portalId}` (the instance attached in the status, otherwise the only running one). No
    instance → `ok: false` "TIA Portal is not running" and **no `Connect`** (Upload never starts TIA Portal); several
@@ -686,7 +692,8 @@ default):
           text?, colors?: {backColor, foreColor, borderColor, lineColor, …}, font?: {name, size, weight},
           bindings: [{property, tag, indirect?}], events?: [{event, script}], visible?}]}
 ```
-Texts: the `en-US` translation (else the first one) without rich-text markup — one language only.
+Texts: the `en-US` translation (else the first one) without rich-text markup — one language only; a line break
+(`<br/>`, `<br />`, `<br>`) is `\n`, and the export check reads `<br/>` in a proposal as `\n` too.
 
 | API | Returns / does |
 |---|---|
@@ -780,13 +787,13 @@ error of the editor = `isError: true` with its message):
 | `propose_edit` | `project`, `round`, `block`, `kind?` + per kind: `nw`, `after?`, `title_after?`, `comment_after?` (network) · `section`, `members` (interface) · `after_nw`, `title`, `after`, `comment?`, `language?` (new_network); `note?`, `by?` | new edit in state **Proposal** (`POST /api/edits`, author = `by` or the client name) → `{id, state, errors, warnings, url}`; `errors` = the LAD/FBD rules of `/api/layout`, `warnings` include the #operand warning |
 | `update_edit` | `id`, `after?`, `note?`, `section?`, `members?`, `title?`, `comment?`, `title_after?`, `comment_after?` | changes a Proposal (a Disapproved edit goes back to Proposal) → `{id, state, errors}` |
 | `delete_edit` | `id`, `force?` | `DELETE /api/edits/<id>` (`force: true` = `?force=1`, also an edit written to TIA; only on a person's explicit instruction) |
-| `cleanup_edits` | `project?`, `states?`, `group?`, `card?`, `all?`, `dry_run?` (default true), `force?` | `POST /api/cleanup` |
+| `cleanup_edits` | `project?`, `states?`, `group?`, `card?`, `older_than_days?`, `all?`, `dry_run?` (default true), `force?` | `POST /api/cleanup` |
 | `create_group` | `edit_ids`, `name?`, `card?`, `card_title?` | `POST /api/groups` → the group + `url` |
 | `update_group` | `id`, `name?`, `card?`, `card_title?` | `POST /api/groups/<id>` → the group |
 | `list_groups` | `project?`, `card?`, `state?` | `GET /api/groups` |
 | `get_group` | `id` | the group (members, state, F note) + `procedure` (markdown of all members) + `url` |
 | `run_check` | `id`, `export_ts?` | export check (`/api/edits/<id>/check-export`) → `{match, export_ts, nw_export, note, diffs, state}` |
-| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved), `version?` (Uploaded, e.g. `V1.4.2`) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state, version?}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
+| `set_state` | `id` or `group`, `state`, `by?` (default: the client name), `reason?` (Disapproved; Checked by hand), `version?` (Uploaded, e.g. `V1.4.2`) | `POST /api/edits/<id>/state` or `/api/groups/<id>/state` → `{id, state, version?}`; the transition rules of the editor apply. The AI sets it only on a person's instruction, Uploaded / Tested only on an explicit one |
 | `get_procedure` | `id` | the TIA steps as markdown text |
 | `tia_status` | `refresh?` | `GET /api/tia/status` (`refresh: true` = `POST /api/tia/status`, checks TIA Portal again) |
 | `take_snapshot` | `project` | starts a snapshot job → the job record (`id`, `state`…) |

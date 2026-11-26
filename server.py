@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -757,7 +757,7 @@ def _validate(after, f=False, root=None, project=None, before=None):
         return hmi.validate(after, set(_known_tags(root, project)) if root else None, _hmi_tables(root, project) if root else True)
     if fbd.is_fbd(after):
         return fbd.validate(after, f, _non_f(root, project) if f and root else (), before)
-    return model.validate(after)
+    return model.validate(after, before)
 
 
 def api_edit_detail(data, uid, width=0, root=None):
@@ -850,7 +850,7 @@ def api_layout(root, body):
         after, last = model.apply(after, op, template)
         verify_model(after)
     res = _diff_drawing(before or after, after, int(body.get('width') or 0))
-    res.update({'after': after, 'places': model.places(after, res['drawing']), 'errors': model.validate(after), 'last': last})
+    res.update({'after': after, 'places': model.places(after, res['drawing']), 'errors': model.validate(after, before), 'last': last})
     if res['drawing'] is None:
         res['errors'].append({'id': None, 'error': 'The circuit cannot be laid out (it is not series-parallel).'})
     return res
@@ -2502,16 +2502,21 @@ def api_group_delete(data, gid, with_edits=False, by=None, force=False):
 
 
 def api_cleanup(data, body):
-    """POST /api/cleanup {project?, states?, group?, card?, all?, dry_run (default true), force?, by?}: delete many edits.
-    A filter is required (all=true = every edit). dry_run lists what would go; a real run needs force for written states
+    """POST /api/cleanup {project?, states?, group?, card?, older_than_days?, all?, dry_run (default true), force?, by?}:
+    delete many edits. A filter is required (all=true = every edit); older_than_days = the edit reached its current state
+    (the last history entry) at least that many days ago. dry_run lists what would go; a real run needs force for written states
     and first copies state.json to <data>/backups/state-<project>-<time>.json. TIA is not touched."""
     if not isinstance(body, dict):
         raise state.StateError('the body must be a JSON object', 400)
     states = body.get('states')
     if states is not None and (not isinstance(states, list) or not set(states) <= set(state.ALL_STATES)):
         raise state.StateError('states: a list from %s' % state.ALL_STATES, 400)
-    if not any(body.get(k) for k in ('project', 'states', 'group', 'card')) and body.get('all') is not True:
-        raise state.StateError('give a filter (project, states, group, card) or all=true', 400)
+    days = body.get('older_than_days')
+    if days is not None and (not isinstance(days, (int, float)) or isinstance(days, bool) or not 0 <= days <= 36500):
+        raise state.StateError('older_than_days: a number of days 0…36500', 400)
+    if not any(body.get(k) for k in ('project', 'states', 'group', 'card')) and days is None and body.get('all') is not True:
+        raise state.StateError('give a filter (project, states, group, card, older_than_days) or all=true', 400)
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec='seconds') if days is not None else None
     dry, force, by = body.get('dry_run', True) is not False, body.get('force') is True, body.get('by') or 'user'
     with state.LOCK:
         found = {}
@@ -2519,7 +2524,8 @@ def api_cleanup(data, body):
             s = state.load(data, p)
             hit = [u for u in s['edits'] if (not states or u['state'] in states)
                    and (not body.get('group') or (u.get('group') or {}).get('id') == body['group'])
-                   and (not body.get('card') or (u.get('group') or {}).get('card') == body['card'])]
+                   and (not body.get('card') or (u.get('group') or {}).get('card') == body['card'])
+                   and (cutoff is None or ((u.get('history') or [{}])[-1].get('time') or u.get('time') or '') <= cutoff)]
             if hit:
                 found[p] = (s, hit)
         written = [u['id'] for _, h in found.values() for u in h if u['state'] not in DELETABLE]
@@ -2542,6 +2548,24 @@ def api_cleanup(data, body):
             _regroup(s, gids, by)                      # also writes the tombstone of a group that lost all its edits
             state.save(data, p, s)
         return dict(out, backups=backups)
+
+
+def retention(data, days):
+    """--tested-retention-days (D6): delete Tested edits that were tested at least `days` days ago, as a cleanup does
+    (backup of state.json, tombstones — ids are never reused)."""
+    return api_cleanup(data, {'states': ['Tested'], 'older_than_days': days, 'dry_run': False, 'force': True,
+                              'by': 'retention (%g days)' % days})
+
+
+def _retention_loop(data, days, every=3600):
+    while True:
+        try:
+            r = retention(data, days)
+            if r['count']:
+                print('retention: deleted %d Tested edit(s): %s' % (r['count'], ', '.join(x['id'] for x in r['edits'])), flush=True)
+        except Exception as e:                        # a broken state.json must not stop the server; try again later
+            print('retention failed: %s' % e, flush=True)
+        time.sleep(every)
 
 
 def api_group_state(data, gid, body):
@@ -2879,6 +2903,8 @@ def main():
                     help='do not check TIA Portal at start and when the home page opens (only the Refresh button does)')
     ap.add_argument('--ai-timeout', type=float, default=AI_TIMEOUT,
                     help='forget an AI client (mcp_server.py) after this many seconds without a heartbeat')
+    ap.add_argument('--tested-retention-days', type=float, default=0,
+                    help='delete Tested edits this many days after Tested, at start and every hour (default 0 = off)')
     ap.add_argument('--demo', action='store_true',
                     help='demo instance (also implied by a fake Writer/Reader): a banner on every page, real projects refused')
     a = ap.parse_args()
@@ -2886,6 +2912,8 @@ def main():
     demo = a.demo or is_fake(mcp)
     srv = create_server(a.port, a.export_root, a.data, mcp=mcp, mcp_timeout=a.mcp_timeout,
                         autoconnect=not a.no_autoconnect, ai_timeout=a.ai_timeout, demo=demo)
+    if a.tested_retention_days > 0:
+        threading.Thread(target=_retention_loop, args=(a.data, a.tested_retention_days), daemon=True).start()
     print('BetterTIA Editor at http://localhost:%d  (export root %s, data %s%s)' % (a.port, a.export_root, a.data,
                                                                               ', DEMO — fake TIA' if demo else ''), flush=True)
     try:

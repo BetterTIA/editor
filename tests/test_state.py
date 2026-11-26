@@ -57,6 +57,20 @@ class TestStateMachine(unittest.TestCase):
         u['checks'].append({'match': False})
         state.change_state(u, 'Checked', 'user')                      # a step back to Checked is not blocked by the check
 
+    def test_checked_by_hand_with_a_reason(self):
+        """D20c: Signed → Checked by hand over a (false) MISMATCH: needs a reason, recorded as a manual matching check."""
+        u = self.u('Signed', [{'match': False, 'note': 'MISMATCH: text'}])
+        with self.assertRaises(state.StateError) as e:
+            state.change_state(u, 'Checked', 'user', '   ')
+        self.assertIn('reason', str(e.exception))
+        state.change_state(u, 'Checked', 'Honza', ' line break checked on the panel ')
+        self.assertEqual(u['state'], 'Checked')
+        self.assertEqual(u['history'][-1]['reason'], 'checked by hand: line break checked on the panel')
+        self.assertEqual((u['checks'][-1]['match'], u['checks'][-1]['note'], u['checks'][-1]['by']),
+                         (True, 'by hand: line break checked on the panel', 'Honza'))
+        state.change_state(u, 'Signed', 'user', 'back')                # a step back with a reason records no check
+        self.assertEqual(len(u['checks']), 2)
+
     def test_versions(self):
         """P3: Uploaded records the project version, Tested its time and the same version; a step back drops the record."""
         self.assertEqual([state.norm_version(v) for v in ('1.4.2', 'v1.4.2', ' V01.4.12 ')], ['V1.4.2', 'V1.4.2', 'V1.4.12'])
@@ -232,6 +246,19 @@ class TestApiEdits(unittest.TestCase):
         self.assertEqual(self.req('POST', '/api/edits/U999/state', {'state': 'Approved'})[0], 404)
         _, st = self.req('GET', '/api/state?project=%s' % PROJECT)
         self.assertEqual([h['state'] for h in st['edits'][0]['history']], ['Proposal', 'Approved', 'Signed', 'Checked'])
+
+    def test_checked_by_hand_via_api(self):
+        """D20c: the reason travels through the API; detail, checks and the changelog show the manual check."""
+        self.create()
+        for st in ('Approved', 'Signed'):
+            self.req('POST', '/api/edits/U001/state', {'state': st})
+        self.req('POST', '/api/check', {'edit_id': 'U001', 'match': False, 'export_ts': TS1, 'note': 'MISMATCH: br'})
+        self.assertEqual(self.req('POST', '/api/edits/U001/state', {'state': 'Checked'})[0], 409)
+        s, u = self.req('POST', '/api/edits/U001/state', {'state': 'Checked', 'by': 'user', 'reason': 'checked in TIA'})
+        self.assertEqual((s, u['state'], u['checks'][-1]['note']), (200, 'Checked', 'by hand: checked in TIA'))
+        self.assertTrue(self.req('GET', '/api/edits/U001')[1]['checked_allowed'])
+        _, log = self.req('GET', '/api/projects/%s/changelog' % PROJECT)
+        self.assertTrue(any('checked by hand: checked in TIA' in x['summary'] for x in log['items']), log['items'])
 
     def test_versions_via_api(self):
         """P3: version required / proposed at Uploaded, kept per project, shown in the detail and the changelog."""

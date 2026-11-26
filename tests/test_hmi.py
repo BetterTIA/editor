@@ -305,3 +305,17 @@ class TestCenteredItems(unittest.TestCase):
         self.assertEqual(hmi.check(old, exp), (True, []))
         moved = {'name': 's', 'width': 100, 'height': 100, 'items': [dict(exp['items'][0], left=0)]}
         self.assertFalse(hmi.check(moved, exp)[0])
+
+
+class TestLineBreaks(unittest.TestCase):
+    """D7b: Unified rich text <br/> is a line break "\\n" in the model; a proposal with "\\n" or "<br/>" checks equal."""
+    def test_br_is_a_newline(self):
+        for br in ('<br/>', '<br />', '<br>', '<BR/>'):
+            self.assertEqual(hmi.text('<body><p>Start%sMotor</p></body>' % br), 'Start\nMotor', br)
+        exp = {'name': 's', 'width': 100, 'height': 100, 'items': [hmi.item(
+            {'$type': 'HmiButton', 'name': 'b', 'left': 0, 'top': 0, 'width': 50, 'height': 20,
+             'text': {'items': [{'language': 'en-US', 'text': '<body><p>Start<br />Motor</p></body>'}]}})]}
+        for t in ('Start\nMotor', 'Start<br/>Motor'):
+            self.assertEqual(hmi.check({'name': 's', 'width': 100, 'height': 100, 'items': [dict(exp['items'][0], text=t)]}, exp),
+                             (True, []), t)
+        self.assertFalse(hmi.check({'name': 's', 'width': 100, 'height': 100, 'items': [dict(exp['items'][0], text='StartMotor')]}, exp)[0])

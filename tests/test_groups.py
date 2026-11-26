@@ -217,6 +217,25 @@ class TestGroups(unittest.TestCase):
         r = json.loads(mcp_server.call_tool(e, 'cleanup_edits', {'all': True})['content'][0]['text'])
         self.assertEqual((r['dry_run'], r['count']), (True, 0))
 
+    def test_tested_retention(self):
+        """D6: cleanup older_than_days, server.retention deletes old Tested edits with tombstones; ids are not reused."""
+        a, b = self.edit(nw=7, title_after='a'), self.edit(nw=6, title_after='b')
+        for st, extra in (('Approved', {}), ('Signed', {}), ('Checked', {'reason': 'compared in TIA'}),
+                          ('Uploaded', {'version': 'V1.0.1'}), ('Tested', {})):
+            self.assertEqual(self.req('POST', '/api/edits/%s/state' % a, dict(extra, state=st))[0], 200, st)
+        self.assertEqual(self.req('POST', '/api/cleanup', {'older_than_days': -1})[0], 400)
+        s, r = self.req('POST', '/api/cleanup', {'states': ['Tested'], 'older_than_days': 1})
+        self.assertEqual((s, r['count']), (200, 0))                                 # tested just now
+        e = mcp_server.Editor(self.url)
+        r = json.loads(mcp_server.call_tool(e, 'cleanup_edits', {'states': ['Tested'], 'older_than_days': 0})['content'][0]['text'])
+        self.assertEqual((r['dry_run'], [x['id'] for x in r['edits']]), (True, [a]))
+        r = server.retention(self.data, 0)
+        self.assertEqual(([x['id'] for x in r['edits']], len(r['backups'])), ([a], 1))
+        st = self.req('GET', '/api/state?project=' + PROJECT)[1]
+        self.assertEqual([u['id'] for u in st['edits']], [b])
+        self.assertEqual(server.retention(self.data, 0)['count'], 0)
+        self.assertNotIn(self.edit(nw=5, title_after='c'), (a, b))                # the tombstone keeps the id taken
+
     def test_group_card(self):
         a, b, c, d = (self.edit(nw=n, title_after='t%d' % n) for n in (7, 6, 5, 4))
         s, g = self.req('POST', '/api/groups', {'edit_ids': [a, b], 'name': 'jam', 'card': '#7', 'card_title': 'Jam'})

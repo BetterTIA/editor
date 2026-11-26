@@ -264,9 +264,20 @@ def apply(model, op, template=None):
 
 # ---------- validation (LAD rules) ----------
 
-def validate(model):
-    """-> [{id | None, error}] — rules that TIA rejects or that leave the proposal unfinished."""
+def _boxes_in_parallel(model):
+    """Ids of boxes inside a parallel branch of contacts (not in an output branch)."""
     P = {p['id']: p for p in model['elements']}
+    feeds = _feeds(model)
+    return {it for ri, r in enumerate(model['rungs']) for k, it in enumerate(r['path'])
+            if it in P and P[it]['type'] == 'box' and r['to'] not in feeds and in_parallel(model, ri, k)}
+
+
+def validate(model, before=None):
+    """-> [{id | None, error}] — rules that TIA rejects or that leave the proposal unfinished. before: the model the edit
+    started from — a box TIA already holds in a parallel branch, unchanged, is not reported (TIA compiled it there)."""
+    P = {p['id']: p for p in model['elements']}
+    B = {p['id']: p for p in (before or {}).get('elements', [])}
+    accepted = {i for i in _boxes_in_parallel(before) if i in P and B[i] == P[i]} if before else set()
     ch = []
     produced = {'powerrail'}                       # nodes that power flows into
     for r in model['rungs']:
@@ -284,7 +295,7 @@ def validate(model):
             nm = _display_name(p)
             if unpowered:
                 ch.append({'id': it, 'error': 'Unpowered element %s — the rung starts in node %s, which nothing leads into.' % (nm, r['from'])})
-            if p['type'] == 'box' and r['to'] not in feeds and in_parallel(model, ri, k):
+            if p['type'] == 'box' and it not in accepted and r['to'] not in feeds and in_parallel(model, ri, k):
                 ch.append({'id': it, 'error': 'Box %s is inside a parallel branch of contacts — TIA rejects it. '
                                                  'Put it in the main or the output branch.' % nm})
             if p['type'] in COILS and (r['to'] is not None or it != elements_r[-1]):

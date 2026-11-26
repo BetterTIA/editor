@@ -802,7 +802,7 @@ async function showEdit(uid, error) {
     (d.previous ? `<button data-state="${esc(d.previous)}" title="back to ${esc(d.previous)}">← ${esc(d.previous)}</button>` : '') +
     `<ol class="stepper" aria-label="state">${STATES.map((x, i) => `<li class="s-${x}${i < at ? ' done' : i === at ? ' current' : ''}"${i === at ? ' aria-current="step"' : ''}><span class="node"></span>${x}</li>`).join('')}</ol>` +
     (d.next === 'Uploaded' ? versionInput(d.versions) : '') +
-    (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked only after the latest export check matches (Check / Check export)"' : ''}>${esc(d.next)} →</button>` : '') +
+    (d.next ? `<button class="forward" data-state="${esc(d.next)}" ${btnChecked ? 'disabled title="Checked only after the latest export check matches (Check / Check export) — or check it in TIA yourself: Record a check by hand… → ✓ Match → Checked"' : ''}>${esc(d.next)} →</button>` : '') +
     `</div><div class="buttons">` +
     (u.state === 'Approved' ? (u.f ? `<span class="fblock">⚠ F-block: change it by hand following the TIA steps below</span>`
       : `<button id="upload" class="tia" ${canTia && !d.upload_note ? '' : 'disabled'} title="${esc(d.upload_note || (!canTia ? 'fill in the TIA settings for the project first'
@@ -816,7 +816,7 @@ async function showEdit(uid, error) {
     `</div>` + disapproveHtml(u.state, u.disapproved) +
     (u.state === 'Signed' ? `<details class="disapprove"><summary>Record a check by hand…</summary>` +
       `<textarea id="hand-note" rows="2" placeholder="what you checked, e.g. written as two networks NW 5 + NW 6 with the same logic"></textarea>` +
-      `<button id="hand-match">✓ Match</button> <button id="hand-mismatch">✗ Mismatch</button></details>` : '') + `</div>` +
+      `<button id="hand-match" title="records a matching check with your note and moves the edit to Checked — also when the automatic check says MISMATCH">✓ Match → Checked</button> <button id="hand-mismatch">✗ Mismatch</button></details>` : '') + `</div>` +
     (d.errors.some(c => !c.unverified) ? `<div class="warning"><b>⚠ The proposal breaks ${language} rules (${d.errors.filter(c => !c.unverified).length})</b> — open it in the editor and fix:<br>${d.errors.filter(c => !c.unverified).map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (d.errors.some(c => c.unverified) ? `<div class="hint">${d.errors.filter(c => c.unverified).map(c => esc(c.error)).join('<br>')}</div>` : '') +
     (error ? `<div class="warning"><b>⚠ ${esc(error)}</b></div>` : '') +
@@ -877,7 +877,11 @@ async function showEdit(uid, error) {
   for (const [id, match] of [['hand-match', true], ['hand-mismatch', false]]) if ($(id)) $(id).onclick = async () => {
     const note = $('hand-note').value.trim();
     if (!note) { $('hand-note').focus(); return; }
-    try { await api('/api/check', 'POST', {edit_id: u.id, match, export_ts: '', note: 'by hand: ' + note}); await showEdit(uid); }
+    try {   // D20c: a match goes through the state (a manual check with the reason → Checked), a mismatch is only recorded
+      if (match) await api(`/api/edits/${enc(u.id)}/state`, 'POST', {state: 'Checked', by: 'user', reason: note});
+      else await api('/api/check', 'POST', {edit_id: u.id, match, export_ts: '', note: 'by hand: ' + note});
+      await showEdit(uid);
+    }
     catch (e) { await showEdit(uid, e.message); }
   };
   armDelete('del-edit', `/api/edits/${enc(u.id)}${DELETABLE.includes(u.state) ? '' : '?force=1'}`, () => { location.href = u.group ? `?group=${enc(u.group.id)}` : `?project=${enc(u.project)}`; });
